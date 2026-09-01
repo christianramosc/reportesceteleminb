@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+entradas/
+salida/
+graficas_temp_*/
+_extraido_*/
+.venv/
