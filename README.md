@@ -6,11 +6,37 @@ y descarga el resultado", los scripts que ya usas en Colab:
 | Pestaña | Qué hace | Entrada | Salida |
 |---|---|---|---|
 | 📁 Relación de Clientes | `bitacora_zip.py` (adaptado de `Relacion_de_clientes_ZIP_DEL_MES`) | 1 ZIP del mes | 1 Excel (bitácora) |
-| 📈 Avance Preliminar Mensual | `avance_preliminar_original.py` (sin cambios) | 1 Excel | 1 PDF |
-| 📊 Comparativo Mensual | `comparativo_mensual_original.py` (sin cambios) | 2+ Excel | 1 PDF |
+| 📈 Avance Preliminar Mensual | `avance_preliminar_original.py` (sin cambios) | 1 Excel | 1 PDF + 1 Word |
+| 📊 Comparativo Mensual | `comparativo_mensual_original.py` (sin cambios) | 2+ Excel | 1 PDF + 1 Word |
 
 Tus compañeros solo necesitan el link de la app — no necesitan Colab, ni
 cuenta de Google, ni saber qué es una celda de código.
+
+### Nombre de PDV y analista (por PDV)
+
+Las pestañas de Avance Preliminar y Comparativo Mensual ahora traen dos
+campos arriba del uploader: **Nombre del PDV** y **Analista**. Vienen
+prellenados con los valores originales del script (`MG Colima PYD` /
+`Christian Ramos`), pero cada quien los puede cambiar antes de generar su
+reporte — así la misma app le sirve a cualquier PDV, no solo a Colima.
+Internamente esto ajusta las constantes `SUBTITULO_EMPRESA` /
+`NOMBRE_ANALISTA` de los scripts originales antes de generar, sin tener
+que tocar esos archivos.
+
+### Versión Word (editable)
+
+Cada vez que generas el Avance Preliminar o el Comparativo, además del
+PDF se genera un `.docx` con el mismo contenido (KPIs, tablas, gráficas
+e insights) para que cualquiera lo pueda editar libremente antes de
+compartirlo — cambiar texto, quitar una tabla, agregar un comentario,
+etc. Lo arma `herramientas/docx_reportes.py`, reutilizando las mismas
+tablas/gráficas/insights ya calculados por los scripts originales (no
+son datos recalculados aparte). La única sección que no es una copia
+literal del PDF es "Conclusiones" del Avance Preliminar: ahí se redactó
+de nuevo con el mismo criterio (top vendedor por volumen, por
+financiado, por GAP) porque en el script original esas frases están
+armadas dentro de la función que arma el PDF, no en una función aparte
+reutilizable. El resto si es exactamente el mismo contenido que el PDF.
 
 ## Cómo desplegarla (gratis, Streamlit Community Cloud)
 
@@ -97,4 +123,8 @@ streamlit run streamlit_app.py
   personas generan un PDF en el mismo minuto exacto podría haber una
   colisión de nombre de archivo. Para el volumen de tu equipo no debería
   ser un problema, pero es bueno saberlo.
-# reportesceteleminb
+- Por el mismo motivo, si dos personas de PDVs distintos generan un
+  reporte exactamente al mismo tiempo, el nombre de PDV/analista de una
+  podría "ganarle" a la otra por una fracción de segundo (es una variable
+  compartida del proceso, no algo aislado por usuario). Para el uso
+  típico —una persona generando un reporte a la vez— no pasa nada.

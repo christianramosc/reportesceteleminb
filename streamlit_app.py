@@ -15,6 +15,10 @@ from datetime import date
 import streamlit as st
 
 from herramientas import REGISTRO
+from herramientas.avance_preliminar_original import (
+    NOMBRE_ANALISTA as _ANALISTA_DEFECTO,
+    SUBTITULO_EMPRESA as _PDV_DEFECTO,
+)
 
 CARPETA_ENTRADAS = os.path.abspath("entradas")
 CARPETA_SALIDA = os.path.abspath("salida")
@@ -60,6 +64,16 @@ for tab, herramienta in zip(tabs, REGISTRO):
 
         # --- Opciones extra específicas de cada herramienta ---
         opciones = {}
+
+        if herramienta.id in ("avance_preliminar", "comparativo_mensual"):
+            col_pdv, col_analista = st.columns(2)
+            opciones["nombre_pdv"] = col_pdv.text_input(
+                "Nombre del PDV", value=_PDV_DEFECTO, key=f"pdv_{herramienta.id}",
+            )
+            opciones["nombre_analista"] = col_analista.text_input(
+                "Analista", value=_ANALISTA_DEFECTO, key=f"analista_{herramienta.id}",
+            )
+
         if herramienta.id == "avance_preliminar":
             usar_hoy = st.checkbox("Usar la fecha de hoy como fecha de corte", value=True,
                                     key=f"hoy_{herramienta.id}")
