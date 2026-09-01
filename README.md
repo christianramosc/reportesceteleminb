@@ -128,3 +128,4 @@ streamlit run streamlit_app.py
   podría "ganarle" a la otra por una fracción de segundo (es una variable
   compartida del proceso, no algo aislado por usuario). Para el uso
   típico —una persona generando un reporte a la vez— no pasa nada.
+# reportesceteleminb
