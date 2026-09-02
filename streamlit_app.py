@@ -30,7 +30,7 @@ st.set_page_config(page_title="Reportes Bitácora MG Colima", page_icon="📋", 
 st.title("📋 Reportes — Bitácora MG Colima")
 st.caption(
     "Sube el archivo que te pida cada herramienta y descarga el Excel o "
-    "PDF ya generado. No hace falta saber programación ni tocar el código."
+    "PDF ya generado."
 )
 
 
@@ -65,13 +65,13 @@ for tab, herramienta in zip(tabs, REGISTRO):
         # --- Opciones extra específicas de cada herramienta ---
         opciones = {}
 
-        if herramienta.id in ("avance_preliminar", "comparativo_mensual"):
+        if herramienta.id in ("avance_preliminar", "comparativo_mensual", "resumen_mensual"):
             col_pdv, col_analista = st.columns(2)
             opciones["nombre_pdv"] = col_pdv.text_input(
                 "Nombre del PDV", value=_PDV_DEFECTO, key=f"pdv_{herramienta.id}",
             )
             opciones["nombre_analista"] = col_analista.text_input(
-                "Analista", value=_ANALISTA_DEFECTO, key=f"analista_{herramienta.id}",
+                "Implant", value=_ANALISTA_DEFECTO, key=f"analista_{herramienta.id}",
             )
 
         if herramienta.id == "avance_preliminar":
