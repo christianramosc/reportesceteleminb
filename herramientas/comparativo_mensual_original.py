@@ -791,18 +791,19 @@ def grafica_comp_montos_por_mes(tabla_comp, guardar_como=None):
 
 
 def grafica_comp_gap_por_mes(tabla_comp, guardar_como=None):
-    """Barras: % de solicitudes con GAP, por mes."""
+    """Línea: % de solicitudes con GAP, por mes (tendencia)."""
     if tabla_comp.empty or "% GAP" not in tabla_comp.columns or tabla_comp["% GAP"].isna().all():
         return None
     meses = tabla_comp.index.tolist()
     valores = tabla_comp["% GAP"].fillna(0).values
-    colores = _gradiente_meses(len(meses))
     fig, ax = plt.subplots(figsize=(max(7, len(meses) * 1.3), 5.5))
-    barras = ax.bar(meses, valores, color=colores, edgecolor="white")
-    for barra, valor in zip(barras, valores):
-        ax.text(barra.get_x() + barra.get_width() / 2, valor + 2, f"{valor:.0f}%",
-                 ha="center", va="bottom", fontsize=9, fontweight="bold")
-    ax.set_ylim(0, 120)
+    ax.plot(meses, valores, marker="o", linewidth=2.4, markersize=7,
+             color=MG_ROJO_OSCURO, markerfacecolor=MG_ROJO_OSCURO, markeredgecolor="white")
+    for i, valor in enumerate(valores):
+        ax.text(i, valor + 3, f"{valor:.0f}%", ha="center", va="bottom",
+                 fontsize=9, fontweight="bold", color=MG_ROJO_OSCURO)
+    maximo = valores.max() if len(valores) else 0
+    ax.set_ylim(0, maximo * 1.3 + 10)
     ax.set_title("% de Solicitudes con GAP por Mes")
     ax.set_ylabel("% con GAP")
     plt.tight_layout()
@@ -848,8 +849,8 @@ def grafica_comp_gap_vs_gap_financiado(tabla_comp, guardar_como=None):
 
 
 def grafica_comp_gap_categoria_por_mes(datos_por_mes, orden_meses, guardar_como=None):
-    """Barras agrupadas: % de GAP por categoría, comparando cada mes (categoría
-    en el eje X, una barra de color distinto por mes)."""
+    """Líneas: % de GAP por categoría, comparando la tendencia mes a mes
+    (mes en el eje X, una línea de color distinto por categoría)."""
     meses_disp = [
         m for m in orden_meses
         if {"Categoria", "¿Tiene GAP?"}.issubset(datos_por_mes[m]["df"].columns)
@@ -864,29 +865,33 @@ def grafica_comp_gap_categoria_por_mes(datos_por_mes, orden_meses, guardar_como=
     if not categorias_presentes:
         return None
 
-    colores_mes = _gradiente_meses(len(meses_disp))
-    x = np.arange(len(categorias_presentes))
-    ancho = min(0.8 / len(meses_disp), 0.32)
+    etiquetas_meses = [m.title() for m in meses_disp]
+    valores_por_categoria = {}
+    for cat in categorias_presentes:
+        valores = []
+        for mes in meses_disp:
+            df_m = datos_por_mes[mes]["df"]
+            df_cat = df_m[df_m["Categoria"] == cat]
+            valores.append((df_cat["¿Tiene GAP?"] == "SI").mean() * 100 if len(df_cat) else 0)
+        valores_por_categoria[cat] = np.array(valores)
 
-    fig, ax = plt.subplots(figsize=(max(7, len(categorias_presentes) * 2.2), 5.5))
-    for i, mes in enumerate(meses_disp):
-        df_m = datos_por_mes[mes]["df"]
-        pct_gap = (df_m["¿Tiene GAP?"] == "SI").groupby(df_m["Categoria"]).mean().mul(100)
-        valores = np.array([pct_gap.get(cat, 0) for cat in categorias_presentes])
-        offset = (i - (len(meses_disp) - 1) / 2) * ancho
-        ax.bar(x + offset, valores, width=ancho, color=colores_mes[i],
-               edgecolor="white", label=mes.title())
-        for xi, valor in zip(x + offset, valores):
-            if valor > 0:
-                ax.text(xi, valor + 2, f"{valor:.0f}%", ha="center", va="bottom", fontsize=7.5)
+    maximo = max((v.max() for v in valores_por_categoria.values()), default=0)
 
-    ax.set_xticks(x)
-    ax.set_xticklabels([c.title() for c in categorias_presentes])
-    ax.set_ylim(0, 125)
+    fig, ax = plt.subplots(figsize=(max(7, len(meses_disp) * 1.4), 5.5))
+    for cat in categorias_presentes:
+        valores = valores_por_categoria[cat]
+        color = COLOR_CATEGORIA.get(cat, MG_GRIS_OSCURO)
+        ax.plot(etiquetas_meses, valores, marker="o", linewidth=2.2, markersize=6.5,
+                 color=color, markerfacecolor=color, markeredgecolor="white", label=cat.title())
+        for i, valor in enumerate(valores):
+            ax.text(i, valor + maximo * 0.03 + 1.5, f"{valor:.0f}%", ha="center",
+                     va="bottom", fontsize=7.5, color=color)
+
+    ax.set_ylim(0, maximo * 1.3 + 10)
     ax.set_title("% con GAP por Categoría, Comparado entre Meses")
     ax.set_ylabel("% con GAP")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), frameon=False,
-               ncol=min(len(meses_disp), 6))
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False,
+               ncol=min(len(categorias_presentes), 4))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
