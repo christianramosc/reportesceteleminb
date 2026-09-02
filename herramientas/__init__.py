@@ -27,9 +27,11 @@ from .registro import Herramienta  # noqa: F401 (re-exportado para las herramien
 from .herramienta_relacion_zip import HERRAMIENTA as _relacion_zip
 from .herramienta_avance_preliminar import HERRAMIENTA as _avance_preliminar
 from .herramienta_comparativo_mensual import HERRAMIENTA as _comparativo_mensual
+from .herramienta_resumen_mensual import HERRAMIENTA as _resumen_mensual
 
 REGISTRO = [
     _relacion_zip,
     _avance_preliminar,
     _comparativo_mensual,
+    _resumen_mensual,
 ]
