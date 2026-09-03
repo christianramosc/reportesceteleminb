@@ -59,6 +59,33 @@ def normalizar_status(nombre_carpeta: str) -> str:
     return MAPEO_STATUS.get(nombre, nombre)
 
 
+def detectar_mes_anio(texto: str) -> str:
+    """Detecta el mes (y el año, si viene) dentro de un texto —típicamente
+    el nombre del ZIP o el de su carpeta raíz, ej. 'JUNIO', 'Junio_2026',
+    'bitacora-julio-2026'— y devuelve el nombre de hoja en formato
+    'MES AAAA'. Si no encuentra un mes reconocible en el texto, usa el mes
+    y año actuales como respaldo. Si encuentra mes pero no año, usa el año
+    actual."""
+    t = texto.strip().upper()
+    t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("utf-8")
+    t = re.sub(r"[_\-.]", " ", t)
+
+    mes_detectado = next((m for m in MESES_ES.values() if m in t), None)
+
+    m_anio = re.search(r"(20\d{2})", t)
+    anio_detectado = m_anio.group(1) if m_anio else None
+
+    ahora = datetime.now()
+    if not mes_detectado:
+        print(f"  ⚠ No se detectó un mes en '{texto}'; se usa el mes actual como respaldo.")
+        mes_detectado = MESES_ES[ahora.month]
+
+    if not anio_detectado:
+        anio_detectado = str(ahora.year)
+
+    return f"{mes_detectado} {anio_detectado}"
+
+
 def extraer_zip(ruta_zip: str, carpeta_destino: str) -> str:
     """Extrae el ZIP y devuelve la ruta de la carpeta que contiene las
     subcarpetas de estatus (soporta ZIPs con una carpeta raíz envolvente,
@@ -367,6 +394,17 @@ def procesar_zip_a_excel(ruta_zip: str, nombre_base: str = None,
     print(f"{'='*60}")
 
     carpeta_raiz = extraer_zip(ruta_zip, carpeta_trabajo)
+
+    # El nombre de la hoja se toma del mes del ZIP: si el ZIP trae una
+    # carpeta raíz envolvente (ej. 'JUNIO/Aprobados/...') se usa el nombre
+    # de esa carpeta; si no, se usa el nombre del archivo ZIP.
+    fuente_nombre_mes = (
+        os.path.basename(carpeta_raiz)
+        if os.path.normpath(carpeta_raiz) != os.path.normpath(carpeta_trabajo)
+        else nombre_base
+    )
+    nombre_hoja = detectar_mes_anio(fuente_nombre_mes)
+
     carpetas_status = detectar_carpetas_status(carpeta_raiz)
 
     if not carpetas_status:
@@ -384,9 +422,6 @@ def procesar_zip_a_excel(ruta_zip: str, nombre_base: str = None,
 
     # --- Exportar a Excel (con formato de encabezado, igual que el original) ---
     from openpyxl.styles import PatternFill, Font, Alignment
-
-    hoy = datetime.now()
-    nombre_hoja = f"{MESES_ES[hoy.month]} {hoy.year}"
 
     with pd.ExcelWriter(archivo_salida, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=nombre_hoja)
