@@ -45,6 +45,12 @@ MAPEO_STATUS = {
 
 LIMPIAR_TEMPORAL = True   # borra los PDFs extraídos al terminar
 
+MESES_ES = {
+    1: "ENERO", 2: "FEBRERO", 3: "MARZO", 4: "ABRIL",
+    5: "MAYO", 6: "JUNIO", 7: "JULIO", 8: "AGOSTO",
+    9: "SEPTIEMBRE", 10: "OCTUBRE", 11: "NOVIEMBRE", 12: "DICIEMBRE",
+}
+
 
 def normalizar_status(nombre_carpeta: str) -> str:
     """Convierte el nombre de una carpeta en el valor de STATUS a usar."""
@@ -379,7 +385,8 @@ def procesar_zip_a_excel(ruta_zip: str, nombre_base: str = None,
     # --- Exportar a Excel (con formato de encabezado, igual que el original) ---
     from openpyxl.styles import PatternFill, Font, Alignment
 
-    nombre_hoja = nombre_base[:31] if nombre_base else "Reporte"
+    hoy = datetime.now()
+    nombre_hoja = f"{MESES_ES[hoy.month]} {hoy.year}"
 
     with pd.ExcelWriter(archivo_salida, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=nombre_hoja)
