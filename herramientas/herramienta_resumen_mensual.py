@@ -5,6 +5,7 @@ import os
 from datetime import date
 
 from . import resumen_mensual_original as _resumen
+from .docx_reportes import generar_docx_resumen
 from .registro import Herramienta
 
 # Valores originales del script, usados como default si el usuario no
@@ -34,15 +35,23 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
 
     marca = date.today().strftime("%Y%m%d_%H%M")
     ruta_pdf = os.path.join(carpeta_salida, f"Resumen_Mensual_{marca}.pdf")
+
+    # El PDF deja aquí sus flowables y el Word se construye con ESOS mismos
+    # elementos, para que ambos documentos digan exactamente lo mismo.
+    elementos_pdf = []
     _resumen.generar_reporte_pdf_verbal(
         df, resumen, tabla_vendedor, tabla_categoria,
         nombre_archivo=ruta_pdf,
+        recolectar_elementos=elementos_pdf,
     )
 
-    # TODO: si más adelante se agrega generar_docx_resumen(...) en
-    # docx_reportes.py, se puede sumar aquí igual que en
-    # herramienta_avance_preliminar.py y devolver [ruta_pdf, ruta_docx].
-    return [ruta_pdf]
+    ruta_docx = generar_docx_resumen(
+        elementos_pdf, nombre_pdv, nombre_analista,
+        nombre_archivo=f"Resumen_Mensual_{marca}.docx",
+        carpeta_salida=carpeta_salida,
+    )
+
+    return [ruta_pdf, ruta_docx]
 
 
 HERRAMIENTA = Herramienta(
@@ -50,8 +59,8 @@ HERRAMIENTA = Herramienta(
     nombre="🗓️ Resumen Mensual",
     descripcion=(
         "Sube el Excel de la bitácora del mes ya cerrado y obtén el PDF de "
-        "resumen mensual (cierre de mes), con el mismo estilo e identidad "
-        "visual que el avance preliminar."
+        "resumen mensual (cierre de mes) más un Word editable con el mismo "
+        "contenido."
     ),
     multiple_archivos=False,
     tipos_permitidos=["xlsx"],

@@ -47,13 +47,15 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
 
     marca = date.today().strftime("%Y%m%d_%H%M")
     ruta_pdf = os.path.join(carpeta_salida, f"Reporte_Comparativo_{marca}.pdf")
+    # El Word se arma con los mismos flowables que el PDF (ver docx_reportes).
+    elementos_pdf = []
     _comparativo.generar_reporte_pdf_comparativo(
         datos_por_mes, orden_meses, tabla_comp, df_combinado, nombre_archivo=ruta_pdf,
+        recolectar_elementos=elementos_pdf,
     )
 
     ruta_docx = generar_docx_comparativo(
-        datos_por_mes, orden_meses, tabla_comp, df_combinado, rutas_graficas,
-        nombre_pdv, nombre_analista,
+        elementos_pdf, nombre_pdv, nombre_analista,
         nombre_archivo=f"Reporte_Comparativo_{marca}.docx",
         carpeta_salida=carpeta_salida,
     )

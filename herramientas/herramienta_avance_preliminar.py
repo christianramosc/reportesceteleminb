@@ -37,14 +37,18 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
 
     marca = date.today().strftime("%Y%m%d_%H%M")
     ruta_pdf = os.path.join(carpeta_salida, f"Avance_Preliminar_{marca}.pdf")
+
+    # El PDF deja aquí sus flowables y el Word se construye con ESOS mismos
+    # elementos, para que ambos documentos digan exactamente lo mismo.
+    elementos_pdf = []
     _avance.generar_reporte_pdf_avance(
         df, resumen, tabla_vendedor, tabla_categoria,
         nombre_archivo=ruta_pdf, fecha_corte=fecha_corte,
+        recolectar_elementos=elementos_pdf,
     )
 
     ruta_docx = generar_docx_avance(
-        df, resumen, tabla_vendedor, tabla_categoria, rutas_graficas, ctx,
-        nombre_pdv, nombre_analista,
+        elementos_pdf, nombre_pdv, nombre_analista,
         nombre_archivo=f"Avance_Preliminar_{marca}.docx",
         carpeta_salida=carpeta_salida,
     )

@@ -151,13 +151,19 @@ FUENTE_BOLD         = _fuente_activa["bold"]
 FUENTE_ITALICA      = _fuente_activa["italica"]
 FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
 
-COLOR_CATEGORIA = {
-    "FINANCIADO":      MG_ROJO_OSCURO,
-    "APROBADO":        MG_ROJO,
-    "CONTRAPROPUESTA": MG_GRIS_OSCURO,
-    "RECHAZADO":       MG_ROJO_PASTEL,
-}
-ORDEN_CATEGORIAS = ["FINANCIADO", "APROBADO", "CONTRAPROPUESTA", "RECHAZADO"]
+# =======================================================================
+# CATÁLOGO DE ESTATUS
+# Los colores, el orden y las etiquetas de cada categoría ya NO viven aquí:
+# están en herramientas/estatus.py, que es la fuente única de verdad para
+# los tres reportes. Para agregar un estatus nuevo, edita ESE archivo.
+# =======================================================================
+try:
+    from . import estatus as _est
+except ImportError:  # ejecución suelta (Colab, o el .py fuera del paquete)
+    import estatus as _est
+
+ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
+COLOR_CATEGORIA = _est.COLOR_CATEGORIA
 
 NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
 SUBTITULO_EMPRESA = "MG Colima PYD"
@@ -273,9 +279,11 @@ COLUMNAS_MONEDA = [
 ]
 COLUMNAS_PORCENTAJE = ["Tasa Interés Anual"]
 
-STATUS_APROBADO   = ["APROBADO"]
-STATUS_FINANCIADO = ["FINANCIADOS", "FINANCIADO"]
-STATUS_RECHAZADOS = ["RECHAZADO", "RECHAZADOS", "CANCELADO", "CANCELADOS"]
+# Los sinónimos de cada estatus están definidos en herramientas/estatus.py.
+# Se re-exportan por compatibilidad con código que los importara de aquí.
+STATUS_APROBADO   = _est.STATUS_APROBADO
+STATUS_FINANCIADO = _est.STATUS_FINANCIADO
+STATUS_RECHAZADOS = _est.STATUS_RECHAZADOS
 
 
 def _limpiar_moneda(serie):
@@ -309,14 +317,13 @@ def _limpiar_porcentaje(serie):
 
 
 def clasificar_status(status):
-    s = str(status).strip().upper()
-    if s in STATUS_FINANCIADO:
-        return "FINANCIADO"
-    if s in STATUS_APROBADO:
-        return "APROBADO"
-    if s in STATUS_RECHAZADOS:
-        return "RECHAZADO"
-    return "CONTRAPROPUESTA"
+    """Traduce el STATUS crudo del Excel a su categoría.
+
+    Un estatus que no esté en el catálogo YA NO se mete a la fuerza en
+    "CONTRAPROPUESTA": se respeta como categoría propia.
+    Ver herramientas/estatus.py.
+    """
+    return _est.clasificar_status(status)
 
 
 def limpiar_datos(df_original, mes=None):
@@ -338,6 +345,9 @@ def limpiar_datos(df_original, mes=None):
     if "STATUS" in df.columns:
         df["STATUS"] = df["STATUS"].astype(str).str.strip().str.upper()
         df["Categoria"] = df["STATUS"].apply(clasificar_status)
+        # Da de alta (con color y lugar en el orden) cualquier estatus de la
+        # bitácora que no esté en el catálogo.
+        _est.registrar_categorias(df["Categoria"].unique())
 
     if "Nombre del Vendedor" in df.columns:
         df["Nombre del Vendedor"] = df["Nombre del Vendedor"].astype(str).str.strip().str.title()
@@ -371,16 +381,31 @@ def resumen_general(df, mes=None, silencioso=False):
     r = {"total": total, "mes": mes}
 
     if "Categoria" in df.columns:
-        conteo_cat  = df["Categoria"].value_counts()
+        conteo_cat = df["Categoria"].value_counts()
+
+        # Conteo de TODAS las categorías del mes, no solo de cuatro fijas.
+        conteo_categorias = {
+            c: int(conteo_cat.get(c, 0)) for c in _est.categorias_presentes(df)
+        }
+
         financiados = int(conteo_cat.get("FINANCIADO", 0))
         aprobados   = int(conteo_cat.get("APROBADO", 0))
         rechazados  = int(conteo_cat.get("RECHAZADO", 0))
-        en_tramite  = int(conteo_cat.get("CONTRAPROPUESTA", 0))
+
+        # "en_tramite" agrupa todo lo que quedó sin resolver (contrapropuesta,
+        # en proceso, en revisión, pendiente...), excepto lo ya aprobado.
+        claves_abiertas = [c for c in _est.claves_por_grupo(_est.ABIERTA)
+                           if c != "APROBADO"]
+        en_tramite = sum(int(conteo_cat.get(c, 0)) for c in claves_abiertas)
+
         r.update({"financiados": financiados, "aprobados": aprobados,
-                   "rechazados": rechazados, "en_tramite": en_tramite})
+                   "rechazados": rechazados, "en_tramite": en_tramite,
+                   "conteo_categorias": conteo_categorias})
         if not silencioso:
-            print(f"Total: {total}  |  Financiado: {financiados}  |  Aprobado: {aprobados}  |  "
-                  f"Contrapropuesta: {en_tramite}  |  Rechazado: {rechazados}")
+            detalle = "  |  ".join(
+                f"{_est.etiqueta(c)}: {n}" for c, n in conteo_categorias.items()
+            )
+            print(f"Total: {total}  |  {detalle}")
     else:
         financiados = aprobados = 0
 
@@ -429,10 +454,11 @@ def analisis_por_vendedor(df):
 
     if "Categoria" in df.columns:
         pivote = pd.crosstab(df["Nombre del Vendedor"], df["Categoria"])
-        for col in ORDEN_CATEGORIAS:
+        presentes = _est.categorias_presentes(df)
+        for col in presentes:
             if col not in pivote.columns:
                 pivote[col] = 0
-        tabla = tabla.join(pivote[ORDEN_CATEGORIAS])
+        tabla = tabla.join(pivote[presentes])
         tabla["% Aprobación"] = (tabla["APROBADO"] / tabla["Total"] * 100).round(1)
         tabla["% Financiado"] = (tabla["FINANCIADO"] / tabla["Total"] * 100).round(1)
 
@@ -522,7 +548,10 @@ def construir_tabla_comparativa(datos_por_mes, orden_meses):
             "Total": total,
             "Financiado": financiados,
             "Aprobado": aprobados,
-            "Contrapropuesta": r.get("en_tramite", 0),
+            # Agrupa todo lo que quedó abierto (contrapropuesta, en proceso,
+            # en revisión, pendiente...). El desglose por estatus se ve en la
+            # gráfica de solicitudes por mes.
+            "En trámite": r.get("en_tramite", 0),
             "Rechazado": r.get("rechazados", 0),
             "% Financiado": round(financiados / total * 100, 1) if total else 0.0,
             "Monto Total": r.get("monto_total", np.nan),
@@ -544,6 +573,15 @@ def _formato_miles(ax, eje="y"):
 
 def _guardar_si_procede(fig, guardar_como):
     if guardar_como:
+        # La carpeta de gráficas se creaba UNA sola vez, al importar el
+        # módulo. En un proceso de larga vida (Streamlit) eso no basta: si
+        # algo la borra entre corridas —por ejemplo la limpieza de temporales
+        # de la app— la siguiente corrida truena con "No such file or
+        # directory", o peor, se queda sin gráficas en silencio. Asegurarla
+        # aquí la vuelve a crear cuando haga falta.
+        carpeta = os.path.dirname(guardar_como)
+        if carpeta:
+            os.makedirs(carpeta, exist_ok=True)
         fig.savefig(guardar_como, dpi=150, bbox_inches="tight", facecolor="white")
     return guardar_como
 
@@ -559,7 +597,7 @@ def imagen_ajustada(ruta, ancho_cm, alto_max_cm=None):
 
 # --- 6A) Gráficas AGREGADAS del periodo completo (mismas del avance
 #         preliminar, aplicadas al DataFrame combinado de todos los meses) ---
-def grafica_vendedores(df, guardar_como=None, titulo="Total de Solicitudes por Vendedor (Periodo)"):
+def grafica_vendedores(df, guardar_como=None, titulo="Solicitudes por vendedor"):
     if "Nombre del Vendedor" not in df.columns:
         return None
     conteo = df["Nombre del Vendedor"].value_counts().sort_values(ascending=True)
@@ -576,11 +614,16 @@ def grafica_vendedores(df, guardar_como=None, titulo="Total de Solicitudes por V
     return guardar_como
 
 
-def grafica_vendedor_status(df, guardar_como=None, titulo="Desempeño por Vendedor (Periodo)\n(Financiado / Aprobado / Contrapropuesta / Rechazado)"):
+def grafica_vendedor_status(df, guardar_como=None, titulo=None):
     if "Nombre del Vendedor" not in df.columns or "Categoria" not in df.columns:
         return None
     pivote = pd.crosstab(df["Nombre del Vendedor"], df["Categoria"])
     orden_cols = [c for c in ORDEN_CATEGORIAS if c in pivote.columns]
+    # El título lista las categorías que de verdad hay en el periodo.
+    if titulo is None:
+        # Sin enumerar categorías: la leyenda ya las muestra y, con muchos
+        # estatus, el título deformaba la imagen exportada.
+        titulo = "Estatus de cierre por vendedor"
     pivote = pivote[orden_cols]
     pivote["Total"] = pivote.sum(axis=1)
     pivote = pivote.sort_values("Total", ascending=True).drop(columns="Total")
@@ -589,18 +632,22 @@ def grafica_vendedor_status(df, guardar_como=None, titulo="Desempeño por Vended
     for col in orden_cols:
         valores = pivote[col].values
         ax.barh(pivote.index, valores, left=izquierda,
-                 color=COLOR_CATEGORIA.get(col, MG_GRIS_CLARO), label=col, edgecolor="white")
+                 color=COLOR_CATEGORIA.get(col, MG_GRIS_CLARO),
+                 label=_est.etiqueta(col), edgecolor="white")
         izquierda += valores
     ax.set_title(titulo)
     ax.set_xlabel("Número de solicitudes")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), frameon=False, ncol=4)
+    ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
+              mode="expand", frameon=False, fontsize=8,
+              handlelength=1.4, columnspacing=1.2,
+              ncol=min(3, max(1, len(orden_cols))))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
     return guardar_como
 
 
-def grafica_modelos(df, guardar_como=None, titulo_extra="(Periodo)"):
+def grafica_modelos(df, guardar_como=None, titulo_extra=""):
     if "Vehículo" not in df.columns:
         return None
     conteo_completo = df["Vehículo"].dropna().value_counts()
@@ -614,9 +661,9 @@ def grafica_modelos(df, guardar_como=None, titulo_extra="(Periodo)"):
     ax.barh(conteo.index, conteo.values, color=colores, edgecolor="white")
     for i, valor in enumerate(conteo.values):
         ax.text(valor + max(conteo.values) * 0.02, i, str(valor), va="center", fontsize=9)
-    titulo = f"Modelos MÁS Solicitados {titulo_extra}"
+    titulo = f"Modelos más solicitados {titulo_extra}".strip()
     if recortado:
-        titulo += f" (Top {TOP_N})"
+        titulo += f" (top {TOP_N})"
     ax.set_title(titulo)
     ax.set_xlabel("Número de solicitudes")
     plt.tight_layout()
@@ -628,7 +675,7 @@ def grafica_modelos(df, guardar_como=None, titulo_extra="(Periodo)"):
     return guardar_como
 
 
-def grafica_gap_por_vendedor_total(df, guardar_como=None, titulo="Solicitudes con GAP por Vendedor (Periodo)\n(vs. Total de Solicitudes)"):
+def grafica_gap_por_vendedor_total(df, guardar_como=None, titulo="Cobertura de GAP por vendedor"):
     if "Nombre del Vendedor" not in df.columns or "¿Tiene GAP?" not in df.columns:
         return None
     df_gap = df[df["¿Tiene GAP?"] == "SI"].copy()
@@ -663,7 +710,7 @@ def grafica_gap_por_vendedor_total(df, guardar_como=None, titulo="Solicitudes co
     return guardar_como
 
 
-def grafica_gap_financiado_por_vendedor(df, guardar_como=None, titulo="Colocación de GAP en Créditos FINANCIADOS por Vendedor (Periodo)"):
+def grafica_gap_financiado_por_vendedor(df, guardar_como=None, titulo="GAP en créditos financiados, por vendedor"):
     if not {"Nombre del Vendedor", "Categoria", "¿Tiene GAP?"}.issubset(df.columns):
         return None
     df_fin_gap = df[(df["Categoria"] == "FINANCIADO") & (df["¿Tiene GAP?"] == "SI")].copy()
@@ -695,15 +742,24 @@ def grafica_comp_totales_por_mes(datos_por_mes, orden_meses, guardar_como=None):
     if not meses_disp:
         return None
     etiquetas = [m.title() for m in meses_disp]
+
+    # Solo las categorías que aparecen en ALGUNO de los meses comparados,
+    # para no meter series en cero a la leyenda cuando el catálogo tiene
+    # muchos estatus posibles.
+    cats_presentes = []
+    for cat in ORDEN_CATEGORIAS:
+        if any(cat in set(datos_por_mes[m]["df"]["Categoria"]) for m in meses_disp):
+            cats_presentes.append(cat)
+
     fig, ax = plt.subplots(figsize=(max(7, len(meses_disp) * 1.3), 5.5))
     abajo = np.zeros(len(meses_disp))
-    for cat in ORDEN_CATEGORIAS:
+    for cat in cats_presentes:
         valores = np.array([
             int(datos_por_mes[m]["df"]["Categoria"].value_counts().get(cat, 0))
             for m in meses_disp
         ])
         ax.bar(etiquetas, valores, bottom=abajo, color=COLOR_CATEGORIA.get(cat, MG_GRIS_CLARO),
-               edgecolor="white", label=cat.title())
+               edgecolor="white", label=_est.etiqueta(cat))
         for i, (v, b) in enumerate(zip(valores, abajo)):
             if v > 0:
                 ax.text(i, b + v / 2, str(int(v)), ha="center", va="center",
@@ -714,9 +770,12 @@ def grafica_comp_totales_por_mes(datos_por_mes, orden_meses, guardar_como=None):
         ax.text(i, t + max(totales) * 0.02, f"Total: {t}", ha="center", va="bottom",
                  fontsize=9, fontweight="bold", color=MG_GRIS_OSCURO)
     ax.set_ylim(0, max(totales) * 1.18 if totales else 1)
-    ax.set_title("Solicitudes por Mes, por Categoría de Cierre")
+    ax.set_title("Estatus de cierre por mes")
     ax.set_ylabel("Número de solicitudes")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=4)
+    ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
+              mode="expand", frameon=False, fontsize=8,
+              handlelength=1.4, columnspacing=1.2,
+              ncol=min(3, max(1, len(cats_presentes))))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
@@ -740,7 +799,7 @@ def grafica_comp_tasa_conversion(tabla_comp, guardar_como=None):
     for i, v in enumerate(pct_apr):
         ax.text(i, v + 4, f"{v:.0f}%", ha="center", va="bottom", fontsize=8.5, color=INBURSA_AZUL)
     ax.set_ylim(0, max(pct_fin.max() if len(pct_fin) else 0, pct_apr.max() if len(pct_apr) else 0) * 1.35 + 5)
-    ax.set_title("Tasa de Conversión por Mes")
+    ax.set_title("Tasa de conversión por mes")
     ax.set_ylabel("% de las solicitudes del mes")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=2)
     plt.tight_layout()
@@ -769,7 +828,7 @@ def grafica_comp_montos_por_mes(tabla_comp, guardar_como=None):
     ax.set_xticks(x)
     ax.set_xticklabels(meses)
     _formato_miles(ax, eje="y")
-    ax.set_title("Monto Total vs Monto Financiado, por Mes")
+    ax.set_title("Monto total vs. financiado por mes")
     ax.set_ylabel("Monto ($ MXN)")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=2)
     plt.tight_layout()
@@ -792,7 +851,7 @@ def grafica_comp_gap_por_mes(tabla_comp, guardar_como=None):
                  fontsize=9, fontweight="bold", color=MG_ROJO_OSCURO)
     maximo = valores.max() if len(valores) else 0
     ax.set_ylim(0, maximo * 1.3 + 10)
-    ax.set_title("% de Solicitudes con GAP por Mes")
+    ax.set_title("% con GAP por mes")
     ax.set_ylabel("% con GAP")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
@@ -827,7 +886,7 @@ def grafica_comp_gap_vs_gap_financiado(tabla_comp, guardar_como=None):
         maximo = max(maximo, pct_gap.max() if len(pct_gap) else 0)
 
     ax.set_ylim(0, maximo * 1.35 + 8)
-    ax.set_title("% GAP vs % GAP Financiado, por Mes")
+    ax.set_title("GAP total vs. GAP financiado por mes")
     ax.set_ylabel("% de solicitudes")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=2)
     plt.tight_layout()
@@ -866,6 +925,18 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
         else:
             print(f"  --  {clave} (sin datos suficientes, se omite)")
     print()
+
+    # Guarda de seguridad: si NINGUNA gráfica se pudo generar, algo está mal
+    # de fondo (carpeta borrada, permisos, columnas faltantes). Antes el
+    # reporte se armaba igual y salía un PDF entero sin una sola gráfica, sin
+    # ningún error visible. Es mejor fallar fuerte y decir por qué.
+    if not rutas:
+        raise RuntimeError(
+            "No se pudo generar ninguna gráfica. Revisa que el archivo traiga "
+            "las columnas esperadas (STATUS, Nombre del Vendedor, etc.) y que "
+            f"la carpeta '{CARPETA_GRAFICAS}' se pueda escribir."
+        )
+
     return rutas
 
 
@@ -928,7 +999,7 @@ def generar_insights_automaticos(tabla_comp, orden_meses, datos_por_mes, df_comb
             if mes_peor_conv != mes_mejor_conv:
                 insights.append(
                     f"En contraste, {mes_peor_conv} registró la conversión más baja "
-                    f"({conv.min():.1f}%); vale la pena revisar si fue por seguimiento a "
+                    f"({conv.min():.1f}%); conviene revisar si se debió al seguimiento de "
                     f"solicitudes APROBADAS/CONTRAPROPUESTA o por menor calidad de las "
                     f"solicitudes entrantes ese mes."
                 )
@@ -1011,7 +1082,8 @@ def generar_insights_automaticos(tabla_comp, orden_meses, datos_por_mes, df_comb
 # 8) GENERACIÓN DEL PDF
 # =======================================================================
 def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
-                                     df_combinado, nombre_archivo=None):
+                                     df_combinado, nombre_archivo=None,
+                                     recolectar_elementos=None):
     if nombre_archivo is None:
         fecha_archivo = datetime.datetime.now().strftime("%Y%m%d_%H%M")
         rango = f"{orden_meses[0].title()}" if len(orden_meses) == 1 else \
@@ -1176,7 +1248,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
             f"Este reporte compara <b>{n_meses} mes{'es' if n_meses != 1 else ''}</b> de la bitácora "
             f"de solicitudes de crédito automotriz ({PERIODO_TXT}), con un total de "
             f"<b>{total_periodo} solicitudes</b> en el periodo. Incluye la evolución del volumen y "
-            f"las categorías de cierre (FINANCIADO, APROBADO, CONTRAPROPUESTA, RECHAZADO), la tasa "
+            f"las categorías de cierre, la tasa "
             f"de conversión mes a mes, el panorama financiero, la colocación del seguro GAP y el "
             f"desempeño acumulado por vendedor a lo largo del periodo.",
             estilo_cuerpo
@@ -1212,12 +1284,12 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
 
     if not tabla_comp.empty:
-        encabezados_vol = ["Mes", "Total", "Financiado", "Aprobado", "Contra-<br/>propuesta", "Rechazado", "%<br/>Financiado"]
+        encabezados_vol = ["Mes", "Total", "Financiado", "Aprobado", "En<br/>trámite", "Rechazado", "%<br/>Financiado"]
         filas_vol = []
         for mes, fila in tabla_comp.iterrows():
             filas_vol.append([
                 mes, int(fila["Total"]), int(fila["Financiado"]), int(fila["Aprobado"]),
-                int(fila["Contrapropuesta"]), int(fila["Rechazado"]), f"{fila['% Financiado']:.1f}%",
+                int(fila["En trámite"]), int(fila["Rechazado"]), f"{fila['% Financiado']:.1f}%",
             ])
         anchos_vol = [3.0 * cm] + [2.5 * cm] * 6
         elementos.append(tabla_estilo_mg([encabezados_vol] + filas_vol, col_widths=anchos_vol))
@@ -1255,7 +1327,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         elementos.append(Paragraph("1. Volumen y Categorías de Cierre por Mes", estilo_h2))
         elementos.append(Paragraph(
             "La siguiente gráfica apila, para cada mes comparado, cuántas solicitudes cerraron en "
-            "cada categoría (Financiado, Aprobado, Contrapropuesta, Rechazado), para comparar de un "
+            f"cada estatus, para comparar de un "
             "vistazo tanto el volumen total como la calidad del cierre mes a mes.",
             estilo_cuerpo
         ))
@@ -1330,8 +1402,8 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
             elementos.append(Spacer(1, 0.2 * cm))
         if "gap_financiado_vend" in rutas_graficas:
             elementos.append(Paragraph(
-                "Y específicamente, colocación de GAP dentro de los créditos ya FINANCIADOS en todo "
-                "el periodo (el indicador más relevante, ya que ese GAP ya está efectivamente vendido):",
+                "Por último, la colocación de GAP dentro de los créditos ya <b>FINANCIADOS</b> "
+                "en todo el periodo: es el indicador más relevante, porque ese GAP ya está vendido.",
                 estilo_cuerpo
             ))
             elementos.append(imagen_ajustada(rutas_graficas["gap_financiado_vend"], ancho_cm=16, alto_max_cm=13))
@@ -1340,7 +1412,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     if "vendedores" in rutas_graficas or "vendedor_status" in rutas_graficas:
         elementos.append(Paragraph("5. Desempeño por Vendedor (Periodo Completo)", estilo_h2))
         elementos.append(Paragraph(
-            f"Se identificaron {n_vendedores} vendedores con solicitudes registradas a lo largo de "
+            f"Participan {n_vendedores} vendedores a lo largo de "
             f"{PERIODO_TXT}. Las siguientes gráficas muestran el total de solicitudes por vendedor y "
             f"su desglose por categoría de cierre, acumulando todos los meses comparados.",
             estilo_cuerpo
@@ -1374,6 +1446,19 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         nombre_archivo, pagesize=letter,
         topMargin=1.8 * cm, bottomMargin=1.3 * cm, leftMargin=1.5 * cm, rightMargin=1.5 * cm
     )
+    # `recolectar_elementos`: si el llamador pasa una lista, aquí se le
+    # deja una copia de todos los flowables del PDF. Es lo que usa
+    # docx_reportes.py para generar el Word a partir de ESTE mismo
+    # contenido, en vez de volver a redactarlo por su cuenta.
+    # Se copia ANTES de doc.build() porque ReportLab va vaciando la lista
+    # que recibe conforme la maqueta.
+    if recolectar_elementos is not None:
+        try:
+            from . import flowables_a_docx as _fd
+        except ImportError:
+            import flowables_a_docx as _fd
+        recolectar_elementos.extend(_fd.capturar_guion(elementos))
+
     doc.build(elementos, onFirstPage=encabezado_pie_pagina, onLaterPages=encabezado_pie_pagina)
 
     print(f"\nReporte PDF generado: {nombre_archivo}")

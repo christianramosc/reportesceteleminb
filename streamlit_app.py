@@ -8,22 +8,49 @@ No hay que tocar este archivo para agregar una herramienta nueva más
 adelante — ver las instrucciones en herramientas/__init__.py.
 """
 
+import contextlib
+import glob
+import io
 import os
+import shutil
+import tempfile
 import traceback
 from datetime import date
 
+import pandas as pd
 import streamlit as st
 
 from herramientas import REGISTRO
+from herramientas import estatus as _est
 from herramientas.avance_preliminar_original import (
     NOMBRE_ANALISTA as _ANALISTA_DEFECTO,
     SUBTITULO_EMPRESA as _PDV_DEFECTO,
 )
 
-CARPETA_ENTRADAS = os.path.abspath("entradas")
-CARPETA_SALIDA = os.path.abspath("salida")
-os.makedirs(CARPETA_ENTRADAS, exist_ok=True)
-os.makedirs(CARPETA_SALIDA, exist_ok=True)
+# =======================================================================
+# MANEJO DE ARCHIVOS — datos personales
+# =======================================================================
+# La bitácora trae datos personales de clientes (nombre completo, fecha de
+# nacimiento, teléfono, correo). Antes el Excel se guardaba tal cual en una
+# carpeta "entradas/" que persiste entre sesiones; en Streamlit Cloud ese
+# disco es compartido y sobrevive días.
+#
+# Ahora cada corrida usa un directorio temporal propio que se borra SIEMPRE
+# al terminar (incluso si el reporte truena), y los archivos generados se
+# devuelven en memoria para que el botón de descarga no dependa del disco.
+_CARPETAS_HEREDADAS = ("entradas", "salida")
+
+
+def _borrar_carpetas_heredadas():
+    """Limpia las carpetas de la versión anterior, que pueden traer Excel
+    con datos de clientes de corridas pasadas."""
+    for nombre in _CARPETAS_HEREDADAS:
+        ruta = os.path.abspath(nombre)
+        if os.path.isdir(ruta):
+            shutil.rmtree(ruta, ignore_errors=True)
+
+
+_borrar_carpetas_heredadas()
 
 st.set_page_config(page_title="Reportes Bitácora MG Colima", page_icon="📋", layout="centered")
 
@@ -34,16 +61,92 @@ st.caption(
 )
 
 
-def _guardar_subidas(archivos_subidos, prefijo):
-    """Guarda en disco los archivos que Streamlit recibe en memoria y
-    devuelve la lista de rutas locales, en el mismo orden."""
-    rutas = []
-    for i, archivo in enumerate(archivos_subidos):
-        ruta = os.path.join(CARPETA_ENTRADAS, f"{prefijo}_{i}_{archivo.name}")
-        with open(ruta, "wb") as f:
-            f.write(archivo.getbuffer())
-        rutas.append(ruta)
-    return rutas
+def _procesar(herramienta, archivos_subidos, opciones):
+    """Ejecuta la herramienta en un directorio temporal y devuelve los
+    resultados EN MEMORIA como [(nombre, bytes), ...].
+
+    El directorio se borra en el `finally`, así que el Excel del cliente no
+    sobrevive a la corrida ni siquiera cuando algo falla a medio camino.
+    """
+    carpeta = tempfile.mkdtemp(prefix=f"mg_{herramienta.id}_")
+    registro = io.StringIO()
+    try:
+        rutas = []
+        for i, archivo in enumerate(archivos_subidos):
+            ruta = os.path.join(carpeta, f"{i}_{archivo.name}")
+            with open(ruta, "wb") as f:
+                f.write(archivo.getbuffer())
+            rutas.append(ruta)
+
+        carpeta_salida = os.path.join(carpeta, "salida")
+        os.makedirs(carpeta_salida, exist_ok=True)
+
+        with contextlib.redirect_stdout(registro):
+            resultados = herramienta.ejecutar(
+                rutas, carpeta_salida=carpeta_salida, **opciones
+            )
+
+        archivos = []
+        for ruta in resultados or []:
+            if os.path.exists(ruta):
+                with open(ruta, "rb") as f:
+                    archivos.append((os.path.basename(ruta), f.read()))
+        return archivos, registro.getvalue()
+    finally:
+        shutil.rmtree(carpeta, ignore_errors=True)
+        # Las gráficas intermedias se escriben junto al script y llevan
+        # nombres de vendedores; tampoco tienen por qué quedarse.
+        for temporal in glob.glob("graficas_temp_*"):
+            shutil.rmtree(temporal, ignore_errors=True)
+
+
+def _vista_previa(archivos_subidos):
+    """Muestra qué trae el Excel ANTES de generar: cuántas filas y qué
+    estatus se detectaron. Sirve para cachar una exportación incompleta o
+    un estatus mal escrito sin esperar los dos minutos del reporte."""
+    filas_totales = 0
+    conteo = {}
+    for archivo in archivos_subidos:
+        try:
+            archivo.seek(0)
+            df = pd.read_excel(archivo)
+        except Exception:
+            continue
+        finally:
+            archivo.seek(0)
+        filas_totales += len(df)
+        columna = next((c for c in df.columns
+                        if str(c).strip().upper() in ("STATUS", "ESTATUS")), None)
+        if columna is None:
+            continue
+        for valor in df[columna]:
+            clave = _est.clasificar_status(valor)
+            conteo[clave] = conteo.get(clave, 0) + 1
+
+    if not filas_totales:
+        return
+    st.info(f"Se leyeron **{filas_totales}** solicitudes.")
+
+    if not conteo:
+        st.warning(
+            "No se encontró una columna STATUS en el archivo. El reporte se "
+            "generará sin el desglose por estatus."
+        )
+        return
+
+    resumen = ", ".join(f"{_est.etiqueta(c)}: {n}"
+                        for c, n in sorted(conteo.items(), key=lambda x: -x[1]))
+    st.caption(f"Estatus detectados — {resumen}")
+
+    # Un estatus fuera del catálogo se grafica igual, pero sin color ni
+    # etiqueta propios: conviene avisarlo aquí, no solo en la consola.
+    sin_catalogar = [c for c in conteo if not _est.esta_catalogado(c)]
+    if sin_catalogar:
+        st.warning(
+            "Estatus fuera del catálogo: **" + ", ".join(sorted(sin_catalogar)) + "**. "
+            "El reporte los incluye con un color automático. Para fijarles "
+            "color y etiqueta, agrégalos en `herramientas/estatus.py`."
+        )
 
 
 tabs = st.tabs([h.nombre for h in REGISTRO])
@@ -61,6 +164,14 @@ for tab, herramienta in zip(tabs, REGISTRO):
         )
         if archivos_subidos and not herramienta.multiple_archivos:
             archivos_subidos = [archivos_subidos]
+
+        if archivos_subidos and herramienta.id != "relacion_zip":
+            _vista_previa(archivos_subidos)
+
+        # El comparativo necesita al menos dos meses para poder comparar.
+        if (herramienta.id == "comparativo_mensual" and archivos_subidos
+                and len(archivos_subidos) < 2):
+            st.warning("Sube al menos dos archivos para poder comparar meses.")
 
         # --- Opciones extra específicas de cada herramienta ---
         opciones = {}
@@ -96,27 +207,48 @@ for tab, herramienta in zip(tabs, REGISTRO):
         generar = st.button("Generar", key=f"generar_{herramienta.id}", type="primary",
                              disabled=not archivos_subidos)
 
+        # Los resultados se guardan en session_state, NO se dibujan solo
+        # dentro del "if generar". st.button() solo devuelve True en el rerun
+        # inmediato al clic, y st.download_button() provoca un rerun al
+        # descargar: si los botones dependieran de "generar", al bajar el PDF
+        # desaparecería el botón del Word.
+        clave_resultado = f"resultado_{herramienta.id}"
+
         if generar and archivos_subidos:
             with st.spinner("Procesando... esto puede tardar uno o dos minutos."):
                 try:
-                    rutas_locales = _guardar_subidas(archivos_subidos, herramienta.id)
-                    resultados = herramienta.ejecutar(
-                        rutas_locales, carpeta_salida=CARPETA_SALIDA, **opciones
-                    )
+                    archivos, registro = _procesar(herramienta, archivos_subidos, opciones)
                 except Exception as e:
+                    st.session_state.pop(clave_resultado, None)
                     st.error(f"Algo falló al generar el reporte: {e}")
                     with st.expander("Detalle técnico"):
                         st.code(traceback.format_exc())
                 else:
-                    if not resultados:
-                        st.warning("Se terminó de procesar, pero no se encontró el archivo de salida.")
-                    else:
-                        st.success("¡Listo! Descarga tu archivo:")
-                        for ruta in resultados:
-                            with open(ruta, "rb") as f:
-                                st.download_button(
-                                    f"⬇️ Descargar {os.path.basename(ruta)}",
-                                    data=f.read(),
-                                    file_name=os.path.basename(ruta),
-                                    key=f"descarga_{herramienta.id}_{os.path.basename(ruta)}",
-                                )
+                    st.session_state[clave_resultado] = {
+                        "archivos": archivos,
+                        "log": registro,
+                        "fecha": date.today().strftime("%d/%m/%Y"),
+                    }
+
+        resultado = st.session_state.get(clave_resultado)
+        if resultado:
+            if not resultado["archivos"]:
+                st.warning("Se terminó de procesar, pero no se encontró el archivo de salida.")
+            else:
+                st.success("¡Listo! Descarga tus archivos:")
+                # Los bytes ya están en memoria: no se lee del disco, porque
+                # el archivo generado se borró junto con el temporal.
+                columnas = st.columns(min(len(resultado["archivos"]), 3))
+                for i, (nombre, contenido) in enumerate(resultado["archivos"]):
+                    icono = "📄" if nombre.lower().endswith(".pdf") else "📝"
+                    columnas[i % len(columnas)].download_button(
+                        f"{icono} {nombre.rsplit('.', 1)[-1].upper()}",
+                        data=contenido,
+                        file_name=nombre,
+                        key=f"descarga_{herramienta.id}_{nombre}",
+                        use_container_width=True,
+                    )
+
+            if resultado.get("log"):
+                with st.expander("Detalle del proceso"):
+                    st.code(resultado["log"])

@@ -153,18 +153,19 @@ FUENTE_ITALICA      = _fuente_activa["italica"]
 FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
 
 
-# colores fijos por categoría de status (para que siempre se vea igual)
-# FINANCIADO = crédito ya formalizado y dispersado (el cierre "más fuerte").
-# APROBADO   = crédito aprobado, aún no formalizado/dispersado.
-COLOR_CATEGORIA = {
-    "FINANCIADO":  MG_ROJO_OSCURO,
-    "APROBADO":    MG_ROJO,
-    "CONTRAPROPUESTA":  MG_GRIS_OSCURO,
-    "RECHAZADO":   MG_ROJO_PASTEL,
-}
+# =======================================================================
+# CATÁLOGO DE ESTATUS
+# Los colores, el orden y las etiquetas de cada categoría ya NO viven aquí:
+# están en herramientas/estatus.py, que es la fuente única de verdad para
+# los tres reportes. Para agregar un estatus nuevo, edita ESE archivo.
+# =======================================================================
+try:
+    from . import estatus as _est
+except ImportError:  # ejecución suelta (Colab, o el .py fuera del paquete)
+    import estatus as _est
 
-# orden consistente en tablas y gráficas: del cierre más fuerte al más débil
-ORDEN_CATEGORIAS = ["FINANCIADO", "APROBADO", "CONTRAPROPUESTA", "RECHAZADO"]
+ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
+COLOR_CATEGORIA = _est.COLOR_CATEGORIA
 
 NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
 SUBTITULO_EMPRESA = "MG Colima PYD"
@@ -266,13 +267,11 @@ COLUMNAS_MONEDA = [
 
 COLUMNAS_PORCENTAJE = ["Tasa Interés Anual"]
 
-# Status que se consideran APROBADO, FINANCIADO y RECHAZADO se manejan cada
-# uno por separado (no se combinan). Cualquier otro status (CONTRAPROPUESTA,
-# EN PROCESO, PENDIENTE, etc.) se agrupa como "CONTRAPROPUESTA". Ajusta estas
-# listas si tu operación usa otras palabras para lo mismo.
-STATUS_APROBADO   = ["APROBADO"]
-STATUS_FINANCIADO = ["FINANCIADOS", "FINANCIADO"]
-STATUS_RECHAZADOS = ["RECHAZADO", "RECHAZADOS", "CANCELADO", "CANCELADOS"]
+# Los sinónimos de cada estatus están definidos en herramientas/estatus.py.
+# Se re-exportan por compatibilidad con código que los importara de aquí.
+STATUS_APROBADO   = _est.STATUS_APROBADO
+STATUS_FINANCIADO = _est.STATUS_FINANCIADO
+STATUS_RECHAZADOS = _est.STATUS_RECHAZADOS
 
 
 def _limpiar_moneda(serie):
@@ -319,14 +318,13 @@ def _limpiar_porcentaje(serie):
 
 
 def clasificar_status(status):
-    s = str(status).strip().upper()
-    if s in STATUS_FINANCIADO:
-        return "FINANCIADO"
-    if s in STATUS_APROBADO:
-        return "APROBADO"
-    if s in STATUS_RECHAZADOS:
-        return "RECHAZADO"
-    return "CONTRAPROPUESTA"
+    """Traduce el STATUS crudo del Excel a su categoría.
+
+    Un estatus que no esté en el catálogo YA NO se mete a la fuerza en
+    "CONTRAPROPUESTA": se respeta como categoría propia.
+    Ver herramientas/estatus.py.
+    """
+    return _est.clasificar_status(status)
 
 
 def limpiar_datos(df_original):
@@ -367,6 +365,9 @@ def limpiar_datos(df_original):
     if "STATUS" in df.columns:
         df["STATUS"] = df["STATUS"].astype(str).str.strip().str.upper()
         df["Categoria"] = df["STATUS"].apply(clasificar_status)
+        # Da de alta (con color y lugar en el orden) cualquier estatus de la
+        # bitácora que no esté en el catálogo.
+        _est.registrar_categorias(df["Categoria"].unique())
 
     if "Nombre del Vendedor" in df.columns:
         df["Nombre del Vendedor"] = (
@@ -407,24 +408,35 @@ def resumen_general(df):
     print(f"Total de solicitudes ingresadas: {total}\n")
 
     if "Categoria" in df.columns:
-        conteo_cat  = df["Categoria"].value_counts()
+        conteo_cat = df["Categoria"].value_counts()
+
+        # Conteo de TODAS las categorías presentes, no solo de cuatro fijas.
+        conteo_categorias = {
+            c: int(conteo_cat.get(c, 0)) for c in _est.categorias_presentes(df)
+        }
+
         financiados = int(conteo_cat.get("FINANCIADO", 0))
         aprobados   = int(conteo_cat.get("APROBADO", 0))
         rechazados  = int(conteo_cat.get("RECHAZADO", 0))
-        en_tramite  = int(conteo_cat.get("CONTRAPROPUESTA", 0))
 
-        print(f"  Financiadas (crédito dispersado) : {financiados:>3}  ({financiados/total*100:5.1f}%)")
-        print(f"  Aprobadas (aún sin dispersar)    : {aprobados:>3}  ({aprobados/total*100:5.1f}%)")
-        print(f"  Rechazadas                       : {rechazados:>3}  ({rechazados/total*100:5.1f}%)")
-        print(f"  CONTRAPROPUESTA / negociación         : {en_tramite:>3}  ({en_tramite/total*100:5.1f}%) ")
+        # "en_tramite" = todo lo que quedó sin resolver al cierre del mes,
+        # excepto lo ya aprobado (que se reporta aparte).
+        claves_abiertas = [c for c in _est.claves_por_grupo(_est.ABIERTA)
+                           if c != "APROBADO"]
+        en_tramite = sum(int(conteo_cat.get(c, 0)) for c in claves_abiertas)
 
-        print("\nDesglose detallado por Estatus:")
+        for clave, cnt in conteo_categorias.items():
+            print(f"  {_est.etiqueta(clave):<24}: {cnt:>3}  ({cnt/total*100:5.1f}%)")
+
+        print("\nDesglose detallado por Estatus (texto tal cual del Excel):")
         for status, cnt in df["STATUS"].value_counts().items():
             print(f"    - {status:<20}: {cnt:>3}  ({cnt/total*100:5.1f}%) ")
 
         r.update({
             "financiados": financiados, "aprobados": aprobados,
             "rechazados": rechazados, "en_tramite": en_tramite,
+            "conteo_categorias": conteo_categorias,
+            "claves_abiertas": claves_abiertas,
             "desglose_status": df["STATUS"].value_counts(),
         })
     else:
@@ -507,12 +519,19 @@ def analisis_por_vendedor(df):
 
     if "Categoria" in df.columns:
         pivote = pd.crosstab(df["Nombre del Vendedor"], df["Categoria"])
-        for col in ORDEN_CATEGORIAS:
+        # Solo las categorías que realmente aparecen este mes, para no llenar
+        # la tabla de columnas en cero.
+        presentes = _est.categorias_presentes(df)
+        for col in presentes:
             if col not in pivote.columns:
                 pivote[col] = 0
-        tabla = tabla.join(pivote[ORDEN_CATEGORIAS])
-        tabla["% Aprobación"] = (tabla["APROBADO"] / tabla["Total"] * 100).round(1)
-        tabla["% Financiado"] = (tabla["FINANCIADO"] / tabla["Total"] * 100).round(1)
+        tabla = tabla.join(pivote[presentes])
+        # Si un mes no hubo ninguna APROBADA (o FINANCIADA), esa columna no
+        # existe: se toma como 0 en vez de tronar.
+        aprobado_v = tabla["APROBADO"] if "APROBADO" in tabla.columns else 0
+        financiado_v = tabla["FINANCIADO"] if "FINANCIADO" in tabla.columns else 0
+        tabla["% Aprobación"] = (aprobado_v / tabla["Total"] * 100).round(1)
+        tabla["% Financiado"] = (financiado_v / tabla["Total"] * 100).round(1)
 
     if "Monto Total a Financiar" in df.columns and "Categoria" in df.columns:
         monto_financiado = (
@@ -556,7 +575,8 @@ def analisis_financiero_por_categoria(df):
         return None
 
     print("=" * 72)
-    print(" COMPARATIVO FINANCIERO: FINANCIADO vs APROBADO vs CONTRAPROPUESTA vs RECHAZADO")
+    print(" COMPARATIVO FINANCIERO POR CATEGORÍA: "
+          + " vs ".join(_est.categorias_presentes(df)))
     print("=" * 72)
 
     columnas_interes = [c for c in [
@@ -625,6 +645,15 @@ def _lista_vendedores_por_categoria(df, categoria, max_nombres=4):
 
 def _guardar_si_procede(fig, guardar_como):
     if guardar_como:
+        # La carpeta de gráficas se creaba UNA sola vez, al importar el
+        # módulo. En un proceso de larga vida (Streamlit) eso no basta: si
+        # algo la borra entre corridas —por ejemplo la limpieza de temporales
+        # de la app— la siguiente corrida truena con "No such file or
+        # directory", o peor, se queda sin gráficas en silencio. Asegurarla
+        # aquí la vuelve a crear cuando haga falta.
+        carpeta = os.path.dirname(guardar_como)
+        if carpeta:
+            os.makedirs(carpeta, exist_ok=True)
         fig.savefig(guardar_como, dpi=150, bbox_inches="tight", facecolor="white")
     return guardar_como
 
@@ -636,14 +665,18 @@ def grafica_status(df, guardar_como=None):
     conteo = df["STATUS"].value_counts().sort_values(ascending=False)
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    colores = _gradiente(len(conteo))
+    # Cada barra toma el color de SU categoría (no un degradado de rojos por
+    # posición): así esta gráfica se lee junto con la dona y las barras
+    # apiladas, donde el color significa lo mismo.
+    colores = [COLOR_CATEGORIA.get(clasificar_status(s), MG_GRIS_CLARO)
+               for s in conteo.index]
     barras = ax.bar(conteo.index, conteo.values, color=colores, edgecolor="white")
 
     for barra, valor in zip(barras, conteo.values):
         ax.text(barra.get_x() + barra.get_width() / 2, valor + max(conteo.values) * 0.01,
                  f"{valor}\n({valor/conteo.sum()*100:.0f}%)", ha="center", va="bottom", fontsize=9)
 
-    ax.set_title("Solicitudes por Estatus")
+    ax.set_title("Solicitudes por estatus")
     ax.set_ylabel("Número de solicitudes")
     ax.set_ylim(0, max(conteo.values) * 1.2)
     plt.xticks(rotation=15)
@@ -675,14 +708,22 @@ def grafica_dona_categoria(df, guardar_como=None):
 
     etiquetas = []
     for cat, valor in zip(conteo.index, conteo.values):
-        etiqueta = f"{cat} ({valor})"
+        etiqueta = f"{_est.etiqueta(cat).upper()} ({valor})"
         if "Nombre del Vendedor" in df.columns:
             etiqueta += f"\n   {_lista_vendedores_por_categoria(df, cat)}"
         etiquetas.append(etiqueta)
 
+    # Con muchos estatus, una leyenda de una sola columna crecía tanto hacia
+    # abajo que al exportar (bbox "tight") la imagen quedaba altísima y, al
+    # escalarla al ancho del PDF, la dona se encogía hasta casi desaparecer.
+    # A partir de 7 entradas se reparte en dos columnas.
+    n_cat = len(etiquetas)
     ax.legend(wedges, etiquetas, loc="upper center", bbox_to_anchor=(0.5, -0.02),
-               frameon=False, fontsize=9, ncol=1, labelspacing=1.2)
-    ax.set_title("Distribución General de Solicitudes")
+               frameon=False, fontsize=8.5 if n_cat > 9 else 9,
+               ncol=2 if n_cat > 6 else 1,
+               labelspacing=0.9 if n_cat > 6 else 1.2,
+               columnspacing=1.5)
+    ax.set_title("Proporción por estatus")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.show()
@@ -702,7 +743,7 @@ def grafica_vendedores(df, guardar_como=None):
     for i, valor in enumerate(conteo.values):
         ax.text(valor + max(conteo.values) * 0.01, i, str(valor), va="center", fontsize=9)
 
-    ax.set_title("Solicitudes por Vendedor")
+    ax.set_title("Solicitudes por vendedor")
     ax.set_xlabel("Número de solicitudes")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
@@ -726,12 +767,19 @@ def grafica_vendedor_status(df, guardar_como=None):
     for col in orden_cols:
         valores = pivote[col].values
         ax.barh(pivote.index, valores, left=izquierda,
-                 color=COLOR_CATEGORIA.get(col, MG_GRIS_CLARO), label=col, edgecolor="white")
+                 color=COLOR_CATEGORIA.get(col, MG_GRIS_CLARO),
+                 label=_est.etiqueta(col), edgecolor="white")
         izquierda += valores
 
-    ax.set_title("Desempeño por Vendedor\n(Financiado / Aprobado / Contrapropuesta / Rechazado)")
+    # El título NO enumera las categorías (la leyenda de abajo ya lo hace):
+    # con muchos estatus esa línea salía más ancha que la gráfica y deformaba
+    # la imagen al exportarla.
+    ax.set_title("Estatus de cierre por vendedor")
     ax.set_xlabel("Número de solicitudes")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), frameon=False, ncol=4)
+    ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
+              mode="expand", frameon=False, fontsize=8,
+              handlelength=1.4, columnspacing=1.2,
+              ncol=min(3, max(1, len(orden_cols))))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.show()
@@ -785,7 +833,7 @@ def grafica_monto_por_vendedor(df, guardar_como=None):
     ax.set_xlim(0, maximo * 1.18)
     _formato_miles(ax, eje="x")
 
-    ax.set_title("Monto Colocado por Vendedor\nAprobado vs Financiado")
+    ax.set_title("Monto por vendedor: aprobado vs. financiado")
     ax.set_xlabel("Monto a financiar ($ MXN)")
     ax.legend(loc="lower right", frameon=False)
     plt.tight_layout()
@@ -813,9 +861,9 @@ def grafica_modelos(df, guardar_como=None):
     for i, valor in enumerate(conteo.values):
         ax.text(valor + max(conteo.values) * 0.02, i, str(valor), va="center", fontsize=9)
 
-    titulo = "Modelos MÁS Solicitados"
+    titulo = "Modelos más solicitados"
     if recortado:
-        titulo += f" (Top {TOP_N})"
+        titulo += f" (top {TOP_N})"
     ax.set_title(titulo)
     ax.set_xlabel("Número de solicitudes")
     plt.tight_layout()
@@ -847,10 +895,13 @@ def grafica_gap_por_categoria(df, guardar_como=None):
         ax.text(barra.get_x() + barra.get_width() / 2, valor + 2,
                  f"{valor:.0f}%", ha="center", va="bottom", fontsize=9, fontweight="bold")
 
-    ax.set_title("% de Solicitudes con GAP", pad=14)
+    ax.set_title("% con GAP por estatus", pad=14)
     ax.set_ylabel("% con GAP")
-    ax.set_ylim(0, 120)
-    plt.xticks(rotation=10)
+    # El tope se ajusta al dato real (antes estaba fijo en 120% y dejaba
+    # media gráfica vacía). Las etiquetas se inclinan más porque con muchas
+    # categorías los nombres se encimaban unos con otros.
+    ax.set_ylim(0, min(100, max(pct_gap.values) * 1.25))
+    plt.xticks(rotation=30, ha="right")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.show()
@@ -898,7 +949,7 @@ def grafica_gap_por_vendedor_total(df, guardar_como=None):
     ax.set_yticklabels(vendedores)
     ax.set_xlim(0, maximo * 1.18)
 
-    ax.set_title("Solicitudes con GAP por Vendedor\n(vs. Total de Solicitudes)")
+    ax.set_title("Cobertura de GAP por vendedor")
     ax.set_xlabel("Número de solicitudes")
     ax.legend(loc="lower right", frameon=False)
     plt.tight_layout()
@@ -933,12 +984,16 @@ def grafica_gap_por_vendedor_y_status(df, guardar_como=None):
     for col in orden_cols:
         valores = pivote[col].values
         ax.barh(pivote.index, valores, left=izquierda,
-                 color=COLOR_CATEGORIA.get(col, MG_GRIS_CLARO), label=col, edgecolor="white")
+                 color=COLOR_CATEGORIA.get(col, MG_GRIS_CLARO),
+                 label=_est.etiqueta(col), edgecolor="white")
         izquierda += valores
 
-    ax.set_title("Solicitudes con GAP por Vendedor")
+    ax.set_title("GAP por vendedor y estatus")
     ax.set_xlabel("Número de solicitudes con GAP")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), frameon=False, ncol=4)
+    ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
+              mode="expand", frameon=False, fontsize=8,
+              handlelength=1.4, columnspacing=1.2,
+              ncol=min(3, max(1, len(orden_cols))))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.show()
@@ -974,7 +1029,7 @@ def grafica_gap_financiado_por_vendedor(df, guardar_como=None):
                         f"¡Felicidades, {vendedor}!", va="center", fontsize=9,
                         color=MG_ROJO_OSCURO, fontweight="bold")
 
-    ax.set_title("Colocación de GAP en Créditos FINANCIADOS por Vendedor")
+    ax.set_title("GAP en créditos financiados, por vendedor")
     ax.set_xlabel("Solicitudes FINANCIADAS con GAP")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
@@ -1028,6 +1083,18 @@ def generar_graficas_para_pdf(df):
         if resultado:
             rutas[clave] = resultado
     print(f"\n{len(rutas)} gráficas generadas correctamente.\n")
+
+    # Guarda de seguridad: si NINGUNA gráfica se pudo generar, algo está mal
+    # de fondo (carpeta borrada, permisos, columnas faltantes). Antes el
+    # reporte se armaba igual y salía un PDF entero sin una sola gráfica, sin
+    # ningún error visible. Es mejor fallar fuerte y decir por qué.
+    if not rutas:
+        raise RuntimeError(
+            "No se pudo generar ninguna gráfica. Revisa que el archivo traiga "
+            "las columnas esperadas (STATUS, Nombre del Vendedor, etc.) y que "
+            f"la carpeta '{CARPETA_GRAFICAS}' se pueda escribir."
+        )
+
     return rutas
 
 
@@ -1072,7 +1139,8 @@ def imagen_ajustada(ruta, ancho_cm, alto_max_cm=None):
     return Image(ruta, width=ancho_cm * cm, height=alto_cm * cm, hAlign="CENTER")
 
 
-def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nombre_archivo=None):
+def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
+                                nombre_archivo=None, recolectar_elementos=None):
     """
     Arma el reporte narrativo completo: portada con KPIs, resumen ejecutivo
     redactado, reporte detallado por sección (con tablas y gráficas) y
@@ -1131,6 +1199,12 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
         "EncabezadoTabla", parent=styles["Normal"], fontSize=8.3, leading=10,
         textColor=rl_colors.white, fontName=FUENTE_BOLD, alignment=TA_CENTER)
 
+    # Versión reducida, para tablas con muchas columnas (muchos estatus)
+    estilo_encabezado_tabla_compacto = ParagraphStyle(
+        "EncabezadoTablaCompacto", parent=styles["Normal"], fontSize=6.6,
+        leading=7.8, textColor=rl_colors.white, fontName=FUENTE_BOLD,
+        alignment=TA_CENTER)
+
     FECHA_REPORTE = datetime.date.today().strftime("%d/%m/%Y")
 
     def encabezado_pie_pagina(canvas_obj, doc):
@@ -1174,11 +1248,27 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
         canvas_obj.drawRightString(ancho - 1.5 * cm, 0.65 * cm, NOMBRE_EMPRESA)
         canvas_obj.restoreState()
 
-    def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1):
+    def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1,
+                        compacta=False):
         """Tabla 'corporativa moderna': encabezado azul Inbursa, sin líneas
         verticales (solo reglas horizontales finas), zebrado casi blanco y
-        un filete rojo MG bajo el encabezado como único acento fuerte."""
-        encabezado = [Paragraph(str(c), estilo_encabezado_tabla) for c in data[0]]
+        un filete rojo MG bajo el encabezado como único acento fuerte.
+
+        compacta=True baja el tamaño de letra y los márgenes internos: se usa
+        cuando la tabla tiene muchas columnas (por ejemplo, cuando el mes trae
+        muchos estatus distintos) para que los encabezados no se partan a
+        media palabra.
+        """
+        if compacta:
+            _n_cols = len(data[0])
+            estilo_enc = estilo_encabezado_tabla_compacto.clone(
+                "EncabezadoTablaAuto",
+                fontSize=6.6 if _n_cols <= 9 else 5.7,
+                leading=7.8 if _n_cols <= 9 else 6.8,
+            )
+        else:
+            estilo_enc = estilo_encabezado_tabla
+        encabezado = [Paragraph(str(c), estilo_enc) for c in data[0]]
         data = [encabezado] + data[1:]
         tabla = Table(data, colWidths=col_widths, repeatRows=1)
         n_filas = len(data)
@@ -1187,7 +1277,7 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
             ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
             ("FONTNAME", (0, 0), (-1, 0), FUENTE_BOLD),
             ("FONTNAME", (0, 1), (-1, -1), FUENTE_REGULAR),
-            ("FONTSIZE", (0, 1), (-1, -1), 8.5),
+            ("FONTSIZE", (0, 1), (-1, -1), 7.0 if compacta else 8.5),
             ("TEXTCOLOR", (0, 1), (-1, -1), rl_colors.HexColor(MG_GRIS_OSCURO)),
             ("ALIGN", (alinear_derecha_desde, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -1199,8 +1289,8 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
             ("BOTTOMPADDING", (0, 0), (-1, 0), 7),
             ("TOPPADDING", (0, 1), (-1, -1), 5),
             ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2 if compacta else 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2 if compacta else 6),
         ]
         tabla.setStyle(TableStyle(estilo))
         return tabla
@@ -1283,12 +1373,20 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
     elementos.append(Paragraph(f"Elaborado por <b>{NOMBRE_ANALISTA}</b> el <b>{FECHA_REPORTE}</b>", estilo_meta_portada))
     elementos.append(Spacer(1, 0.45 * cm))
 
+    # Las categorías se enumeran a partir de las que REALMENTE trae la
+    # bitácora del mes, no de una lista fija de cuatro.
+    _presentes = _est.categorias_presentes(df)
+    _texto_clasificadas = (
+        f"clasificadas en {len(_presentes)} estatus: "
+        f"<b>{_est.frase_enumerada(_presentes)}</b>. "
+        if _presentes else ""
+    )
     intro_portada = Table(
         [[Paragraph(
             f"Este reporte resume el comportamiento de las {total} solicitudes de crédito automotriz "
-            f"registradas en la bitácora, desde su ingreso hasta su cierre como <b>FINANCIADA</b> "
-            f"(crédito ya dispersado), <b>APROBADA</b> (aprobada, aún sin dispersar), <b>RECHAZADA</b> "
-            f"o en <b>CONTRAPROPUESTA</b>/negociación. Incluye el desempeño por vendedor, la colocación "
+            f"registradas en la bitácora, desde su ingreso hasta su cierre de mes, "
+            f"{_texto_clasificadas}"
+            f"Incluye el desempeño por vendedor, la colocación "
             f"del seguro GAP y los modelos de vehículo con mayor demanda.",
             estilo_cuerpo
         )]],
@@ -1324,20 +1422,42 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
 
     elementos.append(Paragraph("Panorama general", estilo_h2))
     if tiene_categoria:
+        # El desglose enumera todas las categorías con solicitudes este mes.
+        _desglose = _est.frase_desglose(resumen.get("conteo_categorias", {}), total)
         elementos.append(Paragraph(
-            f"De las {total} solicitudes registradas en el periodo, {financiados} ({pct(financiados):.1f}%) "
-            f"llegaron a <b>FINANCIADAS</b> (crédito ya dispersado), {aprobados} ({pct(aprobados):.1f}%) están "
-            f"<b>APROBADAS</b> pendientes de dispersar, {rechazados} ({pct(rechazados):.1f}%) fueron "
-            f"<b>RECHAZADAS</b> y {en_tramite} ({pct(en_tramite):.1f}%) permanecen en "
-            f"<b>CONTRAPROPUESTA</b> o negociación.",
+            f"De las {total} solicitudes registradas en el periodo, {_desglose}.",
             estilo_cuerpo
         ))
-        if "desglose_status" in resumen:
-            filas_status = [[s, int(c), f"{c/total*100:.1f}%"] for s, c in resumen["desglose_status"].items()]
+        # La tabla agrupa por CATEGORÍA, no por el texto crudo del Excel: si la
+        # bitácora trae "FINANCIADO" y "FINANCIADOS", ambos suman una sola
+        # fila. Se ordena igual que las gráficas (del cierre más fuerte al
+        # más débil) para que todo el reporte se lea con el mismo criterio.
+        if resumen.get("conteo_categorias"):
+            filas_status = [
+                [_est.etiqueta(clave), int(n), f"{n/total*100:.1f}%"]
+                for clave, n in resumen["conteo_categorias"].items() if n
+            ]
             elementos.append(tabla_estilo_mg(
-                [["Status", "Solicitudes", "% del Total"]] + filas_status,
+                [["Estatus", "Solicitudes", "% del total"]] + filas_status,
                 col_widths=[7 * cm, 4 * cm, 4 * cm]
             ))
+
+            # Si un mismo estatus se capturó con varias palabras distintas,
+            # se avisa: es señal de captura inconsistente en la bitácora.
+            variantes = {}
+            for texto_crudo in resumen.get("desglose_status", {}).index:
+                variantes.setdefault(clasificar_status(texto_crudo), set()).add(texto_crudo)
+            mezclados = {c: v for c, v in variantes.items() if len(v) > 1}
+            if mezclados:
+                detalle = "; ".join(
+                    f"{_est.etiqueta(c)}: " + ", ".join(sorted(v))
+                    for c, v in mezclados.items()
+                )
+                elementos.append(Paragraph(
+                    f"Nota: algunos estatus se capturaron con más de una palabra en la "
+                    f"bitácora y aquí se agrupan en una sola fila ({detalle}).",
+                    estilo_nota
+                ))
     else:
         elementos.append(Paragraph(
             f"Se registraron {total} solicitudes en el periodo. No fue posible clasificarlas por Estatus "
@@ -1365,14 +1485,21 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
             + (f", con un ticket promedio de ${resumen['ticket_aprobado']:,.2f}"
                if "ticket_aprobado" in resumen else "") + "."
         )
+    # Antes eran cuatro oraciones seguidas con la misma estructura ("El X
+    # promedio es de Y"). Se funden en una sola enumeración.
+    promedios = []
     if "pct_enganche" in resumen:
-        partes_financiero.append(f"El enganche promedio solicitado equivale al {resumen['pct_enganche']:.1f}% del precio de venta.")
+        promedios.append(f"un enganche del {resumen['pct_enganche']:.1f}% del precio de venta")
     if "plazo_promedio" in resumen:
-        partes_financiero.append(f"El plazo promedio solicitado es de {resumen['plazo_promedio']:.0f} meses.")
+        promedios.append(f"un plazo de {resumen['plazo_promedio']:.0f} meses")
     if "tasa_promedio" in resumen:
-        partes_financiero.append(f"La tasa de interés anual promedio es de {resumen['tasa_promedio']:.2f}%.")
+        promedios.append(f"una tasa anual del {resumen['tasa_promedio']:.2f}%")
     if "edad_promedio" in resumen:
-        partes_financiero.append(f"La edad promedio de los clientes es de {resumen['edad_promedio']:.0f} años.")
+        promedios.append(f"clientes de {resumen['edad_promedio']:.0f} años")
+    if promedios:
+        cuerpo = (", ".join(promedios[:-1]) + " y " + promedios[-1]
+                  if len(promedios) > 1 else promedios[0])
+        partes_financiero.append(f"En promedio, las solicitudes presentan {cuerpo}.")
     if partes_financiero:
         elementos.append(Paragraph(" ".join(partes_financiero), estilo_cuerpo))
     else:
@@ -1408,7 +1535,7 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
 
     elementos.append(Paragraph("Vendedores destacados", estilo_h2))
     if tabla_vendedor is not None and not tabla_vendedor.empty:
-        texto_vend = f"Se identificaron {n_vendedores} vendedores con solicitudes registradas. "
+        texto_vend = f"Participan {n_vendedores} vendedores. "
         if top_solicitudes_nombres:
             texto_vend += (
                 f"<b>{_nombres_y(top_solicitudes_nombres)}</b> "
@@ -1499,10 +1626,9 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
     if "status" in rutas_graficas or "dona_categoria" in rutas_graficas:
         elementos.append(Paragraph("1. Distribución de Solicitudes por Estatus", estilo_h2))
         elementos.append(Paragraph(
-            "La siguiente gráfica muestra cuántas solicitudes hay en cada Estatus capturado en la "
-            "bitácora, y la gráfica en DONA agrupa esos mismos Estatus en las cuatro categorías de seguimiento "
-            "(Financiado, Aprobado, Contrapropuesta y Rechazado), señalando qué vendedores "
-            "aportan a cada una.",
+            f"La siguiente gráfica muestra cuántas solicitudes hay en cada Estatus capturado en la "
+            f"bitácora, y la gráfica en DONA muestra esos mismos estatus como proporción del total "
+            f"({_est.frase_enumerada(_presentes)}), señalando qué vendedores aportan a cada uno.",
             estilo_cuerpo
         ))
         if "status" in rutas_graficas:
@@ -1516,41 +1642,65 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
     if tabla_vendedor is not None and not tabla_vendedor.empty:
         elementos.append(Paragraph("2. Desempeño por Vendedor", estilo_h2))
         elementos.append(Paragraph(
-            f"Se registran {n_vendedores} vendedores con solicitudes en el periodo. La tabla siguiente "
-            f"desglosa, para cada uno, el total de solicitudes generadas y en qué categoría cerraron "
-            f"(Financiado, Aprobado, Contrapropuesta o Rechazado), junto con su % de conversión a "
-            f"crédito Financiado.",
+            f"Se registran {n_vendedores} vendedores con solicitudes en el periodo. "
+            f"La tabla desglosa, para cada uno, cuántas solicitudes generó, en qué estatus "
+            f"cerraron y su porcentaje de conversión a crédito financiado.",
             estilo_cuerpo
         ))
 
-        # Etiquetas cortas para encabezado (con salto manual en "Contrapropuesta"
-        # para que no se parta a media palabra dentro de la columna angosta)
-        ETIQUETA_CORTA_CATEGORIA = {
-            "FINANCIADO": "Financiado", "APROBADO": "Aprobado",
-            "CONTRAPROPUESTA": "Contra-<br/>propuesta", "RECHAZADO": "Rechazado",
-        }
-        encabezados_v = ["Vendedor", "Total"]
-        claves_v = []
-        for c in ORDEN_CATEGORIAS:
-            if c in tabla_vendedor.columns:
-                encabezados_v.append(ETIQUETA_CORTA_CATEGORIA.get(c, c.capitalize()))
-                claves_v.append(c)
-        if "% Financiado" in tabla_vendedor.columns:
-            encabezados_v.append("%<br/>Financiado")
+        claves_v = [c for c in ORDEN_CATEGORIAS if c in tabla_vendedor.columns]
+        tiene_pct = "% Financiado" in tabla_vendedor.columns
 
-        filas_v = []
-        for vendedor, fila in tabla_vendedor.iterrows():
-            f = [vendedor, int(fila.get("Total", 0))]
+        # Con muchos estatus la tabla no cabe a lo ancho: una columna por
+        # estatus deja menos de 1 cm por columna y los encabezados se parten
+        # a media palabra. A partir de 8 estatus se voltea la tabla —los
+        # estatus pasan a las filas y los vendedores a las columnas—, que es
+        # la orientación natural cuando hay más estatus que vendedores.
+        VOLTEAR_DESDE = 8
+        if len(claves_v) >= VOLTEAR_DESDE:
+            vendedores_v = list(tabla_vendedor.index)
+            encabezados_v = ["Estatus"] + list(vendedores_v) + ["Total"]
+            filas_v = []
             for c in claves_v:
-                f.append(int(fila.get(c, 0)))
-            if "% Financiado" in tabla_vendedor.columns:
-                f.append(f"{fila.get('% Financiado', 0):.1f}%")
-            filas_v.append(f)
+                valores = [int(tabla_vendedor.loc[v].get(c, 0)) for v in vendedores_v]
+                filas_v.append([_est.etiqueta(c)] + valores + [sum(valores)])
+            filas_v.append(["Total"]
+                           + [int(tabla_vendedor.loc[v].get("Total", 0)) for v in vendedores_v]
+                           + [int(tabla_vendedor["Total"].sum())])
+            if tiene_pct:
+                filas_v.append(["% Financiado"]
+                               + [f"{tabla_vendedor.loc[v].get('% Financiado', 0):.1f}%"
+                                  for v in vendedores_v] + [""])
 
-        ancho_disponible_v = 18.3 * cm - 4.2 * cm
-        ancho_col_v = ancho_disponible_v / max(len(encabezados_v) - 1, 1)
-        anchos_v = [4.2 * cm] + [ancho_col_v] * (len(encabezados_v) - 1)
-        elementos.append(tabla_estilo_mg([encabezados_v] + filas_v, col_widths=anchos_v))
+            ancho_nombre_v = 4.6 * cm
+            ancho_col_v = (18.3 * cm - ancho_nombre_v) / max(len(encabezados_v) - 1, 1)
+            anchos_v = [ancho_nombre_v] + [ancho_col_v] * (len(encabezados_v) - 1)
+            elementos.append(tabla_estilo_mg([encabezados_v] + filas_v,
+                                             col_widths=anchos_v,
+                                             compacta=len(encabezados_v) > 7))
+        else:
+            # Las etiquetas cortas de encabezado (con los saltos de línea para
+            # que no se partan a media palabra) vienen del catálogo.
+            encabezados_v = ["Vendedor", "Total"] + [_est.etiqueta_corta(c) for c in claves_v]
+            if tiene_pct:
+                encabezados_v.append("%<br/>Financiado" if len(encabezados_v) <= 6
+                                     else "%<br/>Fin.")
+
+            filas_v = []
+            for vendedor, fila in tabla_vendedor.iterrows():
+                f = [vendedor, int(fila.get("Total", 0))]
+                for c in claves_v:
+                    f.append(int(fila.get(c, 0)))
+                if tiene_pct:
+                    f.append(f"{fila.get('% Financiado', 0):.1f}%")
+                filas_v.append(f)
+
+            ancho_nombre_v = 4.2 * cm if len(encabezados_v) <= 7 else 3.4 * cm
+            ancho_col_v = (18.3 * cm - ancho_nombre_v) / max(len(encabezados_v) - 1, 1)
+            anchos_v = [ancho_nombre_v] + [ancho_col_v] * (len(encabezados_v) - 1)
+            elementos.append(tabla_estilo_mg([encabezados_v] + filas_v,
+                                             col_widths=anchos_v,
+                                             compacta=len(encabezados_v) > 7))
         elementos.append(Spacer(1, 0.3 * cm))
 
         if "vendedores" in rutas_graficas:
@@ -1558,8 +1708,8 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
             elementos.append(Spacer(1, 0.2 * cm))
         if "vendedor_status" in rutas_graficas:
             elementos.append(Paragraph(
-                "La siguiente gráfica apila, por vendedor, cuántas solicitudes cerraron en cada categoría, "
-                "para comparar de un vistazo no solo el volumen sino la calidad del cierre de cada uno.",
+                "La gráfica apila las solicitudes de cada vendedor por estatus, para comparar "
+                "de un vistazo no solo el volumen sino la calidad del cierre.",
                 estilo_cuerpo
             ))
             elementos.append(imagen_ajustada(rutas_graficas["vendedor_status"], ancho_cm=16, alto_max_cm=13))
@@ -1569,10 +1719,9 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
     if "monto_por_vendedor" in rutas_graficas:
         elementos.append(Paragraph("3. Monto Colocado por Vendedor", estilo_h2))
         elementos.append(Paragraph(
-            "Esta gráfica compara, para cada vendedor, el monto en pesos que tiene en créditos "
-            "APROBADOS (aún sin dispersar) contra el que ya tiene en créditos FINANCIADOS "
-            "(dispersados), lo que ayuda a distinguir entre volumen de solicitudes y cierre "
-            "efectivo de negocio.",
+            "Compara, por vendedor, el monto en créditos <b>APROBADOS</b> (aún sin dispersar) "
+            "contra el ya <b>FINANCIADO</b>. La diferencia separa el volumen de solicitudes "
+            "del cierre efectivo de negocio.",
             estilo_cuerpo
         ))
         elementos.append(imagen_ajustada(rutas_graficas["monto_por_vendedor"], ancho_cm=16, alto_max_cm=15))
@@ -1630,16 +1779,16 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
             elementos.append(Spacer(1, 0.2 * cm))
         if "gap_vendedor_status" in rutas_graficas:
             elementos.append(Paragraph(
-                "Desglose de esas mismas solicitudes con GAP por vendedor, separadas por la categoría "
-                "en la que cerraron:",
+                "Las mismas solicitudes con GAP, desglosadas por vendedor y por el estatus "
+                "en el que cerraron.",
                 estilo_cuerpo
             ))
             elementos.append(imagen_ajustada(rutas_graficas["gap_vendedor_status"], ancho_cm=16, alto_max_cm=13))
             elementos.append(Spacer(1, 0.2 * cm))
         if "gap_financiado_vend" in rutas_graficas:
             elementos.append(Paragraph(
-                "Y específicamente, la colocación de GAP dentro de los créditos ya FINANCIADOS "
-                "(el indicador más relevante, ya que ese GAP ya está efectivamente vendido):",
+                "Por último, la colocación de GAP dentro de los créditos ya <b>FINANCIADOS</b>: "
+                "es el indicador más relevante, porque ese GAP ya está vendido.",
                 estilo_cuerpo
             ))
             elementos.append(imagen_ajustada(rutas_graficas["gap_financiado_vend"], ancho_cm=16, alto_max_cm=13))
@@ -1681,8 +1830,9 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
         conclusiones.append(
             f"<b>Mejor conversión a financiado:</b> {_nombres_y(top_financiado_nombres)} "
             f"{'lideran' if len(top_financiado_nombres) > 1 else 'lidera'} en créditos efectivamente "
-            f"FINANCIADOS ({int(top_financiado_val)}); vale la pena identificar qué está(n) haciendo bien "
-            f"para replicarlo con el resto del equipo."
+            f"FINANCIADOS ({int(top_financiado_val)}); conviene identificar qué "
+            f"{'están' if len(top_financiado_nombres) > 1 else 'está'} haciendo bien "
+            f"para replicarlo en el resto del equipo."
         )
     if top_gap_fin_nombres:
         conclusiones.append(
@@ -1717,6 +1867,19 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria, nom
         nombre_archivo, pagesize=letter,
         topMargin=1.8 * cm, bottomMargin=1.3 * cm, leftMargin=1.5 * cm, rightMargin=1.5 * cm
     )
+    # `recolectar_elementos`: si el llamador pasa una lista, aquí se le
+    # deja una copia de todos los flowables del PDF. Es lo que usa
+    # docx_reportes.py para generar el Word a partir de ESTE mismo
+    # contenido, en vez de volver a redactarlo por su cuenta.
+    # Se copia ANTES de doc.build() porque ReportLab va vaciando la lista
+    # que recibe conforme la maqueta.
+    if recolectar_elementos is not None:
+        try:
+            from . import flowables_a_docx as _fd
+        except ImportError:
+            import flowables_a_docx as _fd
+        recolectar_elementos.extend(_fd.capturar_guion(elementos))
+
     doc.build(elementos, onFirstPage=encabezado_pie_pagina, onLaterPages=encabezado_pie_pagina)
 
     print(f"\nReporte PDF generado: {nombre_archivo}")

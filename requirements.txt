@@ -1,7 +1,22 @@
-streamlit>=1.35
-pandas>=2.0
-openpyxl>=3.1
-numpy>=1.24
-matplotlib>=3.7
-reportlab>=4.0
-python-docx>=1.1
+# Versiones FIJAS a propósito.
+#
+# Con "streamlit>=1.35" cada despliegue de Streamlit Cloud reinstala y puede
+# traer una versión mayor nueva. El día que alguna rompa algo, la app deja de
+# funcionar sin que hayas tocado una línea de código, y el error parece
+# inexplicable. Con "==" las actualizaciones ocurren cuando tú lo decides.
+#
+# Estas versiones son las verificadas de punta a punta: se generaron con ellas
+# los tres reportes en PDF y Word.
+#
+# Para subir de versión, hazlo de una en una, corre los tres reportes y revisa
+# que salgan bien antes de desplegar. Para congelar lo que ya te funciona en
+# tu máquina: pip freeze > requirements.txt
+
+streamlit==1.63.0
+pandas==3.0.2
+numpy==2.4.4
+openpyxl==3.1.5
+matplotlib==3.10.8
+reportlab==4.4.10
+python-docx==1.2.0
+pillow==12.1.1
