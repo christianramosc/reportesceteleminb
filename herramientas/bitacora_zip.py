@@ -8,8 +8,8 @@ notebook original; lo único que cambia es que en vez de subir el ZIP con
 `files.upload()` (Colab), la función `procesar_zip_a_excel()` recibe la
 ruta del ZIP como parámetro, para poder llamarse desde la app de Streamlit.
 
-Requiere el binario `pdftotext` (paquete `poppler-utils` del sistema) —
-ver packages.txt en la raíz del proyecto.
+Para leer los PDFs usa el binario `pdftotext` (poppler) si está disponible;
+si no, cae automáticamente a pdfplumber (Python puro). Ver extraer_texto_pdf().
 """
 
 import os
@@ -121,7 +121,12 @@ def detectar_carpetas_status(carpeta_raiz: str) -> dict:
     return carpetas
 
 
-def extraer_texto_pdf(ruta: str) -> str:
+def _hay_pdftotext() -> bool:
+    """True si el binario pdftotext (poppler) está disponible en el sistema."""
+    return shutil.which("pdftotext") is not None
+
+
+def _extraer_con_pdftotext(ruta: str) -> str:
     resultado = subprocess.run(
         ["pdftotext", "-layout", "-enc", "UTF-8", ruta, "-"],
         capture_output=True
@@ -130,6 +135,46 @@ def extraer_texto_pdf(ruta: str) -> str:
         print(f"  ⚠ pdftotext falló (código {resultado.returncode}): {os.path.basename(ruta)}")
         return ""
     return resultado.stdout.decode("utf-8", errors="replace")
+
+
+def _extraer_con_pdfplumber(ruta: str) -> str:
+    """Equivalente en Python puro de `pdftotext -layout`.
+
+    `extract_text(layout=True)` respeta la posición horizontal y vertical del
+    texto igual que la opción -layout, que es de lo que dependen las
+    expresiones regulares de parsear_solicitud() y parsear_amortizacion()
+    (label en una línea, valor en la siguiente). Las páginas se separan con
+    "\\f" igual que pdftotext.
+    """
+    try:
+        import pdfplumber
+    except ImportError:
+        print("  ⚠ No hay pdftotext ni pdfplumber instalado; no se puede leer el PDF.")
+        return ""
+
+    try:
+        with pdfplumber.open(ruta) as pdf:
+            paginas = [(p.extract_text(layout=True) or "") for p in pdf.pages]
+        return "\n\f".join(paginas)
+    except Exception as e:
+        print(f"  ⚠ pdfplumber falló ({e}): {os.path.basename(ruta)}")
+        return ""
+
+
+def extraer_texto_pdf(ruta: str) -> str:
+    """Extrae el texto de un PDF conservando el acomodo visual.
+
+    Usa el binario `pdftotext` (poppler) si está instalado —es más rápido y es
+    con el que se calibraron las expresiones regulares—; si no está, cae a
+    pdfplumber, que hace lo mismo en Python puro.
+
+    Este fallback existe porque Streamlit Community Cloud ya no puede instalar
+    paquetes de sistema vía packages.txt (el repositorio bullseye-security de
+    Debian quedó vencido y apt-get aborta el despliegue completo).
+    """
+    if _hay_pdftotext():
+        return _extraer_con_pdftotext(ruta)
+    return _extraer_con_pdfplumber(ruta)
 
 
 def limpiar(texto: str) -> str:
@@ -163,6 +208,43 @@ def normalizar_tipo_seguro(texto_tipo: str) -> str:
     return t
 
 
+def _extraer_apellidos(texto: str) -> tuple:
+    """Devuelve (primer_apellido, segundo_apellido) del solicitante.
+
+    En la forma CTL-008, ambas etiquetas viven en la MISMA línea, una en cada
+    columna, y los dos valores en la línea de abajo:
+
+        Primer apellido:                    Segundo apellido:
+        ARROYO                              BUSTOS
+
+    Por eso no sirve buscar "Primer apellido:" seguido de salto de línea: lo
+    que sigue a esa etiqueta no es un salto sino la etiqueta de la derecha.
+    Aquí se localiza la línea con AMBAS etiquetas y se parte la línea de
+    valores en la posición donde arranca la columna derecha, usando la
+    posición de "Segundo apellido:" como punto de corte. Funciona igual con
+    pdftotext y con pdfplumber porque ambos conservan la alineación de
+    columnas, aunque usen anchos de espaciado distintos.
+    """
+    lineas = texto.split("\n")
+    for i, linea in enumerate(lineas[:-1]):
+        bajo = linea.lower()
+        if "primer apellido:" in bajo and "segundo apellido:" in bajo:
+            corte = bajo.index("segundo apellido:")
+            valores = lineas[i + 1]
+            # Margen de 2 caracteres: la columna de valores puede quedar
+            # desplazada un carácter respecto a la de etiquetas.
+            izq = limpiar(valores[:max(0, corte - 2)])
+            der = limpiar(valores[max(0, corte - 2):])
+            return izq, der
+
+    # Respaldo: si en algún formato las etiquetas sí van en líneas separadas,
+    # se usa la lectura de toda la vida.
+    m1 = re.search(r"Primer apellido:\s*\n\s*([A-Z\xc0-\xff ]+)", texto)
+    m2 = re.search(r"Segundo apellido:\s*\n\s*([A-Z\xc0-\xff ]+)", texto)
+    return (limpiar(m1.group(1)) if m1 else "",
+            limpiar(m2.group(1)) if m2 else "")
+
+
 def parsear_solicitud(texto: str) -> dict:
     if not texto:
         return {}
@@ -172,14 +254,16 @@ def parsear_solicitud(texto: str) -> dict:
     m = re.search(r"Folio CCK:\s*(\d+)", texto)
     datos["folio_cck"] = m.group(1).strip() if m else ""
 
-    m_nombres   = re.search(r"Nombre\(s\):\s*\n\s*([A-Z\xc0-\xff ]+)", texto)
-    m_apellido1 = re.search(r"Primer apellido:\s*\n\s*([A-Z\xc0-\xff ]+)", texto)
-    m_apellido2 = re.search(r"Segundo apellido:\s*\n\s*([A-Z\xc0-\xff ]+)", texto)
+    m_nombres = re.search(r"Nombre\(s\):\s*\n\s*([A-Z\xc0-\xff ]+)", texto)
+    nombres = limpiar(m_nombres.group(1)) if m_nombres else ""
 
-    nombres   = limpiar(m_nombres.group(1))   if m_nombres   else ""
-    apellido1 = limpiar(m_apellido1.group(1)) if m_apellido1 else ""
-    apellido2 = limpiar(m_apellido2.group(1)) if m_apellido2 else ""
-    datos["nombre_completo"] = f"{nombres} {apellido1} {apellido2}".strip()
+    apellido1, apellido2 = _extraer_apellidos(texto)
+
+    # Se unen con " ".join filtrando los vacíos: si algún apellido falta, no
+    # queda un espacio doble en medio del nombre.
+    datos["nombre_completo"] = " ".join(x for x in (nombres, apellido1, apellido2) if x)
+    datos["primer_apellido"]  = apellido1
+    datos["segundo_apellido"] = apellido2
 
     m = re.search(
         r"Fecha de nacimiento\(dd/mm/aaaa\):.*?\n\s*(\d{2}/\d{2}/\d{4})",
@@ -207,6 +291,19 @@ def parsear_solicitud(texto: str) -> dict:
     return datos
 
 
+def _primera_columna(linea: str) -> str:
+    """Devuelve solo la columna izquierda de una línea a dos columnas.
+
+    Corta en el hueco de 4+ espacios que separa las columnas, y como respaldo
+    en cualquier hueco de 2+ espacios seguido de una etiqueta ("Tipo:",
+    "Tipo resto del plazo:"). El respaldo importa porque pdfplumber usa huecos
+    más angostos que pdftotext y no siempre llega a 4 espacios.
+    """
+    trozo = re.split(r"\s{4,}", linea)[0]
+    trozo = re.split(r"\s{2,}(?=[A-Za-zÁÉÍÓÚÑáéíóúñ][\w áéíóúÁÉÍÓÚñÑ]*:)", trozo)[0]
+    return trozo.strip()
+
+
 def parsear_amortizacion(texto: str) -> dict:
     if not texto:
         return {}
@@ -216,16 +313,17 @@ def parsear_amortizacion(texto: str) -> dict:
     m = re.search(r"Folio CCK:\s*(\d+)", texto)
     datos["folio_cck"] = m.group(1).strip() if m else ""
 
-    # Marca — igual que Vehículo: layout de 2 columnas, se corta en el
-    # primer salto de 4+ espacios que separa la columna derecha (Tipo de seguro)
-    m = re.search(r"^[ \t]*Marca:\s{2,}([^\n]+)", texto, re.IGNORECASE | re.MULTILINE)
-    if m:
-        datos["marca"] = re.split(r"\s{4,}", m.group(1))[0].strip()
-    else:
-        datos["marca"] = ""
+    # Marca y Vehículo viven en un layout de 2 columnas: a la derecha de su
+    # valor viene la columna del seguro ("Tipo:", "Tipo resto del plazo:").
+    # Se usa [ \t]+ y no \s{2,} porque pdftotext alinea las columnas con
+    # muchos espacios ("Marca:         MG MOTOR") mientras que pdfplumber los
+    # comprime a uno solo ("Marca: MG MOTOR"); exigir 2+ espacios dejaba estos
+    # dos campos vacíos al leer sin poppler.
+    m = re.search(r"^[ \t]*Marca:[ \t]+([^\n]+)", texto, re.IGNORECASE | re.MULTILINE)
+    datos["marca"] = _primera_columna(m.group(1)) if m else ""
 
-    m = re.search(r"^[ \t]*Veh[íi]culo:\s{2,}([^\n]+)", texto, re.IGNORECASE | re.MULTILINE)
-    datos["vehiculo"] = re.split(r"\s{4,}", m.group(1))[0].strip() if m else ""
+    m = re.search(r"^[ \t]*Veh[íi]culo:[ \t]+([^\n]+)", texto, re.IGNORECASE | re.MULTILINE)
+    datos["vehiculo"] = _primera_columna(m.group(1)) if m else ""
 
     m = re.search(r"Modelo:\s*(\d{4})", texto, re.IGNORECASE)
     datos["modelo_anio"] = m.group(1).strip() if m else ""

@@ -1,0 +1,9 @@
+# Dependencias SOLO para correr las pruebas.
+# Se mantienen aparte de requirements.txt para que Streamlit Cloud no las
+# instale en producción.
+#
+# Uso:
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   python -m pytest
+
+pytest==9.1.1

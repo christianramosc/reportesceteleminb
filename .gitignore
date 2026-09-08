@@ -5,3 +5,4 @@ salida/
 graficas_temp_*/
 _extraido_*/
 .venv/
+.pytest_cache/

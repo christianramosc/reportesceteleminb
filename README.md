@@ -105,20 +105,49 @@ archivo y el botón de descarga.
 
 ```bash
 pip install -r requirements.txt
-# además necesitas el binario pdftotext (poppler) instalado en el sistema:
+# (opcional) el binario pdftotext acelera la lectura de PDFs; si no lo tienes
+# la app usa pdfplumber automáticamente:
 #   Windows: https://github.com/oschwartz10612/poppler-windows/releases
 #   Mac:     brew install poppler
 #   Linux:   sudo apt install poppler-utils
 streamlit run streamlit_app.py
 ```
 
+## Pruebas
+
+Antes de desplegar un cambio, corre las pruebas desde la raíz del proyecto:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest
+```
+
+Tardan ~35 segundos y cubren tres frentes:
+
+- **`test_estatus.py`** — el catálogo de estatus: que cada sinónimo caiga en
+  su categoría, que "NO FINANCIADOS" nunca se confunda con FINANCIADO, y que
+  al agregar un estatus nuevo no repitas un sinónimo o un color de otro.
+- **`test_calculos.py`** — que los conteos cuadren con el total y que
+  "en trámite" no incluya cierres definitivos.
+- **`test_reportes.py`** — genera los tres reportes de verdad y verifica que
+  el PDF traiga gráficas. Incluye `test_dos_corridas_seguidas_en_el_mismo_proceso`,
+  que ejecuta cada reporte **dos veces seguidas**, como hace Streamlit: es la
+  prueba que detecta los errores que solo aparecen a partir de la segunda
+  generación y que probar una sola vez deja pasar.
+
+Las pruebas no usan bitácoras reales: arman un Excel sintético con las mismas
+columnas, así que se pueden correr en cualquier máquina sin datos de clientes.
+
 ## Notas
 
 - Los tres scripts fueron probados de extremo a extremo (Excel/PDF de
   prueba) antes de entregarte este proyecto.
-- La herramienta "Relación de Clientes" necesita el binario `pdftotext`
-  (paquete `poppler-utils`) — ya está listado en `packages.txt` para que
-  Streamlit Community Cloud lo instale solo.
+- La herramienta "Relación de Clientes" lee PDFs con `pdftotext` (poppler)
+  si el binario está instalado, y si no con `pdfplumber` (Python puro, va en
+  requirements.txt). Por eso el proyecto YA NO lleva `packages.txt`: Streamlit
+  Community Cloud aborta el despliegue completo cuando intenta correr
+  apt-get, porque el repositorio bullseye-security de Debian está vencido.
+  No vuelvas a agregar packages.txt salvo que Streamlit actualice su imagen.
 - Es una app pensada para uso interno de pocas personas a la vez; si dos
   personas generan un PDF en el mismo minuto exacto podría haber una
   colisión de nombre de archivo. Para el volumen de tu equipo no debería

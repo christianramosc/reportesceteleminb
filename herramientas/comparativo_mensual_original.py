@@ -61,11 +61,9 @@ except ImportError:
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 140)
 
-try:
-    import reportlab
-except ImportError:
-    import subprocess
-    subprocess.run(['pip', 'install', '-q', 'reportlab'])
+# reportlab va fijado en requirements.txt; ya no se instala en tiempo de
+# ejecución (eso era herencia de Colab y en un servidor puede colgarse).
+import reportlab  # noqa: F401
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
