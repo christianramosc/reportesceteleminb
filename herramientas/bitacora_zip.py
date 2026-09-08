@@ -300,7 +300,17 @@ def _primera_columna(linea: str) -> str:
     más angostos que pdftotext y no siempre llega a 4 espacios.
     """
     trozo = re.split(r"\s{4,}", linea)[0]
-    trozo = re.split(r"\s{2,}(?=[A-Za-zÁÉÍÓÚÑáéíóúñ][\w áéíóúÁÉÍÓÚñÑ]*:)", trozo)[0]
+
+    # Corte por ETIQUETA, no por espacios. Cuando el nombre del vehículo es
+    # largo ("NEW ZS 1.5T COM TURBO EXCITE AT") el hueco entre columnas se
+    # reduce a UN solo espacio y cualquier corte que cuente espacios falla.
+    # Las etiquetas de la columna derecha ("Tipo:", "Tipo resto del plazo:",
+    # "Importe primer año:", "Aseguradora:") empiezan con mayúscula seguida
+    # de minúsculas y terminan en dos puntos; los nombres de vehículo van en
+    # MAYÚSCULAS y nunca llevan ":". Esa diferencia es la que se aprovecha.
+    m = re.search(r"\s+(?=[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+[\w áéíóúñÁÉÍÓÚÑ]*:)", trozo)
+    if m:
+        trozo = trozo[:m.start()]
     return trozo.strip()
 
 
