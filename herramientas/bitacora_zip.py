@@ -208,6 +208,21 @@ def normalizar_tipo_seguro(texto_tipo: str) -> str:
     return t
 
 
+def _valor_de_linea(linea: str) -> str:
+    """Devuelve el valor de una línea, o "" si esa línea es otra etiqueta.
+
+    En un formato en blanco (o con un campo sin capturar) debajo de una
+    etiqueta no viene un valor: viene la SIGUIENTE etiqueta. Sin este filtro,
+    "Nombre(s):" seguido de "Primer apellido:  Segundo apellido:" devolvía
+    "P" —la primera letra de la etiqueta de abajo— como si fuera el nombre
+    del cliente. Los valores capturados nunca traen ":"; las etiquetas
+    siempre. Esa es la prueba.
+    """
+    if ":" in linea:
+        return ""
+    return _primera_columna(linea)
+
+
 def _extraer_apellidos(texto: str) -> tuple:
     """Devuelve (primer_apellido, segundo_apellido) del solicitante.
 
@@ -233,6 +248,8 @@ def _extraer_apellidos(texto: str) -> tuple:
             valores = lineas[i + 1]
             # Margen de 2 caracteres: la columna de valores puede quedar
             # desplazada un carácter respecto a la de etiquetas.
+            if ":" in valores:      # formato en blanco: abajo va otra etiqueta
+                return "", ""
             izq = limpiar(valores[:max(0, corte - 2)])
             der = limpiar(valores[max(0, corte - 2):])
             return izq, der
@@ -245,17 +262,107 @@ def _extraer_apellidos(texto: str) -> tuple:
             limpiar(m2.group(1)) if m2 else "")
 
 
-def parsear_solicitud(texto: str) -> dict:
-    if not texto:
-        return {}
+def es_persona_moral(texto: str) -> bool:
+    """Distingue la forma CTL-022 (persona moral) de la CTL-008 (persona física).
 
-    datos = {}
+    Se apoya en tres marcas que la CTL-008 nunca trae. Basta con una para
+    decidir, por si alguna versión del formato cambia el encabezado.
+    """
+    marcas = (
+        "PERSONA MORAL",
+        "Denominación o razón social",
+        "CTL-022",
+    )
+    return any(m.lower() in texto.lower() for m in marcas)
+
+
+def tipo_de_persona(texto: str) -> str:
+    """Devuelve MORAL, PFAE o FÍSICA.
+
+    Persona física con actividad empresarial y persona física asalariada
+    comparten el MISMO formato (CTL-008) y se capturan igual; lo único que
+    las separa es el encabezado. Por eso PFAE se detecta por el título y no
+    por el código de formato, y por eso ambas usan el mismo parser.
+    """
+    if es_persona_moral(texto):
+        return "MORAL"
+    if "actividad empresarial" in texto.lower():
+        return "PFAE"
+    return "FÍSICA"
+
+
+def _parsear_solicitud_pm(texto: str) -> dict:
+    """Parser de la solicitud de PERSONA MORAL (CTL-022).
+
+    Ojo con la trampa de este formato: más abajo trae un bloque
+    "Datos del representante legal" con Nombre(s)/Primer apellido/Segundo
+    apellido idéntico al de la persona física. El parser de PF encuentra ESE
+    bloque y devuelve el nombre del representante como si fuera el cliente.
+    Aquí el cliente es la razón social y nada más.
+    """
+    datos = {"tipo_persona": "MORAL"}
 
     m = re.search(r"Folio CCK:\s*(\d+)", texto)
     datos["folio_cck"] = m.group(1).strip() if m else ""
 
-    m_nombres = re.search(r"Nombre\(s\):\s*\n\s*([A-Z\xc0-\xff ]+)", texto)
-    nombres = limpiar(m_nombres.group(1)) if m_nombres else ""
+    # Razón social: va en la línea siguiente a la etiqueta, en la columna
+    # izquierda (a la derecha viene "Nacionalidad:").
+    # El (?:[ \t]*\n)* salta líneas en blanco: pdfplumber conserva el
+    # espaciado vertical del PDF y a veces deja una línea vacía entre la
+    # etiqueta y su valor, donde pdftotext no deja ninguna.
+    m = re.search(r"Denominaci[oó]n o raz[oó]n social:[^\n]*\n(?:[ \t]*\n)*([^\n]+)",
+                  texto, re.IGNORECASE)
+    datos["nombre_completo"] = _valor_de_linea(m.group(1)) if m else ""
+    datos["primer_apellido"] = ""
+    datos["segundo_apellido"] = ""
+
+    # Una empresa no tiene fecha de nacimiento; se usa la de constitución,
+    # que es el campo equivalente del formato. La columna "Tipo de Persona"
+    # deja claro de qué fecha se trata.
+    m = re.search(r"Fecha de constituci[oó]n\s*\(dd/mm/aaaa\):[^\n]*\n\s*(\d{2}/\d{2}/\d{4})",
+                  texto, re.IGNORECASE)
+    datos["fecha_nacimiento"] = m.group(1).strip() if m else ""
+
+    # Teléfono y correo del DOMICILIO FISCAL de la empresa (no los del
+    # representante legal, que aparecen más abajo).
+    m = re.search(r"Tel[eé]fono fijo:[^\n]*Correo electr[oó]nico:[^\n]*\n\s*([\d\s\-]+?)\s{2,}",
+                  texto, re.IGNORECASE)
+    datos["telefono_movil"] = limpiar(m.group(1)) if m else ""
+
+    m = re.search(r"Tel[eé]fono fijo:[^\n]*Correo electr[oó]nico:[^\n]*\n[^\n]*?([\w._%+\-]+@[\w.\-]+)",
+                  texto, re.IGNORECASE)
+    datos["correo_electronico"] = m.group(1).strip() if m else ""
+
+    datos["nombre_vendedor"] = _extraer_vendedor(texto)
+    return datos
+
+
+def _extraer_vendedor(texto: str) -> str:
+    m = re.search(
+        r"Nombre del vendedor:\s*\n\s*\d+\s+\w+\s+([A-Z\xc0-\xff ]+)",
+        texto, re.IGNORECASE
+    )
+    return limpiar(m.group(1)) if m else ""
+
+
+def parsear_solicitud(texto: str) -> dict:
+    """Lee la solicitud y elige el parser según el tipo de persona."""
+    if not texto:
+        return {}
+
+    tipo = tipo_de_persona(texto)
+    if tipo == "MORAL":
+        return _parsear_solicitud_pm(texto)
+
+    # PFAE y física asalariada comparten formato: mismo parser, distinta
+    # etiqueta en la columna "Tipo de Persona".
+    datos = {"tipo_persona": tipo}
+
+    m = re.search(r"Folio CCK:\s*(\d+)", texto)
+    datos["folio_cck"] = m.group(1).strip() if m else ""
+
+    m_nombres = re.search(r"Nombre\(s\):[^\n]*\n(?:[ \t]*\n)*([^\n]+)", texto)
+    nombres = limpiar(_valor_de_linea(m_nombres.group(1))) if m_nombres else ""
 
     apellido1, apellido2 = _extraer_apellidos(texto)
 
@@ -280,13 +387,7 @@ def parsear_solicitud(texto: str) -> dict:
     )
     datos["correo_electronico"] = m.group(1).strip() if m else ""
 
-    m = re.search(
-        r"Nombre del vendedor:\s*\n\s*\d+\s+\w+\s+([A-Z\xc0-\xff ]+)",
-        texto, re.IGNORECASE
-    )
-    datos["nombre_vendedor"] = limpiar(m.group(1)) if m else ""
-
-
+    datos["nombre_vendedor"] = _extraer_vendedor(texto)
 
     return datos
 
@@ -299,7 +400,7 @@ def _primera_columna(linea: str) -> str:
     "Tipo resto del plazo:"). El respaldo importa porque pdfplumber usa huecos
     más angostos que pdftotext y no siempre llega a 4 espacios.
     """
-    trozo = re.split(r"\s{4,}", linea)[0]
+    trozo = re.split(r"\s{4,}", linea.strip())[0]
 
     # Corte por ETIQUETA, no por espacios. Cuando el nombre del vehículo es
     # largo ("NEW ZS 1.5T COM TURBO EXCITE AT") el hueco entre columnas se
@@ -437,6 +538,7 @@ def procesar_carpeta(carpeta_pdf: str, status: str) -> list:
         registro = {
             "Folio CCK":               folio,
             "STATUS":                  status,
+            "Tipo de Persona":         sol.get("tipo_persona", ""),
             "Nombre Completo":         sol.get("nombre_completo", ""),
             "Fecha de Nacimiento":     sol.get("fecha_nacimiento", ""),
             "Teléfono Móvil":          sol.get("telefono_movil", ""),
