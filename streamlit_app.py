@@ -20,6 +20,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+import ui_estilos as ui
 from herramientas import REGISTRO
 from herramientas import estatus as _est
 from herramientas.avance_preliminar_original import (
@@ -52,12 +53,17 @@ def _borrar_carpetas_heredadas():
 
 _borrar_carpetas_heredadas()
 
-st.set_page_config(page_title="Reportes Bitácora MG Colima", page_icon="📋", layout="centered")
+st.set_page_config(
+    page_title="Generador de reportes",
+    page_icon="📋",
+    layout="centered",
+)
 
-st.title("📋 Reportes — Bitácora MG Colima")
-st.caption(
-    "Sube el archivo que te pida cada herramienta y descarga el Excel o "
-    "PDF ya generado."
+ui.aplicar_estilos()
+ui.encabezado(
+    "Generador de reportes",
+    "Elige una herramienta, sube el archivo que te pida y descarga el "
+    "resultado ya generado.",
 )
 
 
@@ -149,7 +155,7 @@ def _vista_previa(archivos_subidos):
         )
 
 
-tabs = st.tabs([h.nombre for h in REGISTRO])
+tabs = st.tabs([ui.nombre_limpio(h.nombre) for h in REGISTRO])
 
 for tab, herramienta in zip(tabs, REGISTRO):
     with tab:
@@ -204,8 +210,8 @@ for tab, herramienta in zip(tabs, REGISTRO):
                 if texto_meses.strip():
                     opciones["nombres_meses"] = [l.strip() for l in texto_meses.splitlines() if l.strip()]
 
-        generar = st.button("Generar", key=f"generar_{herramienta.id}", type="primary",
-                             disabled=not archivos_subidos)
+        generar = st.button("Generar reporte", key=f"generar_{herramienta.id}",
+                             type="primary", disabled=not archivos_subidos)
 
         # Los resultados se guardan en session_state, NO se dibujan solo
         # dentro del "if generar". st.button() solo devuelve True en el rerun
@@ -215,12 +221,12 @@ for tab, herramienta in zip(tabs, REGISTRO):
         clave_resultado = f"resultado_{herramienta.id}"
 
         if generar and archivos_subidos:
-            with st.spinner("Procesando... esto puede tardar uno o dos minutos."):
+            with st.spinner("Generando el reporte. Puede tardar uno o dos minutos."):
                 try:
                     archivos, registro = _procesar(herramienta, archivos_subidos, opciones)
                 except Exception as e:
                     st.session_state.pop(clave_resultado, None)
-                    st.error(f"Algo falló al generar el reporte: {e}")
+                    st.error(f"No se pudo generar el reporte: {e}")
                     with st.expander("Detalle técnico"):
                         st.code(traceback.format_exc())
                 else:
@@ -233,16 +239,21 @@ for tab, herramienta in zip(tabs, REGISTRO):
         resultado = st.session_state.get(clave_resultado)
         if resultado:
             if not resultado["archivos"]:
-                st.warning("Se terminó de procesar, pero no se encontró el archivo de salida.")
+                st.warning("El proceso terminó, pero no se generó ningún archivo de salida.")
             else:
-                st.success("¡Listo! Descarga tus archivos:")
+                cuantos = len(resultado["archivos"])
+                ui.bloque_resultado(
+                    "Reporte generado",
+                    f"{cuantos} archivo{'s' if cuantos != 1 else ''} "
+                    f"· {resultado['fecha']}",
+                )
                 # Los bytes ya están en memoria: no se lee del disco, porque
                 # el archivo generado se borró junto con el temporal.
                 columnas = st.columns(min(len(resultado["archivos"]), 3))
                 for i, (nombre, contenido) in enumerate(resultado["archivos"]):
-                    icono = "📄" if nombre.lower().endswith(".pdf") else "📝"
+                    extension = nombre.rsplit(".", 1)[-1].upper()
                     columnas[i % len(columnas)].download_button(
-                        f"{icono} {nombre.rsplit('.', 1)[-1].upper()}",
+                        f"Descargar {extension}",
                         data=contenido,
                         file_name=nombre,
                         key=f"descarga_{herramienta.id}_{nombre}",
@@ -252,3 +263,5 @@ for tab, herramienta in zip(tabs, REGISTRO):
             if resultado.get("log"):
                 with st.expander("Detalle del proceso"):
                     st.code(resultado["log"])
+
+ui.pie("Los archivos que subes se procesan en el momento y se borran al terminar.")
