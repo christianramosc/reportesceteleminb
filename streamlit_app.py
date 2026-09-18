@@ -182,7 +182,8 @@ for tab, herramienta in zip(tabs, REGISTRO):
         # --- Opciones extra específicas de cada herramienta ---
         opciones = {}
 
-        if herramienta.id in ("avance_preliminar", "comparativo_mensual", "resumen_mensual"):
+        if herramienta.id in ("avance_preliminar", "comparativo_mensual",
+                              "resumen_mensual", "resumen_vendedor"):
             col_pdv, col_analista = st.columns(2)
             opciones["nombre_pdv"] = col_pdv.text_input(
                 "Nombre del PDV", value=_PDV_DEFECTO, key=f"pdv_{herramienta.id}",
@@ -198,6 +199,20 @@ for tab, herramienta in zip(tabs, REGISTRO):
                 fecha_elegida = st.date_input("Fecha de corte", value=date.today(),
                                                key=f"fecha_{herramienta.id}")
                 opciones["fecha_corte"] = fecha_elegida.strftime("%d/%m/%Y")
+
+        if herramienta.id == "resumen_vendedor":
+            with st.expander("Generar solo para ciertos vendedores (opcional)"):
+                st.caption(
+                    "Por default se genera el PDF de todos los vendedores que "
+                    "aparezcan en el Excel. Para limitarlo, escribe un nombre "
+                    "por línea, tal como viene en la columna Nombre del Vendedor."
+                )
+                texto_vend = st.text_area("Un vendedor por línea",
+                                           key=f"vend_{herramienta.id}")
+                if texto_vend.strip():
+                    opciones["vendedores_incluir"] = [
+                        l.strip() for l in texto_vend.splitlines() if l.strip()
+                    ]
 
         if herramienta.id == "comparativo_mensual":
             with st.expander("Etiquetas de mes (opcional)"):
