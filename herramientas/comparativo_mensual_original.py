@@ -71,7 +71,7 @@ from reportlab.lib import colors as rl_colors
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image,
-    PageBreak, HRFlowable
+    PageBreak, HRFlowable, KeepTogether
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
@@ -532,7 +532,33 @@ def _lista_vendedores_por_categoria(df, categoria, max_nombres=4):
 # =======================================================================
 # 5) TABLA COMPARATIVA MENSUAL
 # =======================================================================
+def etiqueta_columna_abiertas(datos_por_mes):
+    """Nombre de la columna que agrupa las solicitudes todavía abiertas.
+
+    Esa columna suma TODAS las categorías abiertas que no son APROBADO
+    (contrapropuesta, en revisión, análisis, pendiente...). Ponerle un
+    nombre fijo de una sola categoría sería mentir en cuanto aparezca otra.
+
+    Pero llamarla "En trámite" cuando mes tras mes la única categoría
+    abierta es CONTRAPROPUESTA esconde información que sí se tiene. Así que
+    el nombre se decide con los datos: si en todo el periodo solo hay una
+    categoría abierta, se usa su nombre real; si hay dos o más, se vuelve al
+    genérico porque ya no describe a ninguna en particular.
+    """
+    presentes = set()
+    for mes in datos_por_mes:
+        conteo = datos_por_mes[mes]["resumen"].get("conteo_categorias") or {}
+        for clave, cantidad in conteo.items():
+            if clave != "APROBADO" and int(cantidad) > 0 \
+                    and clave in _est.claves_por_grupo(_est.ABIERTA):
+                presentes.add(clave)
+    if len(presentes) == 1:
+        return _est.etiqueta(next(iter(presentes)))
+    return "En trámite"
+
+
 def construir_tabla_comparativa(datos_por_mes, orden_meses):
+    col_abiertas = etiqueta_columna_abiertas(datos_por_mes)
     """Arma una tabla (una fila por mes, en orden cronológico) con los
     indicadores clave para comparar el periodo completo de un vistazo."""
     filas = []
@@ -547,9 +573,10 @@ def construir_tabla_comparativa(datos_por_mes, orden_meses):
             "Financiado": financiados,
             "Aprobado": aprobados,
             # Agrupa todo lo que quedó abierto (contrapropuesta, en proceso,
-            # en revisión, pendiente...). El desglose por estatus se ve en la
-            # gráfica de solicitudes por mes.
-            "En trámite": r.get("en_tramite", 0),
+            # en revisión, pendiente...). El encabezado lleva el nombre real
+            # cuando solo hay una categoría abierta en el periodo; ver
+            # etiqueta_columna_abiertas().
+            col_abiertas: r.get("en_tramite", 0),
             "Rechazado": r.get("rechazados", 0),
             "% Financiado": round(financiados / total * 100, 1) if total else 0.0,
             "Monto Total": r.get("monto_total", np.nan),
@@ -595,6 +622,111 @@ def imagen_ajustada(ruta, ancho_cm, alto_max_cm=None):
 
 # --- 6A) Gráficas AGREGADAS del periodo completo (mismas del avance
 #         preliminar, aplicadas al DataFrame combinado de todos los meses) ---
+def tabla_ticket_promedio_vendedor(df_combinado):
+    """Ticket promedio (monto financiado ÷ créditos financiados) por vendedor.
+
+    Se calcula sobre TODO el periodo y no mes a mes a propósito: con pocos
+    créditos financiados al mes por persona, un promedio mensual lo mueve
+    una sola operación y deja de significar algo.
+    """
+    req = {"Nombre del Vendedor", "Categoria", "Monto Total a Financiar"}
+    if not req.issubset(df_combinado.columns):
+        return None
+
+    fin = df_combinado[df_combinado["Categoria"] == "FINANCIADO"]
+    if fin.empty:
+        return None
+
+    tabla = fin.groupby("Nombre del Vendedor")["Monto Total a Financiar"].agg(
+        Financiados="size", Monto="sum")
+    tabla["Ticket"] = (tabla["Monto"] / tabla["Financiados"]).round(0)
+
+    # GAP, pero solo el colocado DENTRO de créditos financiados: ese ya está
+    # efectivamente vendido. El % de GAP sobre todas las solicitudes vive en
+    # la tabla financiera por mes e incluye expedientes que aún pueden caerse,
+    # así que mezclarlos aquí haría ver mejor a quien coloca GAP en
+    # solicitudes que nunca cierran.
+    if "¿Tiene GAP?" in fin.columns:
+        con_gap = fin["¿Tiene GAP?"] == "SI"
+        tabla["GAP"] = con_gap.groupby(fin["Nombre del Vendedor"]).sum()
+        tabla["GAP"] = tabla["GAP"].fillna(0).astype(int)
+        tabla["% GAP"] = (tabla["GAP"] / tabla["Financiados"] * 100).round(0)
+        if "Monto GAP" in fin.columns:
+            montos = fin.loc[con_gap].groupby("Nombre del Vendedor")["Monto GAP"].sum()
+            tabla["Monto GAP"] = montos.reindex(tabla.index).fillna(0)
+
+    return tabla.sort_values("Monto", ascending=False)
+
+
+def tabla_variacion_vendedor(df_combinado, orden_meses):
+    """Quién subió y quién bajó entre el primer y el último mes comparado."""
+    if "Nombre del Vendedor" not in df_combinado.columns or "Mes" not in df_combinado.columns:
+        return None
+    pivote = pd.crosstab(df_combinado["Nombre del Vendedor"], df_combinado["Mes"])
+    meses = [m for m in orden_meses if m in pivote.columns]
+    if len(meses) < 2:
+        return None
+
+    primero, ultimo = meses[0], meses[-1]
+    tabla = pd.DataFrame({
+        "Inicio": pivote[primero],
+        "Fin": pivote[ultimo],
+    })
+    tabla["Variación"] = tabla["Fin"] - tabla["Inicio"]
+    # Partir de cero no es un aumento porcentual medible: se marca así en vez
+    # de mostrar un infinito o un 100% inventado.
+    tabla["% Cambio"] = np.where(
+        tabla["Inicio"] > 0,
+        (tabla["Variación"] / tabla["Inicio"] * 100).round(0),
+        np.nan,
+    )
+    return tabla.sort_values("Variación", ascending=False), primero, ultimo
+
+
+def _recortar_nombre(nombre, maximo=26):
+    """Acorta un nombre largo para que no descuadre la tabla ni la etiqueta.
+
+    Se conserva el primer nombre y se abrevian los apellidos, en vez de
+    cortar a lo bruto: "Luis Valentin Salvidar De La Mora" queda como
+    "Luis Valentin S. D. L. M." y sigue siendo identificable.
+    """
+    if len(nombre) <= maximo:
+        return nombre
+    partes = nombre.split()
+    if len(partes) <= 2:
+        return nombre[:maximo - 1] + "…"
+    resultado = " ".join(partes[:2] + [f"{p[0]}." for p in partes[2:]])
+    return resultado if len(resultado) <= maximo else resultado[:maximo - 1] + "…"
+
+
+def tabla_promedio_vendedor(df_combinado, orden_meses):
+    """Promedio de solicitudes por mes de cada vendedor.
+
+    Devuelve un DataFrame con una columna por mes más Total, Promedio y
+    Variación (último mes contra el primero). El promedio se divide entre
+    TODOS los meses comparados, no solo entre los meses en que el vendedor
+    tuvo actividad: un asesor que no ingresó nada en un mes debe cargar ese
+    cero, porque es justo lo que el reporte busca mostrar.
+    """
+    if "Nombre del Vendedor" not in df_combinado.columns or "Mes" not in df_combinado.columns:
+        return None
+
+    pivote = pd.crosstab(df_combinado["Nombre del Vendedor"], df_combinado["Mes"])
+    meses = [m for m in orden_meses if m in pivote.columns]
+    if not meses:
+        return None
+
+    tabla = pivote[meses].copy()
+    tabla["Total"] = tabla.sum(axis=1)
+    tabla["Promedio"] = (tabla["Total"] / len(meses)).round(1)
+
+    if len(meses) >= 2:
+        primero, ultimo = tabla[meses[0]], tabla[meses[-1]]
+        tabla["Variación"] = ultimo - primero
+
+    return tabla.sort_values("Total", ascending=False)
+
+
 def grafica_vendedores(df, guardar_como=None, titulo="Solicitudes por vendedor"):
     if "Nombre del Vendedor" not in df.columns:
         return None
@@ -1118,6 +1250,11 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     estilo_cuerpo = ParagraphStyle(
         "CuerpoMG", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=10,
         textColor=rl_colors.HexColor(MG_GRIS_OSCURO), leading=15, alignment=TA_JUSTIFY, spaceAfter=6)
+    # Tercer nivel: la sección de vendedores llegó a tener varias
+    # subsecciones y con solo dos niveles se leían todas como iguales.
+    estilo_h3 = ParagraphStyle(
+        "H3MG", parent=styles["Heading3"], fontName=FUENTE_BOLD, fontSize=10.5,
+        textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=8, spaceAfter=4)
     estilo_nota = ParagraphStyle(
         "NotaMG", parent=styles["Normal"], fontSize=8.5,
         textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), leading=11, alignment=TA_LEFT,
@@ -1168,7 +1305,14 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         canvas_obj.drawRightString(ancho - 1.5 * cm, 0.65 * cm, NOMBRE_EMPRESA)
         canvas_obj.restoreState()
 
-    def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1):
+    def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1,
+                        fila_total=False):
+        """fila_total=True destaca el último renglón como resumen de la tabla.
+
+        Mismo criterio que la versión de reporte_base.py: filete rojo arriba,
+        fondo propio y negritas, para que el renglón más consultado no se
+        pierda en el zebrado.
+        """
         encabezado = [Paragraph(str(c), estilo_encabezado_tabla) for c in data[0]]
         data = [encabezado] + data[1:]
         tabla = Table(data, colWidths=col_widths, repeatRows=1)
@@ -1185,7 +1329,8 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
             ("LINEBELOW", (0, 0), (-1, 0), 1.6, rl_colors.HexColor(MG_ROJO)),
             ("LINEBELOW", (0, 1), (-1, max(n_filas - 2, 1)), 0.5, rl_colors.HexColor(GRIS_LINEA)),
             ("BOX", (0, 0), (-1, -1), 0.75, rl_colors.HexColor(GRIS_LINEA)),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor(GRIS_ZEBRA)]),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2 if fila_total else -1),
+             [rl_colors.white, rl_colors.HexColor(GRIS_ZEBRA)]),
             ("TOPPADDING", (0, 0), (-1, 0), 7),
             ("BOTTOMPADDING", (0, 0), (-1, 0), 7),
             ("TOPPADDING", (0, 1), (-1, -1), 5),
@@ -1193,6 +1338,18 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
             ("LEFTPADDING", (0, 0), (-1, -1), 6),
             ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ]
+        if fila_total and n_filas >= 2:
+            f = n_filas - 1
+            estilo += [
+                ("LINEABOVE", (0, f), (-1, f), 1.4, rl_colors.HexColor(MG_ROJO)),
+                ("BACKGROUND", (0, f), (-1, f), rl_colors.HexColor("#EAEEF4")),
+                ("FONTNAME", (0, f), (-1, f), FUENTE_BOLD),
+                ("FONTSIZE", (0, f), (-1, f), 9.0),
+                ("TEXTCOLOR", (0, f), (-1, f), rl_colors.HexColor(INBURSA_AZUL)),
+                ("TOPPADDING", (0, f), (-1, f), 7),
+                ("BOTTOMPADDING", (0, f), (-1, f), 7),
+                ("LINEBELOW", (0, f - 1), (-1, f - 1), 0, rl_colors.white),
+            ]
         tabla.setStyle(TableStyle(estilo))
         return tabla
 
@@ -1282,12 +1439,23 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
 
     if not tabla_comp.empty:
-        encabezados_vol = ["Mes", "Total", "Financiado", "Aprobado", "En<br/>trámite", "Rechazado", "%<br/>Financiado"]
+        # El nombre de la columna de solicitudes abiertas se toma de la propia
+        # tabla, no se escribe a mano: construir_tabla_comparativa() decide si
+        # va el nombre de la categoría (Contrapropuesta) o el genérico
+        # (En trámite) según cuántas categorías abiertas trae el periodo.
+        col_abiertas = etiqueta_columna_abiertas(datos_por_mes)
+        # Los encabezados largos se parten en dos renglones para no ensanchar
+        # la columna; "Contrapropuesta" es de una sola palabra, así que se
+        # corta con guion en vez de dejarla desbordarse.
+        enc_abiertas = (col_abiertas.replace(" ", "<br/>") if " " in col_abiertas
+                        else ("Contra-<br/>propuesta" if col_abiertas == "Contrapropuesta"
+                              else col_abiertas))
+        encabezados_vol = ["Mes", "Total", "Financiado", "Aprobado", enc_abiertas, "Rechazado", "%<br/>Financiado"]
         filas_vol = []
         for mes, fila in tabla_comp.iterrows():
             filas_vol.append([
                 mes, int(fila["Total"]), int(fila["Financiado"]), int(fila["Aprobado"]),
-                int(fila["En trámite"]), int(fila["Rechazado"]), f"{fila['% Financiado']:.1f}%",
+                int(fila[col_abiertas]), int(fila["Rechazado"]), f"{fila['% Financiado']:.1f}%",
             ])
         anchos_vol = [3.0 * cm] + [2.5 * cm] * 6
         elementos.append(tabla_estilo_mg([encabezados_vol] + filas_vol, col_widths=anchos_vol))
@@ -1420,6 +1588,119 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
             elementos.append(Spacer(1, 0.2 * cm))
         if "vendedor_status" in rutas_graficas:
             elementos.append(imagen_ajustada(rutas_graficas["vendedor_status"], ancho_cm=16, alto_max_cm=13))
+
+        # Tabla de promedio mensual por vendedor
+        tabla_prom = tabla_promedio_vendedor(df_combinado, orden_meses)
+        if tabla_prom is not None and not tabla_prom.empty:
+            elementos.append(Spacer(1, 0.3 * cm))
+            elementos.append(Paragraph(
+                f"El promedio se calcula sobre los {len(orden_meses)} meses "
+                f"comparados, no solo sobre los meses con actividad: un mes sin "
+                f"solicitudes cuenta como cero.",
+                estilo_cuerpo
+            ))
+
+            encabezados = ["Vendedor"] + [str(c).title() for c in tabla_prom.columns]
+            filas = [encabezados]
+            for vendedor, fila in tabla_prom.iterrows():
+                celdas = [_recortar_nombre(str(vendedor))]
+                for col in tabla_prom.columns:
+                    valor = fila[col]
+                    if col == "Promedio":
+                        celdas.append(f"{valor:.1f}")
+                    elif col == "Variación":
+                        # El signo es la información: +3 y -3 se leen distinto.
+                        celdas.append(f"{int(valor):+d}" if valor else "0")
+                    else:
+                        celdas.append(str(int(valor)))
+                filas.append(celdas)
+
+            # Fila de totales del equipo
+            totales = ["TOTAL EQUIPO"]
+            for col in tabla_prom.columns:
+                if col == "Promedio":
+                    totales.append(f"{tabla_prom[col].sum():.1f}")
+                elif col == "Variación":
+                    suma = int(tabla_prom[col].sum())
+                    totales.append(f"{suma:+d}" if suma else "0")
+                else:
+                    totales.append(str(int(tabla_prom[col].sum())))
+            filas.append(totales)
+
+            elementos.append(KeepTogether(tabla_estilo_mg(filas, fila_total=True)))
+
+        # --- Quién subió y quién bajó -------------------------------
+        resultado_var = tabla_variacion_vendedor(df_combinado, orden_meses)
+        if resultado_var is not None:
+            tabla_var, mes_ini, mes_fin = resultado_var
+            elementos.append(Spacer(1, 0.35 * cm))
+            elementos.append(Paragraph("Quién subió y quién bajó", estilo_h3))
+            elementos.append(Paragraph(
+                f"Comparación directa entre {str(mes_ini).title()} y "
+                f"{str(mes_fin).title()}, ordenada de mayor aumento a mayor "
+                f"caída. Los meses intermedios no entran en esta lectura.",
+                estilo_cuerpo
+            ))
+            filas_var = [["Vendedor", str(mes_ini).title(), str(mes_fin).title(),
+                          "Variación", "% Cambio"]]
+            for vendedor, fila in tabla_var.iterrows():
+                var = int(fila["Variación"])
+                pct = fila["% Cambio"]
+                filas_var.append([
+                    _recortar_nombre(str(vendedor)),
+                    str(int(fila["Inicio"])),
+                    str(int(fila["Fin"])),
+                    f"{var:+d}" if var else "0",
+                    "—" if pd.isna(pct) else f"{pct:+.0f}%",
+                ])
+            elementos.append(KeepTogether(tabla_estilo_mg(filas_var)))
+
+        # --- Ticket promedio ----------------------------------------
+        tabla_ticket = tabla_ticket_promedio_vendedor(df_combinado)
+        if tabla_ticket is not None and not tabla_ticket.empty:
+            elementos.append(Spacer(1, 0.35 * cm))
+            elementos.append(Paragraph("Ticket promedio y GAP por vendedor", estilo_h3))
+            elementos.append(Paragraph(
+                "El GAP que aquí se cuenta es el colocado dentro de créditos "
+                "ya financiados, es decir el efectivamente vendido.",
+                estilo_cuerpo
+            ))
+            hay_gap = "GAP" in tabla_ticket.columns
+            hay_monto_gap = "Monto GAP" in tabla_ticket.columns
+
+            cab = ["Vendedor", "Créditos", "Monto<br/>financiado", "Ticket<br/>promedio"]
+            if hay_gap:
+                cab += ["Con<br/>GAP", "% GAP"]
+                if hay_monto_gap:
+                    cab.append("Monto<br/>GAP")
+            filas_t = [cab]
+
+            for vendedor, fila in tabla_ticket.iterrows():
+                celdas = [
+                    _recortar_nombre(str(vendedor), maximo=22),
+                    str(int(fila["Financiados"])),
+                    f"${fila['Monto']:,.0f}",
+                    f"${fila['Ticket']:,.0f}",
+                ]
+                if hay_gap:
+                    celdas += [str(int(fila["GAP"])), f"{fila['% GAP']:.0f}%"]
+                    if hay_monto_gap:
+                        celdas.append(f"${fila['Monto GAP']:,.0f}")
+                filas_t.append(celdas)
+
+            n_tot = int(tabla_ticket["Financiados"].sum())
+            m_tot = float(tabla_ticket["Monto"].sum())
+            totales = ["TOTAL EQUIPO", str(n_tot), f"${m_tot:,.0f}",
+                       f"${m_tot / n_tot:,.0f}" if n_tot else "—"]
+            if hay_gap:
+                g_tot = int(tabla_ticket["GAP"].sum())
+                totales += [str(g_tot),
+                            f"{g_tot / n_tot * 100:.0f}%" if n_tot else "—"]
+                if hay_monto_gap:
+                    totales.append(f"${float(tabla_ticket['Monto GAP'].sum()):,.0f}")
+            filas_t.append(totales)
+            elementos.append(KeepTogether(tabla_estilo_mg(filas_t, fila_total=True)))
+
         elementos.append(Spacer(1, 0.4 * cm))
 
     if "modelos" in rutas_graficas:

@@ -8,6 +8,7 @@ import pandas as pd
 
 from . import comparativo_mensual_original as _comparativo
 from .docx_reportes import generar_docx_comparativo
+from .libros_analisis import libro_comparativo
 from .registro import Herramienta
 
 _PDV_DEFECTO = _comparativo.SUBTITULO_EMPRESA
@@ -60,7 +61,17 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
         carpeta_salida=carpeta_salida,
     )
 
-    return [ruta_pdf, ruta_docx]
+    # Libro de análisis: las mismas tablas del reporte pero con fórmulas
+    # vivas, para que quien lo reciba pueda auditarlas o rehacer el corte
+    # por su cuenta sin volver a ejecutar la herramienta.
+    ruta_xlsx = os.path.join(carpeta_salida, f"Comparativo_Datos_{marca}.xlsx")
+    libro_comparativo(
+        df_combinado, orden_meses, ruta_xlsx,
+        "Comparativo Mensual — datos y cálculos",
+        ", ".join(os.path.basename(r) for r in rutas_archivos),
+    )
+
+    return [ruta_pdf, ruta_docx, ruta_xlsx]
 
 
 HERRAMIENTA = Herramienta(

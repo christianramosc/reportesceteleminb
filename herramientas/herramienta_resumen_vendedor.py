@@ -12,6 +12,7 @@ import os
 import zipfile
 
 from . import resumen_vendedor_original as _rv
+from .libros_analisis import libro_mensual
 from .registro import Herramienta
 
 _PDV_DEFECTO = _rv.SUBTITULO_EMPRESA
@@ -87,7 +88,19 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
             zf.write(ruta, arcname=os.path.basename(ruta))
 
     print(f"  Empaquetados {len(rutas_pdf)} PDFs en {nombre_zip}")
-    return [ruta_zip]
+
+    # Libro de análisis: los PDFs por vendedor son de lectura, no de
+    # trabajo. Esto entrega la base para que cualquiera reconstruya los
+    # mismos KPIs con sus propios cortes.
+    ruta_xlsx = os.path.join(
+        carpeta_salida,
+        f"Resumen_Vendedor_Datos_{ctx_mes['nombre_mes']}_{ctx_mes['anio']}.xlsx")
+    libro_mensual(df, ruta_xlsx,
+                  f"Resumen por Vendedor — datos y cálculos "
+                  f"({ctx_mes['nombre_mes'].title()} {ctx_mes['anio']})",
+                  os.path.basename(rutas_archivos[0]))
+
+    return [ruta_zip, ruta_xlsx]
 
 
 HERRAMIENTA = Herramienta(

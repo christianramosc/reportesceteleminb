@@ -6,6 +6,7 @@ from datetime import date
 
 from . import resumen_mensual_original as _resumen
 from .docx_reportes import generar_docx_resumen
+from .libros_analisis import libro_mensual
 from .registro import Herramienta
 
 # Valores originales del script, usados como default si el usuario no
@@ -51,7 +52,14 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
         carpeta_salida=carpeta_salida,
     )
 
-    return [ruta_pdf, ruta_docx]
+    # Libro de análisis: las mismas tablas del reporte pero con fórmulas
+    # vivas, para que quien lo reciba pueda auditarlas o rehacer el corte
+    # por su cuenta sin volver a ejecutar la herramienta.
+    ruta_xlsx = os.path.join(carpeta_salida, "Resumen_Mensual_Datos_{marca}.xlsx".format(marca=marca))
+    libro_mensual(df, ruta_xlsx, "Resumen Mensual — datos y cálculos",
+                  os.path.basename(rutas_archivos[0]))
+
+    return [ruta_pdf, ruta_docx, ruta_xlsx]
 
 
 HERRAMIENTA = Herramienta(

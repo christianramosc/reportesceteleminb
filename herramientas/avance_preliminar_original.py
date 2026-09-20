@@ -33,7 +33,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    HRFlowable, Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    HRFlowable, Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate,
+    Spacer, Table, TableStyle,
 )
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -374,6 +375,19 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
                 f"con {int(top_gap_fin_val)}."
             )
         elementos.append(Paragraph(texto_vend, estilo_cuerpo))
+
+        # Tabla por vendedor. El texto de arriba solo nombra a los que
+        # destacan; esto da el panorama completo, incluido el GAP colocado
+        # en créditos ya financiados.
+        filas_vend, nota_vend, anchos_vend = filas_tabla_vendedor(tabla_vendedor)
+        if filas_vend:
+            elementos.append(Spacer(1, 0.25 * cm))
+            elementos.append(KeepTogether(tabla_estilo_mg(
+                filas_vend, col_widths=[a * cm for a in anchos_vend],
+                fila_total=True,
+            )))
+            if nota_vend:
+                elementos.append(Paragraph(nota_vend, estilo_nota))
     else:
         elementos.append(Paragraph(
             "No se encontró la columna 'Nombre del Vendedor' en el archivo fuente.", estilo_nota

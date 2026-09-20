@@ -183,6 +183,7 @@ _MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
 
 
 __all__ = [
+    "filas_tabla_vendedor", "recortar_nombre",
     "secciones_detalladas",
     "crear_estilos",
     "crear_maquetadores",
@@ -681,6 +682,93 @@ def resumen_general(df):
 # =======================================================================
 # 5) CÁLCULOS — ANÁLISIS POR VENDEDOR
 # =======================================================================
+
+def recortar_nombre(nombre, maximo=22):
+    """Acorta un nombre largo para que no descuadre una tabla.
+
+    Conserva el nombre de pila y abrevia los apellidos, en vez de cortar a
+    lo bruto: "Luis Valentin Salvidar De La Mora" queda como
+    "Luis Valentin S. D. L. M." y sigue siendo identificable.
+    """
+    nombre = str(nombre)
+    if len(nombre) <= maximo:
+        return nombre
+    partes = nombre.split()
+    if len(partes) <= 2:
+        return nombre[:maximo - 1] + "…"
+    resultado = " ".join(partes[:2] + [f"{p[0]}." for p in partes[2:]])
+    return resultado if len(resultado) <= maximo else resultado[:maximo - 1] + "…"
+
+
+def filas_tabla_vendedor(tabla_vendedor):
+    """Arma las filas de la tabla por vendedor para el PDF.
+
+    Vive aquí y no en cada reporte porque el Avance Preliminar y el Resumen
+    Mensual comparten esta maquinaria: una sola definición evita que las dos
+    tablas se vayan separando con el tiempo.
+
+    Las columnas se incluyen solo si existen, porque no todas las bitácoras
+    traen monto ni GAP. El % de GAP se calcula sobre créditos FINANCIADOS
+    —el GAP efectivamente vendido— y no sobre todas las solicitudes.
+    """
+    if tabla_vendedor is None or tabla_vendedor.empty:
+        return None, None, None
+
+    hay_monto = "Monto Financiado ($)" in tabla_vendedor.columns
+    hay_gap = "GAP Financiado" in tabla_vendedor.columns
+
+    # Encabezado y ancho van juntos: repartir 16 cm por igual dejaba las
+    # columnas tan angostas que "Solicitudes" se partía como "Solicitude s".
+    # Cada encabezado lleva su salto de línea explícito y su ancho medido.
+    cabecera = ["Vendedor", "Solicitudes", "Créditos<br/>financiados",
+                "%<br/>Financiado"]
+    anchos = [3.6, 2.2, 2.3, 2.2]
+    if hay_monto:
+        cabecera.append("Monto<br/>financiado")
+        anchos.append(2.7)
+    if hay_gap:
+        cabecera += ["GAP en<br/>financiados", "%<br/>GAP"]
+        anchos += [2.3, 1.4]
+
+    filas = [cabecera]
+    for vendedor, fila in tabla_vendedor.iterrows():
+        financiado = int(fila.get("FINANCIADO", 0))
+        celdas = [
+            recortar_nombre(vendedor),
+            str(int(fila["Total"])),
+            str(financiado),
+            f"{fila.get('% Financiado', 0):.1f}%",
+        ]
+        if hay_monto:
+            celdas.append(f"${fila['Monto Financiado ($)']:,.0f}")
+        if hay_gap:
+            gap_fin = int(fila["GAP Financiado"])
+            celdas.append(str(gap_fin))
+            # Sin créditos financiados el porcentaje no existe: se marca con
+            # una raya en vez de un 0% que se leería como mal desempeño.
+            celdas.append(f"{gap_fin / financiado * 100:.0f}%" if financiado else "—")
+        filas.append(celdas)
+
+    total_sol = int(tabla_vendedor["Total"].sum())
+    total_fin = int(tabla_vendedor["FINANCIADO"].sum()) if "FINANCIADO" in tabla_vendedor else 0
+    totales = ["TOTAL EQUIPO", str(total_sol), str(total_fin),
+               f"{total_fin / total_sol * 100:.1f}%" if total_sol else "—"]
+    if hay_monto:
+        totales.append(f"${tabla_vendedor['Monto Financiado ($)'].sum():,.0f}")
+    if hay_gap:
+        total_gap = int(tabla_vendedor["GAP Financiado"].sum())
+        totales.append(str(total_gap))
+        totales.append(f"{total_gap / total_fin * 100:.0f}%" if total_fin else "—")
+    filas.append(totales)
+
+    nota = ("El % de GAP se calcula sobre créditos FINANCIADOS: es el GAP "
+            "efectivamente vendido." if hay_gap else None)
+
+    # Si sobran columnas, el ancho restante se le da al nombre, que es el que
+    # más lo aprovecha.
+    anchos[0] += max(0.0, 16.0 - sum(anchos))
+    return filas, nota, anchos
+
 
 def analisis_por_vendedor(df):
     if "Nombre del Vendedor" not in df.columns:
@@ -1374,7 +1462,7 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
         canvas_obj.restoreState()
 
     def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1,
-                        compacta=False):
+                        compacta=False, fila_total=False):
         """Tabla 'corporativa moderna': encabezado azul Inbursa, sin líneas
         verticales (solo reglas horizontales finas entre filas), zebrado en
         gris casi blanco y un filete rojo MG bajo el encabezado como único
@@ -1384,6 +1472,11 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
         cuando la tabla tiene muchas columnas (por ejemplo, cuando el mes trae
         muchos estatus distintos) para que los encabezados no se partan a
         media palabra.
+
+        fila_total=True trata el último renglón como el resumen de la tabla:
+        lo separa con un filete rojo, le pone fondo propio, negritas y algo
+        más de aire. Es el renglón que más se consulta y con el zebrado
+        normal se perdía entre los demás.
         """
         # Entre más columnas, más chico el encabezado, para que etiquetas
         # como "Financiado" o "Rechazado" quepan en una sola línea.
@@ -1412,7 +1505,8 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
             ("LINEBELOW", (0, 0), (-1, 0), 1.6, rl_colors.HexColor(MG_ROJO)),
             ("LINEBELOW", (0, 1), (-1, max(n_filas - 2, 1)), 0.5, rl_colors.HexColor(GRIS_LINEA)),
             ("BOX", (0, 0), (-1, -1), 0.75, rl_colors.HexColor(GRIS_LINEA)),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor(GRIS_ZEBRA)]),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2 if fila_total else -1),
+             [rl_colors.white, rl_colors.HexColor(GRIS_ZEBRA)]),
             ("TOPPADDING", (0, 0), (-1, 0), 7),
             ("BOTTOMPADDING", (0, 0), (-1, 0), 7),
             ("TOPPADDING", (0, 1), (-1, -1), 5),
@@ -1420,6 +1514,22 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
             ("LEFTPADDING", (0, 0), (-1, -1), 2 if compacta else 6),
             ("RIGHTPADDING", (0, 0), (-1, -1), 2 if compacta else 6),
         ]
+        if fila_total and n_filas >= 2:
+            f = n_filas - 1
+            estilo += [
+                # Filete rojo arriba: separa el resumen del detalle con el
+                # mismo acento que va bajo el encabezado, para que la tabla
+                # quede "cerrada" por los dos extremos.
+                ("LINEABOVE", (0, f), (-1, f), 1.4, rl_colors.HexColor(MG_ROJO)),
+                ("BACKGROUND", (0, f), (-1, f), rl_colors.HexColor("#EAEEF4")),
+                ("FONTNAME", (0, f), (-1, f), FUENTE_BOLD),
+                ("FONTSIZE", (0, f), (-1, f), 7.4 if compacta else 9.0),
+                ("TEXTCOLOR", (0, f), (-1, f), rl_colors.HexColor(INBURSA_AZUL)),
+                ("TOPPADDING", (0, f), (-1, f), 7),
+                ("BOTTOMPADDING", (0, f), (-1, f), 7),
+                ("LINEBELOW", (0, f - 1), (-1, f - 1), 0, rl_colors.white),
+            ]
+
         tabla.setStyle(TableStyle(estilo))
         return tabla
 
