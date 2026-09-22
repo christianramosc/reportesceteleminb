@@ -62,6 +62,14 @@ MIN_CASOS_GRUPO = 5
 # Cambio mínimo, en solicitudes, para decir que un vendedor "subió" o "bajó".
 MIN_CAMBIO_VENDEDOR = 3
 
+# Meta de GAP: porcentaje mínimo de solicitudes y de créditos financiados que
+# deben llevarlo. Si la política cambia, se cambia aquí y nada más.
+# Alcanzar exactamente la meta cuenta como cumplir.
+META_GAP = 50.0
+
+# Rojo MG, solo para la etiqueta de "Alerta de GAP".
+_ROJO_LLAMADO = "#E4002B"
+
 COL_VEND = "Nombre del Vendedor"
 COL_CAT = "Categoria"
 COL_MONTO = "Monto Total a Financiar"
@@ -576,6 +584,99 @@ def lectura_y_conclusiones_comparativo(tabla_comp, orden_meses, df_combinado):
 
 
 # ========================================================== por vendedor
+def _faltan_para_meta(logrado, total):
+    """Cuántos GAP más hacían falta para llegar a la meta."""
+    import math
+    return max(0, math.ceil(total * META_GAP / 100) - logrado)
+
+
+def _mensaje_gap_meta(mio, n, fin):
+    """Un solo mensaje de GAP por vendedor, según la meta de cumplimiento.
+
+    Niveles, del más severo al más leve (se usa el más severo que aplique):
+      1. Alerta de GAP: 0% de GAP en solicitudes, o menos de la meta
+         en créditos financiados.
+      2. Oportunidad en GAP: entre 1% y la meta en solicitudes, con los
+         financiados en regla o sin financiados todavía.
+      3. Meta de GAP cumplida.
+
+    Redacción asertiva: el hecho, la meta, cuánto faltó en número concreto y
+    —solo en el llamado— qué se espera. La acción depende del caso: no es lo
+    mismo no ofrecer GAP que ofrecerlo y perderlo antes de dispersar.
+
+    No se exige un mínimo de casos, a diferencia de las comparaciones del
+    resto del reporte: esto es una meta de cumplimiento, no una estadística,
+    y un crédito sin GAP es una venta perdida. Por eso cada mensaje lleva el
+    conteo ("0 de 1") para que se lea como el hecho que es.
+    """
+    g_sol = int((mio[COL_GAP] == "SI").sum())
+    p_sol = _pct(g_sol, n) or 0.0
+    fin_df = mio[mio[COL_CAT] == "FINANCIADO"]
+    g_fin = int((fin_df[COL_GAP] == "SI").sum())
+    p_fin = _pct(g_fin, fin) if fin else None
+    meta = f"{META_GAP:.0f}%"
+
+    llamado = f"<font color='{_ROJO_LLAMADO}'><b>Alerta de GAP:</b></font>"
+
+    def _faltaron(k):
+        return f"te {'faltó' if k == 1 else 'faltaron'} {k} para cumplirla"
+
+    falla_sol_cero = g_sol == 0
+    falla_fin = p_fin is not None and p_fin < META_GAP
+
+    # ---- 1. Alerta de GAP
+    if falla_sol_cero and falla_fin:
+        return (f"{llamado} ninguna de tus {_n(n, 'solicitud')} lleva GAP, y tampoco "
+                f"{'tu crédito financiado' if fin == 1 else f'tus {fin} créditos financiados'}. "
+                f"La meta es al menos {meta}: {_faltaron(_faltan_para_meta(0, n))} en "
+                f"solicitudes. Para el próximo mes, ofrécelo en cada solicitud desde la "
+                f"primera cotización y confírmalo antes de formalizar.")
+
+    if falla_sol_cero:
+        return (f"{llamado} ninguna de tus {_n(n, 'solicitud')} lleva GAP. La meta es "
+                f"al menos {meta}: {_faltaron(_faltan_para_meta(0, n))}. Para el "
+                f"próximo mes, ofrécelo en cada solicitud desde la primera cotización.")
+
+    if falla_fin:
+        if fin == 1:
+            hecho = "tu único crédito financiado salió sin GAP (0 de 1)"
+        elif g_fin == 0:
+            hecho = f"ninguno de tus {fin} créditos financiados lleva GAP"
+        else:
+            hecho = (f"solo {g_fin} de tus {fin} créditos financiados "
+                     f"{'lleva' if g_fin == 1 else 'llevan'} GAP ({p_fin:.0f}%)")
+        texto = f"{llamado} {hecho}, por debajo de la meta de {meta}."
+        if p_sol >= META_GAP:
+            # Lo ofrece, pero se pierde en el camino: la acción es cuidar
+            # que el GAP llegue hasta la dispersión, no ofrecerlo más.
+            texto += (f" En solicitudes sí la superas ({g_sol} de {n}): el GAP se "
+                      f"está perdiendo entre la solicitud y la dispersión. Confírmalo "
+                      f"antes de formalizar cada crédito.")
+        else:
+            texto += (f" En solicitudes también estás por debajo ({g_sol} de {n}, "
+                      f"{p_sol:.0f}%). Ofrécelo desde la cotización y confírmalo antes "
+                      f"de formalizar cada crédito.")
+        return texto
+
+    # ---- 2. Oportunidad en GAP (nota suave, sin instrucción)
+    if p_sol < META_GAP:
+        texto = (f"<b>Oportunidad en GAP:</b> {g_sol} de tus "
+                 f"{_n(n, 'solicitud')} {'lleva' if g_sol == 1 else 'llevan'} GAP "
+                 f"({p_sol:.0f}%); la meta es {meta} y "
+                 f"{_faltaron(_faltan_para_meta(g_sol, n))}.")
+        if fin:
+            texto += f" En tus créditos financiados sí la alcanzas ({g_fin} de {fin})."
+        return texto
+
+    # ---- 3. Cumple
+    if fin:
+        return (f"<b>Meta de GAP cumplida:</b> {g_sol} de {_n(n, 'solicitud')} "
+                f"({p_sol:.0f}%) y {g_fin} de "
+                f"{_n(fin, 'crédito financiado', 'créditos financiados')} ({p_fin:.0f}%).")
+    return (f"<b>Meta de GAP cumplida:</b> {g_sol} de {_n(n, 'solicitud')} "
+            f"({p_sol:.0f}%). Aún no tienes créditos financiados para medirla ahí.")
+
+
 def conclusiones_vendedor(df, vendedor):
     """Conclusiones del reporte individual.
 
@@ -631,52 +732,18 @@ def conclusiones_vendedor(df, vendedor):
             f"<b>Pendientes:</b> {'te queda' if n_ab == 1 else 'te quedan'} "
             f"{_n(n_ab, 'solicitud')} sin dispersar ({detalle}).")
 
-    # --- GAP vendido
-    # La página 1 del reporte individual muestra el GAP sobre TODAS las
-    # solicitudes. Si ahí sale alto y aquí el GAP vendido sale bajo, leídas
-    # por separado parecen contradecirse ("35 puntos arriba del equipo" y
-    # luego "0 de 1"). Cuando pasa, la conclusión une las dos cifras, porque
-    # esa es la lectura: se ofrece GAP en solicitudes que no se financian.
+    # --- GAP: meta de cumplimiento (ver _mensaje_gap_meta)
     if COL_GAP in df.columns:
-        g_ofrecido = int((mio[COL_GAP] == "SI").sum())
-        p_ofrecido = _pct(g_ofrecido, n) or 0.0
-        p_ofrecido_eq = _pct(int((df[COL_GAP] == "SI").sum()), total_eq) or 0.0
-        ofrece_mas = (n >= MIN_SOLICITUDES_TASA
-                      and p_ofrecido - p_ofrecido_eq >= UMBRAL_CONTRASTE)
-
-        if fin == 0:
-            texto = ("<b>GAP:</b> ninguna de tus solicitudes se financió este mes, así "
-                     "que no hay GAP efectivamente vendido")
-            if ofrece_mas:
-                texto += (f", aunque lo ofreciste en {g_ofrecido} de {n} ({p_ofrecido:.0f}%), "
-                          f"más que el equipo ({p_ofrecido_eq:.0f}%)")
-            conclusiones.append(texto + ".")
+        if _es_nombre_de_persona(vendedor):
+            gap = _mensaje_gap_meta(mio, n, fin)
         else:
-            g = int((mio[mio[COL_CAT] == "FINANCIADO"][COL_GAP] == "SI").sum())
-            fin_eq_df = df[df[COL_CAT] == "FINANCIADO"]
-            g_eq = _pct(int((fin_eq_df[COL_GAP] == "SI").sum()), len(fin_eq_df)) or 0.0
-            p = _pct(g, fin)
-            vendidos = (f"{g} de {_n(fin, 'crédito financiado', 'créditos financiados')}"
-                        f" ({p:.0f}%)")
-            if ofrece_mas and p_ofrecido - p >= 20:
-                if g == 0:
-                    vendido = ("tu único crédito financiado no lo lleva" if fin == 1 else
-                               f"ninguno de tus {fin} créditos financiados lo lleva")
-                else:
-                    vendido = (f"solo {g} de tus {fin} créditos financiados "
-                               f"{'lo lleva' if g == 1 else 'lo llevan'} ({p:.0f}%)")
-                conclusiones.append(
-                    f"<b>GAP:</b> lo ofreciste en {g_ofrecido} de tus {n} solicitudes "
-                    f"({p_ofrecido:.0f}%, más que el equipo), pero {vendido}. El GAP que "
-                    f"colocas se está quedando en solicitudes que no se financian.")
-            else:
-                if fin < 2:
-                    comp = f"el equipo, {g_eq:.0f}%"
-                elif abs(p - g_eq) < UMBRAL_PUNTOS:
-                    comp = f"en línea con el equipo ({g_eq:.0f}%)"
-                else:
-                    comp = f"{'arriba' if p > g_eq else 'abajo'} del equipo ({g_eq:.0f}%)"
-                conclusiones.append(f"<b>GAP:</b> colocaste GAP en {vendidos}; {comp}.")
+            # Capturas genéricas ("Casa"): no reciben llamado, porque no hay
+            # a quién dirigirlo. Se deja solo el dato.
+            g = int((mio[COL_GAP] == "SI").sum())
+            gap = (f"<b>GAP:</b> {g} de {_n(n, 'solicitud')} con GAP "
+                   f"({_pct(g, n):.0f}%).")
+        # Primera viñeta: es el indicador que más importa a la operación.
+        conclusiones.insert(0, gap)
 
     # --- Rechazo: solo si es claramente mayor que el del equipo.
     rech_eq = _pct(int((df[COL_CAT] == "RECHAZADO").sum()), total_eq) or 0.0

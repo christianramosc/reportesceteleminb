@@ -144,3 +144,77 @@ def test_individual_con_pocas_solicitudes_advierte():
                    [("Beto Diaz Mora", "RECHAZADO", "NO", 1)] * 8)
     texto = _sin_etiquetas(" ".join(C.conclusiones_vendedor(df, "Ana Lopez Ruiz")))
     assert "no es una comparación justa" in texto
+
+
+# ------------------------------------------------------ meta de GAP (50%)
+def _limpio(t):
+    return re.sub(r"<[^>]+>", "", t)
+
+
+def _mensaje_gap(filas_vendedor, vendedor="Ana Lopez Ruiz"):
+    """filas_vendedor: (categoria, gap). Se agrega un compañero para que el
+    equipo tenga más de una persona."""
+    filas = [(vendedor, cat, gap, 1) for cat, gap in filas_vendedor]
+    filas += [("Beto Diaz Mora", "FINANCIADO", "SI", 1)] * 3
+    return _limpio(C.conclusiones_vendedor(_bitacora(filas), vendedor)[0])
+
+
+def test_gap_va_primero_y_es_un_solo_mensaje():
+    filas = [("Ana Lopez Ruiz", "FINANCIADO", "NO", 1)] * 3 + \
+            [("Beto Diaz Mora", "FINANCIADO", "SI", 1)] * 3
+    concl = [_limpio(c) for c in C.conclusiones_vendedor(_bitacora(filas), "Ana Lopez Ruiz")]
+    assert "GAP" in concl[0]
+    assert sum("GAP" in c for c in concl) == 1
+
+
+def test_cero_gap_en_solicitudes_es_alerta_con_faltante():
+    msg = _mensaje_gap([("RECHAZADO", "NO")] * 4)
+    assert msg.startswith("Alerta de GAP")
+    assert "te faltaron 2" in msg
+
+
+def test_ofrece_gap_pero_lo_pierde_en_financiados():
+    msg = _mensaje_gap([("FINANCIADO", "NO")] + [("RECHAZADO", "SI")] * 5)
+    assert msg.startswith("Alerta de GAP")
+    assert "0 de 1" in msg and "entre la solicitud y la dispersión" in msg
+
+
+def test_financiados_bajo_meta_con_varios_creditos():
+    msg = _mensaje_gap([("FINANCIADO", "SI")] + [("FINANCIADO", "NO")] * 2)
+    assert msg.startswith("Alerta de GAP")
+    assert "solo 1 de tus 3 créditos financiados lleva GAP (33%)" in msg
+
+
+def test_incumple_las_dos_condiciones_en_un_solo_mensaje():
+    msg = _mensaje_gap([("FINANCIADO", "NO")] * 2 + [("RECHAZADO", "NO")] * 2)
+    assert msg.startswith("Alerta de GAP")
+    assert "tampoco" in msg
+
+
+def test_por_debajo_de_la_meta_es_nota_suave():
+    msg = _mensaje_gap([("RECHAZADO", "SI")] + [("RECHAZADO", "NO")] * 3)
+    assert msg.startswith("Oportunidad en GAP")
+    assert "Alerta" not in msg and "te faltó 1" in msg
+
+
+def test_exactamente_la_meta_cumple():
+    msg = _mensaje_gap([("FINANCIADO", "SI"), ("FINANCIADO", "NO")])
+    assert msg.startswith("Meta de GAP cumplida")
+
+
+def test_cumple_sin_financiados_lo_dice():
+    msg = _mensaje_gap([("RECHAZADO", "SI"), ("APROBADO", "NO")])
+    assert "Aún no tienes créditos financiados" in msg
+
+
+def test_captura_generica_no_recibe_alerta():
+    filas = [("Casa", "FINANCIADO", "NO", 1)] + [("Beto Diaz Mora", "FINANCIADO", "SI", 1)] * 3
+    msg = _limpio(C.conclusiones_vendedor(_bitacora(filas), "Casa")[0])
+    assert "Alerta" not in msg and "meta" not in msg
+
+
+def test_la_meta_es_un_solo_parametro(monkeypatch):
+    """Si la política cambia a 60%, con mover META_GAP basta."""
+    monkeypatch.setattr(C, "META_GAP", 60.0)
+    msg = _mensaje_gap([("FINANCIADO", "SI"), ("FINANCIADO", "NO")])   # 50%
+    assert msg.startswith("Alerta de GAP") and "60%" in msg
