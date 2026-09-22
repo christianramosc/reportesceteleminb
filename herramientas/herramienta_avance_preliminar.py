@@ -42,10 +42,20 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
     # El PDF deja aquí sus flowables y el Word se construye con ESOS mismos
     # elementos, para que ambos documentos digan exactamente lo mismo.
     elementos_pdf = []
+    # El nombre de la hoja ("JULIO 2026") es la única pista del mes al que
+    # pertenecen los datos. Se usa para advertir si la fecha de corte cae en
+    # otro mes: sin esto, correr el avance sobre un mes ya cerrado afirmaba
+    # "quedan 10 días para el cierre".
+    try:
+        import pandas as _pd
+        hoja = _pd.ExcelFile(rutas_archivos[0]).sheet_names[0]
+    except Exception:
+        hoja = None
+
     _avance.generar_reporte_pdf_avance(
         df, resumen, tabla_vendedor, tabla_categoria,
         nombre_archivo=ruta_pdf, fecha_corte=fecha_corte,
-        recolectar_elementos=elementos_pdf,
+        recolectar_elementos=elementos_pdf, hoja=hoja,
     )
 
     ruta_docx = generar_docx_avance(

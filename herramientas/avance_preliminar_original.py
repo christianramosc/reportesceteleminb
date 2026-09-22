@@ -15,10 +15,14 @@ try:
     from .reporte_base import *          # noqa: F401,F403  (ver __all__ allí)
     from . import estatus as _est
     from . import reporte_base as _base
+    from . import conclusiones as _conclusiones
+    from . import pdf_util as _pdf_util
 except ImportError:                       # ejecución suelta (Colab)
     from reporte_base import *            # noqa: F401,F403
     import estatus as _est
     import reporte_base as _base
+    import conclusiones as _conclusiones
+    import pdf_util as _pdf_util
 
 import datetime
 import os
@@ -50,7 +54,7 @@ NOMBRE_ANALISTA = "Christian Ramos"
 
 def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
                                 nombre_archivo=None, fecha_corte=None,
-                                recolectar_elementos=None):
+                                recolectar_elementos=None, hoja=None):
     """
     Arma el reporte de AVANCE PRELIMINAR: portada con KPIs y el contexto
     del corte dentro del mes, resumen ejecutivo redactado, reporte
@@ -161,13 +165,28 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     elementos.append(Spacer(1, 0.12 * cm))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(GRIS_LINEA),
                                  spaceBefore=6, spaceAfter=10, hAlign="LEFT"))
-    elementos.append(Paragraph(
-        f"Corte: <b>{FECHA_REPORTE}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
-        f"Día {ctx['dia_actual']} de {ctx['dias_en_mes']} de {ctx['nombre_mes']} "
-        f"&nbsp;&nbsp;|&nbsp;&nbsp; "
-        f"<font color='{MG_ROJO}'><b>{ctx['pct_transcurrido']:.0f}% del mes transcurrido</b></font>",
-        estilo_meta_portada
-    ))
+    # ¿La fecha de corte cae en el mismo mes que los datos? Se decide una sola
+    # vez y lo respetan la portada, la introducción y los focos. Antes solo
+    # los focos lo sabían, y la portada seguía diciendo "quedan 9 días para
+    # el cierre de septiembre" sobre datos de julio.
+    _mes_datos = _conclusiones.mes_desde_hoja(hoja)
+    corte_coherente = not (_mes_datos and _mes_datos != ctx["fecha_corte"].month)
+
+    if corte_coherente:
+        elementos.append(Paragraph(
+            f"Corte: <b>{FECHA_REPORTE}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"Día {ctx['dia_actual']} de {ctx['dias_en_mes']} de {ctx['nombre_mes']} "
+            f"&nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"<font color='{MG_ROJO}'><b>{ctx['pct_transcurrido']:.0f}% del mes transcurrido</b></font>",
+            estilo_meta_portada
+        ))
+    else:
+        elementos.append(Paragraph(
+            f"Corte: <b>{FECHA_REPORTE}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"<font color='{MG_ROJO}'><b>La fecha de corte no corresponde al mes "
+            f"de los datos</b></font>",
+            estilo_meta_portada
+        ))
     elementos.append(Spacer(1, 0.5 * cm))
 
     # Las categorías se enumeran a partir de las que REALMENTE trae la
@@ -186,7 +205,7 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
         f"para el cierre de {ctx['nombre_mes']}, así que las solicitudes en "
         f"<b>{_est.frase_enumerada(_abiertas_presentes, y='y')}</b> "
         f"aún pueden convertirse en FINANCIADAS. "
-        if _abiertas_presentes else ""
+        if _abiertas_presentes and corte_coherente else ""
     )
     intro_portada = Table(
         [[Paragraph(
@@ -404,12 +423,17 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
 
 
 
-    if resumen.get("incompletas"):
-        elementos.append(Paragraph(
-            f"<b>Nota de calidad de datos:</b> {resumen['incompletas']} solicitudes tienen datos incompletos "
-            f"(marca, vehículo o monto sin capturar), lo cual puede afectar la precisión de algunos análisis.",
-            estilo_nota
-        ))
+    # --- Focos de atención ---
+    # En un avance, esto es lo más importante del documento: qué se puede
+    # rescatar antes del cierre y a quién hay que seguir. Si la fecha de
+    # corte no corresponde al mes de los datos, el primer foco lo advierte.
+    focos, conclusiones = _conclusiones.focos_y_conclusiones_mensual(
+        df, "avance", resumen=resumen, ctx=ctx, hoja=hoja)
+    if focos:
+        elementos.append(Paragraph("Focos de atención", estilo_h2))
+        for nota in focos:
+            elementos.append(Paragraph("•  " + nota, estilo_cuerpo))
+        elementos.append(Spacer(1, 0.2 * cm))
 
     elementos.append(PageBreak())
     # === FIN RESUMEN EJECUTIVO — continúa el Reporte Detallado abajo ===
@@ -441,72 +465,8 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     elementos.append(Paragraph("Conclusiones y Factores Importantes (a la fecha)", estilo_h1))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
 
-    conclusiones = []
-    conclusiones.append(
-        f"<b>Corte preliminar:</b> este avance corresponde al día {ctx['dia_actual']} de "
-        f"{ctx['dias_en_mes']} de {ctx['nombre_mes']} ({ctx['pct_transcurrido']:.0f}% del mes "
-        f"transcurrido); {'queda' if ctx['dias_restantes'] == 1 else 'quedan'} "
-        f"{ctx['dias_restantes']} día{'s' if ctx['dias_restantes'] != 1 else ''} para el cierre, en "
-        f"los que las solicitudes en "
-        f"{_est.frase_enumerada(_abiertas_presentes, y='y', mayusculas=True)} "
-        f"todavía pueden convertirse en FINANCIADAS."
-        if _abiertas_presentes else
-        f"<b>Corte preliminar:</b> este avance corresponde al día {ctx['dia_actual']} de "
-        f"{ctx['dias_en_mes']} de {ctx['nombre_mes']} ({ctx['pct_transcurrido']:.0f}% del mes "
-        f"transcurrido)."
-    )
-    if tiene_categoria and total:
-        tasa_financiamiento = financiados / total * 100
-        conclusiones.append(
-            f"<b>Avance de cierre a la fecha:</b> {financiados} de {total} solicitudes ({tasa_financiamiento:.1f}%) "
-            f"se han convertido en crédito FINANCIADO hasta el corte. "
-            f"{aprobados} solicitudes adicionales ({pct(aprobados):.1f}%) están APROBADAS y representan "
-            f"negocio a punto de cerrarse si se les da seguimiento oportuno a su dispersión antes de fin de mes."
-        )
-        if en_tramite:
-            _cats_tramite = [c for c in _abiertas_presentes if c != "APROBADO"]
-            conclusiones.append(
-                f"<b>Solicitudes aún abiertas:</b> {en_tramite} solicitudes "
-                f"({pct(en_tramite):.1f}%) siguen en "
-                f"{_est.frase_enumerada(_cats_tramite, y='o', mayusculas=True)}; son las que "
-                f"requieren seguimiento en los días que restan para que no se caigan al cierre."
-            )
-    if top_solicitudes_nombres:
-        conclusiones.append(
-            f"<b>Carga de trabajo por vendedor:</b> {_nombres_y(top_solicitudes_nombres)} "
-            f"{'concentran' if len(top_solicitudes_nombres) > 1 else 'concentra'} el mayor número de "
-            f"solicitudes generadas ({int(top_solicitudes_val)}); conviene validar si esto se traduce "
-            f"proporcionalmente en créditos financiados o si requiere apoyo adicional para cerrar más negocio."
-        )
-    if top_financiado_nombres:
-        conclusiones.append(
-            f"<b>Mejor conversión a financiado:</b> {_nombres_y(top_financiado_nombres)} "
-            f"{'lideran' if len(top_financiado_nombres) > 1 else 'lidera'} en créditos efectivamente "
-            f"FINANCIADOS ({int(top_financiado_val)}); conviene identificar qué "
-            f"{'están' if len(top_financiado_nombres) > 1 else 'está'} haciendo bien "
-            f"para replicarlo en el resto del equipo."
-        )
-    if top_gap_fin_nombres:
-        conclusiones.append(
-            f"<b>Venta cruzada de GAP:</b> {_nombres_y(top_gap_fin_nombres)} "
-            f"{'destacan' if len(top_gap_fin_nombres) > 1 else 'destaca'} colocando GAP en créditos ya "
-            f"financiados ({int(top_gap_fin_val)}); reforzar esta práctica con el resto del equipo "
-            f"incrementaría los ingresos por venta cruzada sin necesidad de más solicitudes."
-        )
+    # `conclusiones` ya se calculó arriba junto con los focos.
 
-    if resumen.get("incompletas"):
-        conclusiones.append(
-            f"<b>Calidad de datos:</b> {resumen['incompletas']} solicitudes tienen datos incompletos "
-            f"(marca, vehículo o monto sin capturar); se recomienda completarlos en la fuente para que "
-            f"los próximos reportes reflejen el 100% de la información."
-        )
-
-    if not conclusiones:
-        conclusiones.append(
-            "No se generaron conclusiones automáticas adicionales: revisa que el archivo fuente "
-            "incluya las columnas ESTATUS, Nombre del Vendedor y Monto Total a Financiar para un "
-            "análisis más completo."
-        )
 
     for c in conclusiones:
         elementos.append(Paragraph("•  " + c, estilo_cuerpo))
@@ -524,6 +484,9 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     # contenido, en vez de volver a redactarlo por su cuenta.
     # Se copia ANTES de doc.build() porque ReportLab va vaciando la lista
     # que recibe conforme la maqueta.
+    # Sin esto, un Spacer que no cabe al final de una página genera una
+    # hoja en blanco antes del siguiente salto. Ver pdf_util.py.
+    elementos[:] = _pdf_util.quitar_espacios_antes_de_salto(elementos)
     if recolectar_elementos is not None:
         try:
             from . import flowables_a_docx as _fd

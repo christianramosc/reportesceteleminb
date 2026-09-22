@@ -15,10 +15,14 @@ try:
     from .reporte_base import *          # noqa: F401,F403  (ver __all__ allí)
     from . import estatus as _est
     from . import reporte_base as _base
+    from . import conclusiones as _conclusiones
+    from . import pdf_util as _pdf_util
 except ImportError:                       # ejecución suelta (Colab)
     from reporte_base import *            # noqa: F401,F403
     import estatus as _est
     import reporte_base as _base
+    import conclusiones as _conclusiones
+    import pdf_util as _pdf_util
 
 import datetime
 import os
@@ -368,45 +372,18 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
         ))
         elementos.append(Spacer(1, 0.2 * cm))
 
-    # --- Focos de atención (comparativo RECHAZADO vs FINANCIADO) ---
-    notas_atencion = []
-    if tabla_categoria is not None and "RECHAZADO" in tabla_categoria.index:
-        rech = tabla_categoria.loc["RECHAZADO"]
-        referencia = "FINANCIADO" if "FINANCIADO" in tabla_categoria.index else (
-            "APROBADO" if "APROBADO" in tabla_categoria.index else None)
-        if referencia:
-            comp = tabla_categoria.loc[referencia]
-            if "% Enganche prom." in tabla_categoria.columns and pd.notna(rech.get("% Enganche prom.")) and pd.notna(comp.get("% Enganche prom.")):
-                if rech["% Enganche prom."] < comp["% Enganche prom."] - 3:
-                    notas_atencion.append(
-                        f"Las solicitudes RECHAZADAS piden en promedio un enganche menor "
-                        f"({rech['% Enganche prom.']:.1f}%) que las {referencia} ({comp['% Enganche prom.']:.1f}%), "
-                        f"lo que sugiere que un enganche insuficiente podría estar asociado al rechazo."
-                    )
-            if "Monto Total a Financiar" in tabla_categoria.columns and pd.notna(rech.get("Monto Total a Financiar")) and pd.notna(comp.get("Monto Total a Financiar")):
-                if rech["Monto Total a Financiar"] > comp["Monto Total a Financiar"] * 1.15:
-                    notas_atencion.append(
-                        f"El monto promedio a financiar en solicitudes RECHAZADAS (${rech['Monto Total a Financiar']:,.2f}) "
-                        f"es notablemente mayor al de las {referencia} (${comp['Monto Total a Financiar']:,.2f})."
-                    )
-            if "% con GAP" in tabla_categoria.columns and pd.notna(rech.get("% con GAP")) and pd.notna(comp.get("% con GAP")):
-                if rech["% con GAP"] < comp["% con GAP"] - 5:
-                    notas_atencion.append(
-                        f"Las solicitudes RECHAZADAS llevan GAP con menor frecuencia ({rech['% con GAP']:.1f}%) "
-                        f"que las {referencia} ({comp['% con GAP']:.1f}%)."
-                    )
-    if notas_atencion:
+    # --- Focos de atención ---
+    # Lo que pide una acción va aquí, arriba, porque es lo primero que alguien
+    # con poco tiempo debe leer. Los criterios (umbrales, tamaños mínimos de
+    # muestra) viven en herramientas/conclusiones.py y son los mismos para los
+    # cuatro reportes. Nada de esto se repite en las conclusiones del final.
+    focos, conclusiones = _conclusiones.focos_y_conclusiones_mensual(
+        df, "cierre", resumen=resumen)
+    if focos:
         elementos.append(Paragraph("Focos de atención", estilo_h2))
-        for nota in notas_atencion:
+        for nota in focos:
             elementos.append(Paragraph("•  " + nota, estilo_cuerpo))
         elementos.append(Spacer(1, 0.2 * cm))
-
-    if resumen.get("incompletas"):
-        elementos.append(Paragraph(
-            f"<b>Nota de calidad de datos:</b> {resumen['incompletas']} solicitudes tienen datos incompletos "
-            f"(marca, vehículo o monto sin capturar), lo cual puede afectar la precisión de algunos análisis.",
-            estilo_nota
-        ))
 
     elementos.append(PageBreak())
     # === FIN RESUMEN EJECUTIVO — continúa el Reporte Detallado abajo ===
@@ -438,52 +415,8 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     elementos.append(Paragraph("Conclusiones y Factores Importantes", estilo_h1))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
 
-    conclusiones = []
-    if tiene_categoria and total:
-        tasa_financiamiento = financiados / total * 100
-        conclusiones.append(
-            f"<b>Tasa de cierre efectivo:</b> {financiados} de {total} solicitudes ({tasa_financiamiento:.1f}%) "
-            f"se convirtieron en crédito FINANCIADO en el periodo. "
-            f"{aprobados} solicitudes adicionales ({pct(aprobados):.1f}%) están APROBADAS y representan "
-            f"negocio a punto de cerrarse si se les da seguimiento oportuno a su dispersión."
-        )
-    if top_solicitudes_nombres:
-        conclusiones.append(
-            f"<b>Carga de trabajo por vendedor:</b> {_nombres_y(top_solicitudes_nombres)} "
-            f"{'concentran' if len(top_solicitudes_nombres) > 1 else 'concentra'} el mayor número de "
-            f"solicitudes generadas ({int(top_solicitudes_val)}); conviene validar si esto se traduce "
-            f"proporcionalmente en créditos financiados o si requiere apoyo adicional para cerrar más negocio."
-        )
-    if top_financiado_nombres:
-        conclusiones.append(
-            f"<b>Mejor conversión a financiado:</b> {_nombres_y(top_financiado_nombres)} "
-            f"{'lideran' if len(top_financiado_nombres) > 1 else 'lidera'} en créditos efectivamente "
-            f"FINANCIADOS ({int(top_financiado_val)}); conviene identificar qué "
-            f"{'están' if len(top_financiado_nombres) > 1 else 'está'} haciendo bien "
-            f"para replicarlo en el resto del equipo."
-        )
-    if top_gap_fin_nombres:
-        conclusiones.append(
-            f"<b>Venta cruzada de GAP:</b> {_nombres_y(top_gap_fin_nombres)} "
-            f"{'destacan' if len(top_gap_fin_nombres) > 1 else 'destaca'} colocando GAP en créditos ya "
-            f"financiados ({int(top_gap_fin_val)}); reforzar esta práctica con el resto del equipo "
-            f"incrementaría los ingresos por venta cruzada sin necesidad de más solicitudes."
-        )
-    for nota in notas_atencion:
-        conclusiones.append(f"<b>Foco de atención:</b> {nota}")
-    if resumen.get("incompletas"):
-        conclusiones.append(
-            f"<b>Calidad de datos:</b> {resumen['incompletas']} solicitudes tienen datos incompletos "
-            f"(marca, vehículo o monto sin capturar); se recomienda completarlos en la fuente para que "
-            f"los próximos reportes reflejen el 100% de la información."
-        )
+    # `conclusiones` ya se calculó arriba junto con los focos.
 
-    if not conclusiones:
-        conclusiones.append(
-            "No se generaron conclusiones automáticas adicionales: revisa que el archivo fuente "
-            "incluya las columnas ESTATUS, Nombre del Vendedor y Monto Total a Financiar para un "
-            "análisis más completo."
-        )
 
     for c in conclusiones:
         elementos.append(Paragraph("•  " + c, estilo_cuerpo))
@@ -501,6 +434,9 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     # contenido, en vez de volver a redactarlo por su cuenta.
     # Se copia ANTES de doc.build() porque ReportLab va vaciando la lista
     # que recibe conforme la maqueta.
+    # Sin esto, un Spacer que no cabe al final de una página genera una
+    # hoja en blanco antes del siguiente salto. Ver pdf_util.py.
+    elementos[:] = _pdf_util.quitar_espacios_antes_de_salto(elementos)
     if recolectar_elementos is not None:
         try:
             from . import flowables_a_docx as _fd

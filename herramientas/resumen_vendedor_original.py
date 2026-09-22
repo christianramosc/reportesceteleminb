@@ -59,6 +59,13 @@ import matplotlib.ticker as mticker
 from matplotlib.colors import LinearSegmentedColormap, to_rgb
 
 try:
+    from . import conclusiones as _conclusiones
+    from . import pdf_util as _pdf_util
+except ImportError:  # ejecución suelta (Colab)
+    import conclusiones as _conclusiones
+    import pdf_util as _pdf_util
+
+try:
     from google.colab import files  # noqa
     EN_COLAB = True
 except ImportError:
@@ -500,7 +507,15 @@ def resumen_equipo(df, tabla_vendedor):
         if "FINANCIADO" in tabla_vendedor.columns:
             r["promedio_financiado_por_vendedor"] = tabla_vendedor["FINANCIADO"].mean()
         if "% Financiado" in tabla_vendedor.columns:
-            r["promedio_pct_financiado"] = tabla_vendedor["% Financiado"].mean()
+            # Conversión DEL EQUIPO = financiados del equipo / solicitudes del
+            # equipo. Antes se promediaban las tasas de cada vendedor sin
+            # ponderar, y alguien con 1 de 1 (100%) inflaba el "promedio" muy
+            # por encima de la conversión real (28.2% contra 23.1% en julio),
+            # haciendo que todos se vieran peor comparados contra él. Además
+            # no cuadraba con el 23.1% que muestran los demás reportes.
+            _fin_eq = int(tabla_vendedor["FINANCIADO"].sum()) if "FINANCIADO" in tabla_vendedor else 0
+            _tot_eq = int(tabla_vendedor["Total"].sum())
+            r["promedio_pct_financiado"] = _fin_eq / _tot_eq * 100 if _tot_eq else 0.0
         if "% con GAP" in tabla_vendedor.columns:
             r["promedio_pct_gap"] = tabla_vendedor["% con GAP"].mean()
 
@@ -542,7 +557,9 @@ def _rango(serie, vendedor, ascending=False):
 def analisis_individual(df_total, vendedor, tabla_vendedor, resumen_eq):
     df_v = df_total[df_total["Nombre del Vendedor"] == vendedor].copy()
     total_v = len(df_v)
-    r = {"vendedor": vendedor, "df": df_v, "total": total_v}
+    # df_equipo viaja con el resultado para que las conclusiones comparen
+    # contra el equipo completo sin tener que cambiar la firma del PDF.
+    r = {"vendedor": vendedor, "df": df_v, "df_equipo": df_total, "total": total_v}
 
     if "Categoria" in df_v.columns:
         conteo = df_v["Categoria"].value_counts()
@@ -1337,44 +1354,13 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     elementos.append(Paragraph("Conclusiones y Factores Importantes", estilo_h1))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
 
-    conclusiones = []
-    conclusiones.append(
-        f"<b>Cierre del mes:</b> Este resumen corresponde al mes completo de {MES_TITULO}, "
-        f"con {total_v} solicitud{'es' if total_v != 1 else ''} gestionada{'s' if total_v != 1 else ''} "
-        f"y una conversión a FINANCIADO de {resumen_v.get('pct_financiado', 0):.1f}%."
-    )
-    if "promedio_pct_financiado" in resumen_eq and "pct_financiado" in resumen_v:
-        diferencia = resumen_v["pct_financiado"] - resumen_eq["promedio_pct_financiado"]
-        if diferencia >= 0:
-            conclusiones.append(
-                f"<b>Fortaleza:</b> Tu tasa de conversión está {diferencia:.1f} puntos por arriba del "
-                f"promedio del equipo — vale la pena identificar qué estás haciendo bien para "
-                f"mantenerlo el próximo mes."
-            )
-        else:
-            conclusiones.append(
-                f"<b>Área de oportunidad:</b> Tu tasa de conversión está {abs(diferencia):.1f} puntos por "
-                f"debajo del promedio del equipo; conviene revisar en qué etapa se están cayendo tus "
-                f"solicitudes APROBADAS o en CONTRAPROPUESTA."
-            )
-    if "pct_gap" in resumen_v and "pct_gap_equipo" in resumen_eq:
-        if resumen_v["pct_gap"] < resumen_eq["pct_gap_equipo"]:
-            conclusiones.append(
-                f"<b>Venta cruzada de GAP:</b> Tu colocación de GAP ({resumen_v['pct_gap']:.1f}%) está por "
-                f"debajo del promedio del equipo ({resumen_eq['pct_gap_equipo']:.1f}%); reforzar su "
-                f"oferta en cada solicitud puede incrementar tus ingresos por venta cruzada."
-            )
-        else:
-            conclusiones.append(
-                f"<b>Venta cruzada de GAP:</b> Tu colocación de GAP ({resumen_v['pct_gap']:.1f}%) está por "
-                f"arriba del promedio del equipo ({resumen_eq['pct_gap_equipo']:.1f}%), buen trabajo."
-            )
-    if rechazado:
-        conclusiones.append(
-            f"<b>Solicitudes rechazadas:</b> Tuviste {rechazado} solicitud{'es' if rechazado != 1 else ''} "
-            f"RECHAZADA{'S' if rechazado != 1 else ''} en el mes; revisar el motivo de rechazo puede "
-            f"ayudar a mejorar la calidad de las próximas solicitudes."
-        )
+    # Criterios compartidos con los demás reportes (herramientas/conclusiones.py):
+    # se compara contra la conversión REAL del equipo, el GAP que se mide es
+    # el colocado en créditos financiados, y con pocas solicitudes se dice
+    # explícitamente que la comparación todavía no es justa.
+    conclusiones = _conclusiones.conclusiones_vendedor(resumen_v["df_equipo"], vendedor)
+    if not conclusiones:
+        conclusiones = ["No hay datos suficientes para una lectura automática de este mes."]
 
     for c in conclusiones:
         elementos.append(Paragraph("•  " + c, estilo_cuerpo))
@@ -1389,6 +1375,9 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
         title=f"Resumen Mensual {vendedor} — {MES_TITULO}",
         author=NOMBRE_EMPRESA, subject="Resumen mensual de desempeño individual",
     )
+    # Sin esto, un Spacer que no cabe al final de una página genera una
+    # hoja en blanco antes del siguiente salto. Ver pdf_util.py.
+    elementos[:] = _pdf_util.quitar_espacios_antes_de_salto(elementos)
     doc.build(elementos, onFirstPage=encabezado_pie_pagina, onLaterPages=encabezado_pie_pagina)
     return nombre_archivo
 

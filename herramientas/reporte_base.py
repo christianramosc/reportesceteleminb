@@ -168,8 +168,10 @@ FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
 # =======================================================================
 try:
     from . import estatus as _est
+    from . import metricas as _metricas
 except ImportError:  # ejecución suelta (Colab, o el .py fuera del paquete)
     import estatus as _est
+    import metricas as _metricas
 
 ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
 COLOR_CATEGORIA = _est.COLOR_CATEGORIA
@@ -1221,39 +1223,41 @@ def grafica_gap_por_vendedor_y_status(df, guardar_como=None):
     return guardar_como
 
 def grafica_gap_financiado_por_vendedor(df, guardar_como=None):
-    """Barras horizontales: solicitudes FINANCIADAS con GAP por vendedor,
-    con felicitación a todos los que tengan la máxima colocación (maneja empates)."""
-    if not {"Nombre del Vendedor", "Categoria", "¿Tiene GAP?"}.issubset(df.columns):
-        print("Las columnas 'Nombre del Vendedor', 'Categoria' o '¿Tiene GAP?' no están presentes.")
+    """Barras horizontales: créditos financiados con GAP por vendedor.
+
+    Cada barra dice "3 de 5 financiados (60%)". Antes llevaba
+    "¡Felicidades, <nombre>!" para quien tuviera el máximo, lo que además de
+    informal premiaba empates en 1 y ocultaba con cuántos créditos se logró.
+    El cálculo vive en metricas.py y lo comparte el comparativo.
+    """
+    datos = _metricas.gap_en_financiados_por_vendedor(df)
+    if datos.empty:
         return None
 
-    df_fin_gap = df[(df["Categoria"] == "FINANCIADO") & (df["¿Tiene GAP?"] == "SI")].copy()
-    if df_fin_gap.empty:
-        print("No hay solicitudes FINANCIADAS con GAP para graficar.")
-        return None
+    fig, ax = plt.subplots(figsize=(8, max(4, len(datos) * 0.5)))
+    # Color por valor, no por posición: los empates se ven iguales.
+    rangos, n_valores = _metricas.rango_de_valor(datos)
+    paleta = list(reversed(_gradiente(n_valores)))
+    ax.barh(datos.index, datos["con_gap"], color=[paleta[r] for r in rangos],
+            edgecolor="white")
 
-    conteo = df_fin_gap["Nombre del Vendedor"].value_counts().sort_values(ascending=True)
+    # Cada barra lleva el dato que permite juzgarla, no una felicitación.
+    tope = datos["con_gap"].max()
+    for i, (_, fila) in enumerate(datos.iterrows()):
+        ax.text(fila["con_gap"] + tope * 0.02, i,
+                _metricas.etiqueta_gap(fila["con_gap"], fila["financiados"], fila["pct"]),
+                va="center", fontsize=9, color=MG_GRIS_OSCURO)
 
-    fig, ax = plt.subplots(figsize=(8, max(4, len(conteo) * 0.5)))
-    colores = list(reversed(_gradiente(len(conteo))))
-
-    if not conteo.empty:
-        max_gap = conteo.max()
-        vendedores_top = conteo[conteo == max_gap].index.tolist()
-
-        ax.barh(conteo.index, conteo.values, color=colores, edgecolor="white")
-        for i, (vendedor, valor) in enumerate(conteo.items()):
-            ax.text(valor + max(conteo.values) * 0.01, i, str(valor), va="center", fontsize=9)
-            if vendedor in vendedores_top and max_gap > 0:
-                ax.text(valor + max(conteo.values) * 0.05, i,
-                        f"¡Felicidades, {vendedor}!", va="center", fontsize=9,
-                        color=MG_ROJO_OSCURO, fontweight="bold")
-
+    # Espacio a la derecha para la etiqueta, que es más larga que un número.
+    ax.set_xlim(0, tope * 2.1)
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+    ax.set_xlabel("Créditos financiados con GAP")
     ax.set_title("GAP en créditos financiados, por vendedor")
-    ax.set_xlabel("Solicitudes FINANCIADAS con GAP")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
-    plt.show()
+    # plt.close y no plt.show: en el servidor no hay pantalla, y show() sin
+    # cerrar dejaba la figura viva en memoria en cada corrida.
+    plt.close(fig)
     return guardar_como
 
 def generar_todas_las_graficas(df):

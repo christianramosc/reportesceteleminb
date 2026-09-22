@@ -14,6 +14,7 @@ aquí cada número es una fórmula que se puede abrir y auditar.
 
 from openpyxl.utils import get_column_letter
 
+from . import folios as _folios
 from .exportador_excel import (FMT_ENTERO, FMT_MONEDA, FMT_PORCENTAJE,
                                LibroAnalisis)
 
@@ -25,6 +26,17 @@ COL_VEHICULO = "Vehículo"
 COL_MES = "Mes"
 COL_GAP = "¿Tiene GAP?"
 COL_MONTO_GAP = "Monto GAP"
+
+
+def _filtro_periodo(libro):
+    """Criterio extra para contar cada folio una sola vez.
+
+    Solo existe en el libro del comparativo, donde la hoja Datos trae la
+    columna "Cuenta en periodo" (SI/NO, ver folios.py). En los libros de un
+    solo mes no hay cruces que filtrar y el criterio queda vacío.
+    """
+    r = libro.rango("Cuenta en periodo")
+    return f',{r},"SI"' if r else ""
 
 
 def _valores(df, columna):
@@ -67,27 +79,28 @@ def _hoja_vendedores(libro, df, categorias):
     c_total = L["Solicitudes"]
     c_fin = L[ "Financiado".title() ] if "FINANCIADO" in categorias else None
 
+    fp = _filtro_periodo(libro)
     vendedores = _valores(df, COL_VENDEDOR)
     filas = []
     for i, vendedor in enumerate(vendedores):
         f = 4 + i
-        fila = [vendedor, f'=COUNTIFS({r_vend},$A{f})']
+        fila = [vendedor, f'=COUNTIFS({r_vend},$A{f}{fp})']
         for cat in categorias:
-            fila.append(f'=COUNTIFS({r_vend},$A{f},{r_cat},"{cat}")')
+            fila.append(f'=COUNTIFS({r_vend},$A{f},{r_cat},"{cat}"{fp})')
         # Denominador protegido: un vendedor puede quedar sin solicitudes.
         fila.append(f'=IF({c_total}{f}=0,"",{c_fin}{f}/{c_total}{f})'
                     if c_fin else "")
         if hay_monto:
-            fila.append(f'=SUMIFS({r_monto},{r_vend},$A{f},{r_cat},"FINANCIADO")')
+            fila.append(f'=SUMIFS({r_monto},{r_vend},$A{f},{r_cat},"FINANCIADO"{fp})')
             # Sin créditos financiados el ticket queda en blanco, no en cero:
             # un $0 se lee como "vendió barato" cuando no vendió.
             fila.append(f'=IF({c_fin}{f}=0,"",{L["Monto financiado"]}{f}/{c_fin}{f})'
                         if c_fin else "")
         if hay_gap:
-            fila.append(f'=COUNTIFS({r_vend},$A{f},{r_gap},"SI")')
+            fila.append(f'=COUNTIFS({r_vend},$A{f},{r_gap},"SI"{fp})')
             fila.append(f'=IF({c_total}{f}=0,"",{L["Con GAP"]}{f}/{c_total}{f})')
             fila.append(
-                f'=COUNTIFS({r_vend},$A{f},{r_gap},"SI",{r_cat},"FINANCIADO")'
+                f'=COUNTIFS({r_vend},$A{f},{r_gap},"SI",{r_cat},"FINANCIADO"{fp})'
                 if c_fin else "")
             # El GAP dentro de FINANCIADOS es el que ya está efectivamente
             # vendido; el % general incluye solicitudes que aún pueden caerse.
@@ -95,7 +108,7 @@ def _hoja_vendedores(libro, df, categorias):
                 f'=IF({c_fin}{f}=0,"",{L["GAP en financiados"]}{f}/{c_fin}{f})'
                 if c_fin else "")
             if r_monto_gap:
-                fila.append(f'=SUMIFS({r_monto_gap},{r_vend},$A{f},{r_gap},"SI")')
+                fila.append(f'=SUMIFS({r_monto_gap},{r_vend},$A{f},{r_gap},"SI"{fp})')
         filas.append(fila)
 
     ultima = 3 + len(vendedores)
@@ -190,6 +203,7 @@ def _hoja_modelos(libro, df):
         return
     r_veh = libro.rango(COL_VEHICULO)
     r_monto = libro.rango(COL_MONTO)
+    fp = _filtro_periodo(libro)
     modelos = _valores(df, COL_VEHICULO)
 
     encabezados = ["Vehículo", "Solicitudes"]
@@ -200,11 +214,11 @@ def _hoja_modelos(libro, df):
         f = 4 + i
         # El nombre va en la celda y la fórmula la referencia, para que
         # cambiar el texto del modelo reetiquete el renglón completo.
-        fila = [modelo, f'=COUNTIFS({r_veh},$A{f})']
+        fila = [modelo, f'=COUNTIFS({r_veh},$A{f}{fp})']
         if r_monto:
             r_cat = libro.rango(COL_CATEGORIA)
-            fila.append(f'=SUMIFS({r_monto},{r_veh},$A{f},{r_cat},"FINANCIADO")'
-                        if r_cat else f'=SUMIFS({r_monto},{r_veh},$A{f})')
+            fila.append(f'=SUMIFS({r_monto},{r_veh},$A{f},{r_cat},"FINANCIADO"{fp})'
+                        if r_cat else f'=SUMIFS({r_monto},{r_veh},$A{f}{fp})')
         filas.append(fila)
 
     ultima = 3 + len(modelos)
@@ -238,8 +252,14 @@ def libro_comparativo(df_combinado, orden_meses, ruta, titulo, fuente_datos):
         titulo, fuente_datos,
         notas=["La columna Mes de la hoja Datos es la que separa los "
                "periodos; todas las tablas por mes filtran por ella."])
-    libro.agregar_datos(df_combinado,
-                        descripcion="Los meses comparados, apilados y con columna Mes")
+    # Todas las filas originales, más "Mes de captura" y "Cuenta en periodo".
+    # No se borra nada: las hojas por vendedor filtran con esas columnas, y
+    # quien audite ve exactamente qué filas quedaron fuera y por qué.
+    df_datos = _folios.anotar(df_combinado, orden_meses)
+    _, res_folios = _folios.consolidar(df_combinado, orden_meses)
+    libro.agregar_datos(df_datos,
+                        descripcion="Los meses comparados, apilados, con mes de captura "
+                                    "y marca de folio único")
 
     r_mes = libro.rango(COL_MES)
     r_cat = libro.rango(COL_CATEGORIA)
@@ -277,7 +297,11 @@ def libro_comparativo(df_combinado, orden_meses, ruta, titulo, fuente_datos):
             formatos[4 + len(categorias)] = FMT_MONEDA
 
         ultima = 3 + len(orden_meses)
-        total = ["TOTAL", f"=SUM(B4:B{ultima})"]
+        # Si hay folios en más de un mes, este renglón suma bitácoras, no
+        # solicitudes únicas: se nombra así para que no choque con el total
+        # del periodo del PDF.
+        hay_cruces = not res_folios["cruces"].empty
+        total = ["SUMA DE LOS MESES" if hay_cruces else "TOTAL", f"=SUM(B4:B{ultima})"]
         for k in range(len(categorias)):
             letra = chr(ord("C") + k)
             total.append(f"=SUM({letra}4:{letra}{ultima})")
@@ -294,9 +318,19 @@ def libro_comparativo(df_combinado, orden_meses, ruta, titulo, fuente_datos):
             "Resumen por mes", encabezados, filas,
             descripcion="Comparativo por mes — equivale a la tabla del resumen ejecutivo",
             formatos=formatos, fila_total=total,
+            nota=(f"Cada renglón es la bitácora de ese mes tal cual. La suma incluye "
+                  f"{len(res_folios['cruces'])} folio(s) que aparecen en dos meses; las "
+                  f"solicitudes únicas del periodo son {res_folios['folios']}. Ver "
+                  f"'Folios entre meses'.") if hay_cruces else None,
         )
 
     # ---- Vendedor por mes, con promedio y variación ----
+    # Cuenta capturas: cada folio una vez, en el mes en que se capturó. Por
+    # eso sus totales por mes pueden diferir de la hoja "Resumen por mes",
+    # que es la foto de cada bitácora; la hoja "Folios entre meses" lista
+    # exactamente qué folios explican la diferencia.
+    r_mes_vend = libro.rango("Mes de captura") or r_mes
+    fp = _filtro_periodo(libro)
     if r_mes and r_vend:
         vendedores = _valores(df_combinado, COL_VENDEDOR)
         meses = [str(m).title() for m in orden_meses]
@@ -309,7 +343,7 @@ def libro_comparativo(df_combinado, orden_meses, ruta, titulo, fuente_datos):
             f = 4 + i
             fila = [vendedor]
             for k, mes in enumerate(orden_meses):
-                fila.append(f'=COUNTIFS({r_vend},$A{f},{r_mes},"{mes}")')
+                fila.append(f'=COUNTIFS({r_vend},$A{f},{r_mes_vend},"{mes}"{fp})')
             primera = "B"
             ultima_mes = chr(ord("B") + len(meses) - 1)
             fila.append(f'=SUM({primera}{f}:{ultima_mes}{f})')
@@ -352,6 +386,23 @@ def libro_comparativo(df_combinado, orden_meses, ruta, titulo, fuente_datos):
                   "blanco cuando el primer mes fue cero."),
         )
 
-    _hoja_vendedores(libro, df_combinado, categorias)
-    _hoja_modelos(libro, df_combinado)
+    _hoja_vendedores(libro, df_datos, categorias)
+    _hoja_modelos(libro, df_datos)
+
+    cruces = res_folios["cruces"]
+    if not cruces.empty:
+        filas = [[str(r["Folio"]), r["Vendedor"], str(r["Mes de captura"]).title(),
+                  str(r["Estatus al capturar"]), str(r["Mes del último estatus"]).title(),
+                  str(r["Último estatus"]), ", ".join(r["Cambios"]) or "—"]
+                 for _, r in cruces.iterrows()]
+        libro.agregar_tabla(
+            "Folios entre meses",
+            ["Folio", "Vendedor", "Mes de captura", "Estatus al capturar",
+             "Mes del último estatus", "Último estatus", "Campos que cambiaron"],
+            filas,
+            descripcion="Folios que aparecen en la bitácora de más de un mes",
+            nota=("En Datos, la aparición anterior de cada uno de estos folios "
+                  "lleva 'Cuenta en periodo' = NO. Por eso las hojas por vendedor "
+                  "suman menos solicitudes que 'Resumen por mes'."),
+        )
     return libro.guardar(ruta)

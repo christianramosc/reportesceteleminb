@@ -71,7 +71,7 @@ from reportlab.lib import colors as rl_colors
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image,
-    PageBreak, HRFlowable, KeepTogether
+    PageBreak, HRFlowable, KeepTogether, CondPageBreak
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
@@ -157,8 +157,16 @@ FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
 # =======================================================================
 try:
     from . import estatus as _est
+    from . import conclusiones as _conclusiones
+    from . import pdf_util as _pdf_util
+    from . import folios as _folios
+    from . import metricas as _metricas
 except ImportError:  # ejecución suelta (Colab, o el .py fuera del paquete)
     import estatus as _est
+    import conclusiones as _conclusiones
+    import pdf_util as _pdf_util
+    import folios as _folios
+    import metricas as _metricas
 
 ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
 COLOR_CATEGORIA = _est.COLOR_CATEGORIA
@@ -841,24 +849,30 @@ def grafica_gap_por_vendedor_total(df, guardar_como=None, titulo="Cobertura de G
 
 
 def grafica_gap_financiado_por_vendedor(df, guardar_como=None, titulo="GAP en créditos financiados, por vendedor"):
-    if not {"Nombre del Vendedor", "Categoria", "¿Tiene GAP?"}.issubset(df.columns):
+    """Misma gráfica y mismo cálculo que en reporte_base.py (ver metricas.py)."""
+    datos = _metricas.gap_en_financiados_por_vendedor(df)
+    if datos.empty:
         return None
-    df_fin_gap = df[(df["Categoria"] == "FINANCIADO") & (df["¿Tiene GAP?"] == "SI")].copy()
-    if df_fin_gap.empty:
-        return None
-    conteo = df_fin_gap["Nombre del Vendedor"].value_counts().sort_values(ascending=True)
-    fig, ax = plt.subplots(figsize=(8, max(4, len(conteo) * 0.5)))
-    colores = list(reversed(_gradiente(len(conteo))))
-    max_gap = conteo.max()
-    vendedores_top = conteo[conteo == max_gap].index.tolist()
-    ax.barh(conteo.index, conteo.values, color=colores, edgecolor="white")
-    for i, (vendedor, valor) in enumerate(conteo.items()):
-        ax.text(valor + max(conteo.values) * 0.01, i, str(valor), va="center", fontsize=9)
-        if vendedor in vendedores_top and max_gap > 0:
-            ax.text(valor + max(conteo.values) * 0.05, i, f"¡Felicidades, {vendedor}!",
-                     va="center", fontsize=9, color=MG_ROJO_OSCURO, fontweight="bold")
+
+    fig, ax = plt.subplots(figsize=(8, max(4, len(datos) * 0.5)))
+    # Color por valor, no por posición: los empates se ven iguales.
+    rangos, n_valores = _metricas.rango_de_valor(datos)
+    paleta = list(reversed(_gradiente(n_valores)))
+    ax.barh(datos.index, datos["con_gap"], color=[paleta[r] for r in rangos],
+            edgecolor="white")
+
+    # Cada barra lleva el dato que permite juzgarla, no una felicitación.
+    tope = datos["con_gap"].max()
+    for i, (_, fila) in enumerate(datos.iterrows()):
+        ax.text(fila["con_gap"] + tope * 0.02, i,
+                _metricas.etiqueta_gap(fila["con_gap"], fila["financiados"], fila["pct"]),
+                va="center", fontsize=9, color=MG_GRIS_OSCURO)
+
+    # Espacio a la derecha para la etiqueta, que es más larga que un número.
+    ax.set_xlim(0, tope * 2.1)
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+    ax.set_xlabel("Créditos financiados con GAP")
     ax.set_title(titulo)
-    ax.set_xlabel("Solicitudes FINANCIADAS con GAP")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
@@ -1026,6 +1040,10 @@ def grafica_comp_gap_vs_gap_financiado(tabla_comp, guardar_como=None):
 
 
 def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado):
+    # Vendedores y modelos cuentan cada folio una vez (ver folios.py). Las
+    # gráficas por mes no usan df_combinado, así que siguen siendo la foto
+    # de cada bitácora.
+    df_combinado, _ = _folios.consolidar(df_combinado, orden_meses)
     print("=" * 72)
     print(" GENERANDO GRÁFICAS PARA EL REPORTE COMPARATIVO")
     print("=" * 72)
@@ -1073,139 +1091,11 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
 # =======================================================================
 # 7) INSIGHTS AUTOMÁTICOS
 # =======================================================================
-def generar_insights_automaticos(tabla_comp, orden_meses, datos_por_mes, df_combinado):
-    insights = []
-    n_meses = len(orden_meses)
-    meses_fmt = [m.title() for m in orden_meses]
-
-    if n_meses == 1:
-        insights.append(
-            f"<b>Un solo mes cargado:</b> este reporte solo incluye {meses_fmt[0]}, por lo que "
-            f"no hay todavía una tendencia mes a mes que comparar. Sube uno o más meses "
-            f"adicionales para ver la evolución del volumen, la conversión y el GAP en el tiempo."
-        )
-
-    if n_meses >= 2 and "Total" in tabla_comp.columns:
-        totales = tabla_comp["Total"]
-        mes_max_total = totales.idxmax()
-        mes_min_total = totales.idxmin()
-        if mes_max_total == mes_min_total:
-            insights.append(
-                f"<b>Volumen de solicitudes:</b> los {n_meses} meses comparados tuvieron el mismo "
-                f"número de solicitudes registradas ({int(totales.max())})."
-            )
-        else:
-            insights.append(
-                f"<b>Volumen de solicitudes:</b> {mes_max_total} fue el mes con más solicitudes "
-                f"registradas ({int(totales.max())}), mientras que {mes_min_total} tuvo el menor "
-                f"volumen ({int(totales.min())})."
-            )
-        primero, ultimo = totales.iloc[0], totales.iloc[-1]
-        if primero > 0:
-            cambio = (ultimo - primero) / primero * 100
-            if abs(cambio) < 1:
-                insights.append(
-                    f"<b>Tendencia del periodo:</b> del primer mes comparado ({meses_fmt[0]}) al "
-                    f"último ({meses_fmt[-1]}), el volumen de solicitudes se mantuvo estable."
-                )
-            else:
-                direccion = "creció" if cambio > 0 else "cayó"
-                insights.append(
-                    f"<b>Tendencia del periodo:</b> del primer mes comparado ({meses_fmt[0]}) al "
-                    f"último ({meses_fmt[-1]}), el volumen de solicitudes {direccion} "
-                    f"{abs(cambio):.0f}%."
-                )
-
-    if n_meses >= 1 and "% Financiado" in tabla_comp.columns:
-        conv = tabla_comp["% Financiado"]
-        mes_mejor_conv = conv.idxmax()
-        insights.append(
-            f"<b>Mejor conversión a FINANCIADO:</b> {mes_mejor_conv} tuvo la tasa de conversión "
-            f"más alta del periodo, con {conv.max():.1f}% de sus solicitudes convertidas en "
-            f"crédito FINANCIADO."
-        )
-        if n_meses >= 2:
-            mes_peor_conv = conv.idxmin()
-            if mes_peor_conv != mes_mejor_conv:
-                insights.append(
-                    f"En contraste, {mes_peor_conv} registró la conversión más baja "
-                    f"({conv.min():.1f}%); conviene revisar si se debió al seguimiento de "
-                    f"solicitudes APROBADAS/CONTRAPROPUESTA o por menor calidad de las "
-                    f"solicitudes entrantes ese mes."
-                )
-
-    if "% GAP" in tabla_comp.columns and tabla_comp["% GAP"].notna().any():
-        gap = tabla_comp["% GAP"].dropna()
-        if not gap.empty:
-            mes_mejor_gap = gap.idxmax()
-            insights.append(
-                f"<b>Venta cruzada de GAP:</b> {mes_mejor_gap} tuvo la mayor proporción de "
-                f"solicitudes con GAP colocado, con {gap.max():.1f}%."
-            )
-            if n_meses >= 2:
-                mes_peor_gap = gap.idxmin()
-                if mes_peor_gap != mes_mejor_gap:
-                    insights.append(
-                        f"{mes_peor_gap} fue el mes con menor colocación de GAP ({gap.min():.1f}%); "
-                        f"reforzar esta venta cruzada ahí podría representar ingresos adicionales "
-                        f"sin necesidad de más solicitudes."
-                    )
-
-    if "% GAP Financiado" in tabla_comp.columns and tabla_comp["% GAP Financiado"].notna().any():
-        gap_fin = tabla_comp["% GAP Financiado"].dropna()
-        if not gap_fin.empty:
-            mes_mejor_gap_fin = gap_fin.idxmax()
-            insights.append(
-                f"<b>GAP dentro de créditos FINANCIADOS:</b> {mes_mejor_gap_fin} tuvo la mayor "
-                f"proporción de créditos ya FINANCIADOS con GAP colocado, con "
-                f"{gap_fin.max():.1f}% — el indicador más relevante, porque ese GAP ya está "
-                f"efectivamente vendido."
-            )
-            if "% GAP" in tabla_comp.columns:
-                brecha = (tabla_comp["% GAP"] - tabla_comp["% GAP Financiado"]).dropna()
-                if not brecha.empty:
-                    mes_mayor_brecha = brecha.idxmax()
-                    if brecha.loc[mes_mayor_brecha] > 5:
-                        insights.append(
-                            f"En {mes_mayor_brecha}, el % de GAP general ({tabla_comp.loc[mes_mayor_brecha, '% GAP']:.1f}%) "
-                            f"superó por {brecha.loc[mes_mayor_brecha]:.0f} puntos al % de GAP dentro de "
-                            f"FINANCIADOS ({tabla_comp.loc[mes_mayor_brecha, '% GAP Financiado']:.1f}%); es decir, "
-                            f"parte del GAP colocado ese mes fue en solicitudes que no llegaron a dispersarse."
-                        )
-
-    if "Nombre del Vendedor" in df_combinado.columns:
-        top_vend = df_combinado["Nombre del Vendedor"].value_counts()
-        if not top_vend.empty:
-            nombres_top, val_top = _quienes_maximo(top_vend)
-            insights.append(
-                f"<b>Vendedor con más actividad en el periodo:</b> {_nombres_y(nombres_top)} "
-                f"{'concentran' if len(nombres_top) > 1 else 'concentra'} el mayor número de "
-                f"solicitudes generadas en total ({int(val_top)}), sumando todos los meses comparados."
-            )
-        if "Categoria" in df_combinado.columns:
-            top_fin = (df_combinado[df_combinado["Categoria"] == "FINANCIADO"]
-                       .groupby("Nombre del Vendedor").size())
-            nombres_fin, val_fin = _quienes_maximo(top_fin)
-            if nombres_fin:
-                insights.append(
-                    f"<b>Mejor conversión acumulada:</b> {_nombres_y(nombres_fin)} "
-                    f"{'lideran' if len(nombres_fin) > 1 else 'lidera'} en créditos FINANCIADOS "
-                    f"a lo largo del periodo, con {int(val_fin)}."
-                )
-
-    if "Monto Financiado" in tabla_comp.columns and tabla_comp["Monto Financiado"].notna().any():
-        monto_total_periodo = tabla_comp["Monto Financiado"].fillna(0).sum()
-        insights.append(
-            f"<b>Monto financiado acumulado:</b> en el periodo comparado se dispersaron "
-            f"${monto_total_periodo:,.2f} en créditos FINANCIADOS."
-        )
-
-    if not insights:
-        insights.append(
-            "No se generaron insights automáticos adicionales: revisa que los archivos fuente "
-            "incluyan las columnas STATUS, Nombre del Vendedor y Monto Total a Financiar."
-        )
-    return insights
+# La redacción de "Lectura del periodo" y de "Conclusiones" vive ahora en
+# herramientas/conclusiones.py, compartida con los otros tres reportes para
+# que todos apliquen los mismos umbrales. Ver el docstring de ese módulo para
+# los criterios; antes esta función producía una sola lista que se imprimía
+# idéntica en las dos secciones.
 
 
 # =======================================================================
@@ -1225,7 +1115,8 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     print("=" * 72)
 
     rutas_graficas = generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado)
-    insights = generar_insights_automaticos(tabla_comp, orden_meses, datos_por_mes, df_combinado)
+    lectura, conclusiones_fin = _conclusiones.lectura_y_conclusiones_comparativo(
+        tabla_comp, orden_meses, df_combinado)
 
     # --- Estilos (idénticos al avance preliminar) ---
     styles = getSampleStyleSheet()
@@ -1372,12 +1263,22 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         ]))
         return t
 
+    # --- Folios que cruzan de mes ---
+    # De aquí en adelante df_combinado tiene una fila por folio (su último
+    # estatus, en su mes de captura). Todo lo "del periodo" y "por vendedor"
+    # sale de ahí; lo "por mes" sigue saliendo de tabla_comp. Ver folios.py.
+    df_combinado, _res_folios = _folios.consolidar(df_combinado, orden_meses)
+
     # --- Datos clave para portada/KPIs ---
-    total_periodo = int(tabla_comp["Total"].sum()) if "Total" in tabla_comp.columns else len(df_combinado)
-    financiado_periodo = int(tabla_comp["Financiado"].sum()) if "Financiado" in tabla_comp.columns else 0
+    # Por folio único. Antes el total sumaba las filas de cada mes (81 en
+    # junio–agosto, contando dos veces 3 solicitudes) y la conversión era el
+    # promedio simple de las tasas mensuales, sin ponderar por volumen.
+    total_periodo = len(df_combinado)
+    financiado_periodo = (int((df_combinado["Categoria"] == "FINANCIADO").sum())
+                          if "Categoria" in df_combinado.columns else 0)
     n_meses = len(orden_meses)
     n_vendedores = int(df_combinado["Nombre del Vendedor"].nunique()) if "Nombre del Vendedor" in df_combinado.columns else 0
-    conv_prom = tabla_comp["% Financiado"].mean() if "% Financiado" in tabla_comp.columns and not tabla_comp.empty else 0
+    conv_prom = financiado_periodo / total_periodo * 100 if total_periodo else 0
 
     elementos = []
 
@@ -1425,7 +1326,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     fila_kpis = [
         tarjeta_kpi(total_periodo, "Total del\nPeriodo", MG_ROJO_OSCURO), _kpi_gap,
         tarjeta_kpi(financiado_periodo, "Financiadas", MG_ROJO_MEDIO), _kpi_gap,
-        tarjeta_kpi(f"{conv_prom:.0f}%", "Conversión\nPromedio", MG_ROJO), _kpi_gap,
+        tarjeta_kpi(f"{conv_prom:.0f}%", "Conversión\ndel Periodo", MG_ROJO), _kpi_gap,
         tarjeta_kpi(n_vendedores, "Vendedores\nInvolucrados", INBURSA_AZUL),
     ]
     anchos_kpis = [4.0 * cm, 0.35 * cm, 4.0 * cm, 0.35 * cm, 4.0 * cm, 0.35 * cm, 4.0 * cm]
@@ -1479,9 +1380,13 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     elementos.append(Spacer(1, 0.4 * cm))
 
     elementos.append(Paragraph("Lectura del periodo", estilo_h2))
-    for texto in insights:
+    for texto in lectura + _folios.texto_aviso(_res_folios):
         elementos.append(Paragraph("•  " + texto, estilo_cuerpo))
-    elementos.append(PageBreak())
+    # Salto condicional: si la lectura cabe en la portada, el reporte
+    # detallado empieza en página nueva como siempre; si se desborda (por
+    # ejemplo, con el aviso de folios entre meses), sigue en la misma página
+    # en vez de dejar una hoja con tres renglones y el resto en blanco.
+    elementos.append(CondPageBreak(14 * cm))
 
     # ===============================================================
     # REPORTE DETALLADO
@@ -1701,6 +1606,33 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
             filas_t.append(totales)
             elementos.append(KeepTogether(tabla_estilo_mg(filas_t, fila_total=True)))
 
+        # --- Folios que cruzaron de mes -------------------------------
+        cruces = _res_folios["cruces"]
+        if not cruces.empty:
+            elementos.append(Spacer(1, 0.35 * cm))
+            elementos.append(Paragraph("Folios que cruzaron de mes", estilo_h3))
+            elementos.append(Paragraph(
+                "Solicitudes que aparecen en la bitácora de más de un mes. En las "
+                "tablas de esta sección cuentan una sola vez, en el mes de captura "
+                "y con su último estatus.",
+                estilo_cuerpo
+            ))
+            nombres_campo = {"Nombre del Vendedor": "vendedor", "Vehículo": "vehículo",
+                             "Monto Total a Financiar": "monto", "¿Tiene GAP?": "GAP"}
+            filas_c = [["Folio", "Vendedor", "Captura", "Último<br/>estatus",
+                        "Cambió"]]
+            for _, fila in cruces.iterrows():
+                cambios = ", ".join(nombres_campo.get(c, c) for c in fila["Cambios"]) or "—"
+                filas_c.append([
+                    str(fila["Folio"]),
+                    _recortar_nombre(str(fila["Vendedor"]), maximo=22),
+                    f"{str(fila['Mes de captura']).title()}: {str(fila['Estatus al capturar']).title()}",
+                    f"{str(fila['Mes del último estatus']).title()}: {str(fila['Último estatus']).title()}",
+                    cambios,
+                ])
+            elementos.append(KeepTogether(tabla_estilo_mg(
+                filas_c, col_widths=[2.2 * cm, 4.2 * cm, 3.4 * cm, 3.4 * cm, 3.4 * cm])))
+
         elementos.append(Spacer(1, 0.4 * cm))
 
     if "modelos" in rutas_graficas:
@@ -1717,7 +1649,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     # ===============================================================
     elementos.append(Paragraph("Conclusiones y Factores Importantes", estilo_h1))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
-    for texto in insights:
+    for texto in conclusiones_fin:
         elementos.append(Paragraph("•  " + texto, estilo_cuerpo))
 
     # -------------------------------------------------------------
@@ -1731,6 +1663,9 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     # contenido, en vez de volver a redactarlo por su cuenta.
     # Se copia ANTES de doc.build() porque ReportLab va vaciando la lista
     # que recibe conforme la maqueta.
+    # Sin esto, un Spacer que no cabe al final de una página genera una
+    # hoja en blanco antes del siguiente salto. Ver pdf_util.py.
+    elementos[:] = _pdf_util.quitar_espacios_antes_de_salto(elementos)
     if recolectar_elementos is not None:
         try:
             from . import flowables_a_docx as _fd
