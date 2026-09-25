@@ -56,6 +56,23 @@ def _cifra_monto(df):
                   f"ticket de ${monto / len(fin):,.0f}")
 
 
+def _cifra_monto_promedio_mensual(df, n_meses):
+    """Comparativo: monto financiado del periodo y su promedio POR MES.
+
+    En un reporte que compara meses, el dato útil junto al total es cuánto se
+    financia en un mes típico. El ticket (promedio por crédito) sigue en las
+    tablas del reporte; en la portada lo sustituye este promedio mensual.
+    Dividir el total entre los meses no depende de a qué mes se atribuya
+    cada crédito, así que no le afectan los folios que cruzan de mes.
+    """
+    fin = _financiados(df)
+    if COL_MONTO not in df.columns or fin.empty or not n_meses:
+        return None
+    monto = float(fin[COL_MONTO].fillna(0).sum())
+    return _cifra("MONTO FINANCIADO", _monto_corto(monto),
+                  f"{_monto_corto(monto / n_meses)} promedio por mes")
+
+
 def _cifra_gap_financiados(df):
     fin = _financiados(df)
     if COL_GAP not in df.columns or fin.empty:
@@ -124,7 +141,7 @@ def cifras_comparativo(df_unico, tabla_comp, n_meses):
     cifras = [
         _cifra("SOLICITUDES", f"{total}", f"en {n_meses} mes{'es' if n_meses != 1 else ''}"),
         _cifra("CONVERSIÓN", f"{pct:.0f}%", f"{fin} financiadas en el periodo"),
-        _cifra_monto(df_unico),
+        _cifra_monto_promedio_mensual(df_unico, n_meses),
     ]
     if n_meses >= 2 and "% Financiado" in tabla_comp.columns and not tabla_comp.empty:
         conv = tabla_comp["% Financiado"].astype(float)

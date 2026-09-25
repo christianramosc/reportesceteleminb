@@ -162,6 +162,7 @@ try:
     from . import lateral as _lateral
     from . import folios as _folios
     from . import metricas as _metricas
+    from . import hallazgos as _h
 except ImportError:  # ejecución suelta (Colab, o el .py fuera del paquete)
     import estatus as _est
     import conclusiones as _conclusiones
@@ -169,6 +170,7 @@ except ImportError:  # ejecución suelta (Colab, o el .py fuera del paquete)
     import lateral as _lateral
     import folios as _folios
     import metricas as _metricas
+    import hallazgos as _h
 
 ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
 COLOR_CATEGORIA = _est.COLOR_CATEGORIA
@@ -467,8 +469,13 @@ def analisis_por_vendedor(df):
             if col not in pivote.columns:
                 pivote[col] = 0
         tabla = tabla.join(pivote[presentes])
-        tabla["% Aprobación"] = (tabla["APROBADO"] / tabla["Total"] * 100).round(1)
-        tabla["% Financiado"] = (tabla["FINANCIADO"] / tabla["Total"] * 100).round(1)
+        # Un mes puede no tener algún estatus (septiembre 2026 no tuvo ninguna
+        # APROBADA). Antes esto tronaba con KeyError: 'APROBADO'. Mismo
+        # criterio que reporte_base.py: si el estatus no está, cuenta cero.
+        aprobado_v = tabla["APROBADO"] if "APROBADO" in tabla.columns else 0
+        financiado_v = tabla["FINANCIADO"] if "FINANCIADO" in tabla.columns else 0
+        tabla["% Aprobación"] = (aprobado_v / tabla["Total"] * 100).round(1)
+        tabla["% Financiado"] = (financiado_v / tabla["Total"] * 100).round(1)
 
     if "Monto Total a Financiar" in df.columns and "Categoria" in df.columns:
         monto_financiado = (df[df["Categoria"] == "FINANCIADO"]
@@ -740,13 +747,17 @@ def tabla_promedio_vendedor(df_combinado, orden_meses):
 def grafica_vendedores(df, guardar_como=None, titulo="Solicitudes por vendedor"):
     if "Nombre del Vendedor" not in df.columns:
         return None
+    total_equipo = len(df)   # con capturas genéricas: cuadra con la portada
+    df, excluidos = _h.solo_personas(df)
     conteo = df["Nombre del Vendedor"].value_counts().sort_values(ascending=True)
     fig, ax = plt.subplots(figsize=(8, max(4, len(conteo) * 0.5)))
     colores = list(reversed(_gradiente(len(conteo))))
     ax.barh(conteo.index, conteo.values, color=colores, edgecolor="white")
     for i, valor in enumerate(conteo.values):
         ax.text(valor + max(conteo.values) * 0.01, i, str(valor), va="center", fontsize=9)
-    ax.set_title(titulo)
+    _h.titular(ax, _h.vendedor_con_mas(conteo, total_equipo),
+               "Solicitudes ingresadas por vendedor en el periodo"
+               + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Número de solicitudes")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
@@ -757,6 +768,7 @@ def grafica_vendedores(df, guardar_como=None, titulo="Solicitudes por vendedor")
 def grafica_vendedor_status(df, guardar_como=None, titulo=None):
     if "Nombre del Vendedor" not in df.columns or "Categoria" not in df.columns:
         return None
+    df, excluidos = _h.solo_personas(df)
     pivote = pd.crosstab(df["Nombre del Vendedor"], df["Categoria"])
     orden_cols = [c for c in ORDEN_CATEGORIAS if c in pivote.columns]
     # El título lista las categorías que de verdad hay en el periodo.
@@ -765,6 +777,7 @@ def grafica_vendedor_status(df, guardar_como=None, titulo=None):
         # estatus, el título deformaba la imagen exportada.
         titulo = "Estatus de cierre por vendedor"
     pivote = pivote[orden_cols]
+    hallazgo = _h.vendedor_mejor_conversion(pivote)
     pivote["Total"] = pivote.sum(axis=1)
     pivote = pivote.sort_values("Total", ascending=True).drop(columns="Total")
     fig, ax = plt.subplots(figsize=(9, max(4, len(pivote) * 0.55) + 0.8))
@@ -775,7 +788,8 @@ def grafica_vendedor_status(df, guardar_como=None, titulo=None):
                  color=COLOR_CATEGORIA.get(col, MG_GRIS_CLARO),
                  label=_est.etiqueta(col), edgecolor="white")
         izquierda += valores
-    ax.set_title(titulo)
+    _h.titular(ax, hallazgo, "Estatus de cierre de las solicitudes de cada vendedor"
+               + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Número de solicitudes")
     ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
               mode="expand", frameon=False, fontsize=8,
@@ -804,7 +818,8 @@ def grafica_modelos(df, guardar_como=None, titulo_extra=""):
     titulo = f"Modelos más solicitados {titulo_extra}".strip()
     if recortado:
         titulo += f" (top {TOP_N})"
-    ax.set_title(titulo)
+    _h.titular(ax, _h.modelo_lider(conteo_completo),
+               f"Modelos con más solicitudes en el periodo (top {min(TOP_N, len(conteo_completo))})")
     ax.set_xlabel("Número de solicitudes")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
@@ -818,6 +833,8 @@ def grafica_modelos(df, guardar_como=None, titulo_extra=""):
 def grafica_gap_por_vendedor_total(df, guardar_como=None, titulo="Cobertura de GAP por vendedor"):
     if "Nombre del Vendedor" not in df.columns or "¿Tiene GAP?" not in df.columns:
         return None
+    total_equipo, gap_equipo = len(df), int((df["¿Tiene GAP?"] == "SI").sum())
+    df, excluidos = _h.solo_personas(df)
     df_gap = df[df["¿Tiene GAP?"] == "SI"].copy()
     if df_gap.empty:
         return None
@@ -834,14 +851,16 @@ def grafica_gap_por_vendedor_total(df, guardar_como=None, titulo="Cobertura de G
              edgecolor="white", label="Total de solicitudes")
     ax.barh(y - alto / 2, valores_gap, height=alto, color=MG_ROJO,
              edgecolor="white", label="Con GAP")
-    for yi, valor in zip(y + alto / 2, valores_total):
-        ax.text(valor + maximo * 0.015, yi, str(valor), va="center", fontsize=8)
-    for yi, valor in zip(y - alto / 2, valores_gap):
-        ax.text(valor + maximo * 0.015, yi, str(valor), va="center", fontsize=8)
+    # Misma lectura que la gráfica de GAP en financiados: "15 de 21 (71%)".
+    for yi, g, t in zip(y, valores_gap, valores_total):
+        ax.text(max(g, t) + maximo * 0.015, yi, f"{g} de {t} ({g / t * 100:.0f}%)" if t else "—",
+                va="center", fontsize=8.5, color=MG_GRIS_OSCURO)
     ax.set_yticks(y)
     ax.set_yticklabels(vendedores)
-    ax.set_xlim(0, maximo * 1.18)
-    ax.set_title(titulo)
+    ax.set_xlim(0, maximo * 1.45)
+    _h.titular(ax, _h.cobertura_gap(total_equipo, gap_equipo),
+               "Solicitudes con GAP frente al total de cada vendedor"
+               + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Número de solicitudes")
     ax.legend(loc="lower right", frameon=False)
     plt.tight_layout()
@@ -852,6 +871,9 @@ def grafica_gap_por_vendedor_total(df, guardar_como=None, titulo="Cobertura de G
 
 def grafica_gap_financiado_por_vendedor(df, guardar_como=None, titulo="GAP en créditos financiados, por vendedor"):
     """Misma gráfica y mismo cálculo que en reporte_base.py (ver metricas.py)."""
+    fin_equipo = df[df["Categoria"] == "FINANCIADO"] if "Categoria" in df.columns else df.iloc[0:0]
+    gap_fin_equipo = int((fin_equipo["¿Tiene GAP?"] == "SI").sum()) if "¿Tiene GAP?" in df.columns else 0
+    df, excluidos = _h.solo_personas(df)
     datos = _metricas.gap_en_financiados_por_vendedor(df)
     if datos.empty:
         return None
@@ -874,7 +896,9 @@ def grafica_gap_financiado_por_vendedor(df, guardar_como=None, titulo="GAP en cr
     ax.set_xlim(0, tope * 2.1)
     ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
     ax.set_xlabel("Créditos financiados con GAP")
-    ax.set_title(titulo)
+    _h.titular(ax, _h.gap_en_financiados(gap_fin_equipo, len(fin_equipo)),
+               "Créditos financiados con GAP, por vendedor"
+               + (" · sin capturas genéricas" if excluidos else ""))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
@@ -916,7 +940,9 @@ def grafica_comp_totales_por_mes(datos_por_mes, orden_meses, guardar_como=None):
         ax.text(i, t + max(totales) * 0.02, f"Total: {t}", ha="center", va="bottom",
                  fontsize=9, fontweight="bold", color=MG_GRIS_OSCURO)
     ax.set_ylim(0, max(totales) * 1.18 if totales else 1)
-    ax.set_title("Estatus de cierre por mes")
+    rechazos = [int(datos_por_mes[m]["df"]["Categoria"].value_counts().get("RECHAZADO", 0)) for m in meses_disp]
+    _h.titular(ax, _h.rechazo_por_mes(meses_disp, totales, rechazos),
+               "Solicitudes por estatus de cierre, por mes")
     ax.set_ylabel("Número de solicitudes")
     ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
               mode="expand", frameon=False, fontsize=8,
@@ -934,7 +960,8 @@ def grafica_comp_tasa_conversion(tabla_comp, guardar_como=None):
         return None
     meses = tabla_comp.index.tolist()
     pct_fin = tabla_comp["% Financiado"].values
-    pct_apr = ((tabla_comp["Aprobado"] / tabla_comp["Total"]).fillna(0) * 100).values
+    pct_apr = ((tabla_comp["Aprobado"] / tabla_comp["Total"]).fillna(0) * 100).values \
+        if "Aprobado" in tabla_comp.columns else np.zeros(len(meses))
 
     fig, ax = plt.subplots(figsize=(max(7, len(meses) * 1.3), 5.5))
     ax.plot(meses, pct_fin, marker="o", linewidth=2.4, color=MG_ROJO_OSCURO, label="% Financiado")
@@ -944,10 +971,21 @@ def grafica_comp_tasa_conversion(tabla_comp, guardar_como=None):
         ax.text(i, v - 4, f"{v:.0f}%", ha="center", va="top", fontsize=9, fontweight="bold", color=MG_ROJO_OSCURO)
     for i, v in enumerate(pct_apr):
         ax.text(i, v + 4, f"{v:.0f}%", ha="center", va="bottom", fontsize=8.5, color=INBURSA_AZUL)
-    ax.set_ylim(0, max(pct_fin.max() if len(pct_fin) else 0, pct_apr.max() if len(pct_apr) else 0) * 1.35 + 5)
-    ax.set_title("Tasa de conversión por mes")
+    # Rechazo: la "Lectura del periodo" explica la caída de conversión con el
+    # rechazo; ahora la gráfica muestra esa evidencia junto a la conversión.
+    pct_rech = ((tabla_comp["Rechazado"] / tabla_comp["Total"]).fillna(0) * 100).values \
+        if "Rechazado" in tabla_comp.columns else None
+    if pct_rech is not None:
+        color_rech = COLOR_CATEGORIA.get("RECHAZADO", "#F4A6B1")
+        ax.plot(meses, pct_rech, marker="o", linewidth=2.0, color=color_rech, linestyle=":", label="% Rechazado")
+        for i, v in enumerate(pct_rech):
+            ax.text(i, v + 4, f"{v:.0f}%", ha="center", va="bottom", fontsize=8.5, color=color_rech)
+    tope = max([x.max() for x in (pct_fin, pct_apr, pct_rech) if x is not None and len(x)] or [0])
+    ax.set_ylim(0, tope * 1.3 + 5)
+    _h.titular(ax, _h.por_mes_minimo(meses, list(pct_fin), "la conversión"),
+               "% de las solicitudes de cada mes: financiadas, aprobadas y rechazadas")
     ax.set_ylabel("% de las solicitudes del mes")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=2)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=3)
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
@@ -968,15 +1006,25 @@ def grafica_comp_montos_por_mes(tabla_comp, guardar_como=None):
     ax.bar(x - ancho / 2, monto_fin, width=ancho, color=MG_ROJO_OSCURO, edgecolor="white", label="Monto Financiado")
     ax.bar(x + ancho / 2, monto_tot, width=ancho, color=MG_GRIS_CLARO, edgecolor="white", label="Monto Total a Financiar (todas)")
     for xi, v in zip(x - ancho / 2, monto_fin):
-        ax.text(xi, v + max(monto_tot.max(), 1) * 0.015, f"${v:,.0f}", ha="center", fontsize=7.5, rotation=90 if len(meses) > 4 else 0, va="bottom")
+        ax.text(xi, v + max(monto_tot.max(), 1) * 0.015, _h.monto_corto(v), ha="center", fontsize=8, rotation=90 if len(meses) > 4 else 0, va="bottom",
+                zorder=4, bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none"))
     for xi, v in zip(x + ancho / 2, monto_tot):
-        ax.text(xi, v + max(monto_tot.max(), 1) * 0.015, f"${v:,.0f}", ha="center", fontsize=7.5, rotation=90 if len(meses) > 4 else 0, va="bottom")
+        ax.text(xi, v + max(monto_tot.max(), 1) * 0.015, _h.monto_corto(v), ha="center", fontsize=8, rotation=90 if len(meses) > 4 else 0, va="bottom",
+                zorder=4, bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none"))
+    # Referencia: el promedio mensual financiado, la misma cifra de la portada.
+    promedio = float(monto_fin.mean()) if len(monto_fin) else 0
+    if promedio:
+        # En la leyenda y no como rótulo: chocaba con la etiqueta de un mes
+        # cercano al promedio (junio financió $1.80 M con promedio de $1.79 M).
+        ax.axhline(promedio, color=INBURSA_AZUL, linestyle=(0, (4, 3)), linewidth=1.1, zorder=3,
+                   label=f"Promedio mensual financiado ({_h.monto_corto(promedio)})")
     ax.set_xticks(x)
     ax.set_xticklabels(meses)
-    _formato_miles(ax, eje="y")
-    ax.set_title("Monto total vs. financiado por mes")
-    ax.set_ylabel("Monto ($ MXN)")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=2)
+    _h.formato_millones(ax, eje="y")
+    _h.titular(ax, _h.montos_por_mes(meses, list(monto_fin)),
+               "Monto financiado vs. monto total solicitado, por mes")
+    ax.set_ylabel("Monto (millones de pesos)")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=3, fontsize=8.5)
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
@@ -1031,10 +1079,13 @@ def grafica_comp_gap_vs_gap_financiado(tabla_comp, guardar_como=None):
             ax.text(i, v + 3, f"{v:.0f}%", ha="center", fontsize=8.5, color=INBURSA_AZUL)
         maximo = max(maximo, pct_gap.max() if len(pct_gap) else 0)
 
-    ax.set_ylim(0, maximo * 1.35 + 8)
-    ax.set_title("GAP total vs. GAP financiado por mes")
+    # Hasta 108 para que se vea la línea de "lo esperado: todas" (100%).
+    ax.set_ylim(0, 108)
+    _h.referencia_alerta_gap(ax)
+    _h.titular(ax, _h.gap_financiados_por_mes(meses, list(pct_gap_fin)),
+               "% con GAP: en créditos financiados y en todas las solicitudes")
     ax.set_ylabel("% de solicitudes")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=2)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=2, fontsize=8.5)
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
@@ -1053,7 +1104,6 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
         ("totales_mes",        lambda ruta: grafica_comp_totales_por_mes(datos_por_mes, orden_meses, ruta), "c01_totales_mes.png"),
         ("tasa_conversion",    lambda ruta: grafica_comp_tasa_conversion(tabla_comp, ruta),                   "c02_tasa_conversion.png"),
         ("montos_mes",         lambda ruta: grafica_comp_montos_por_mes(tabla_comp, ruta),                    "c03_montos_mes.png"),
-        ("gap_mes",            lambda ruta: grafica_comp_gap_por_mes(tabla_comp, ruta),                       "c04_gap_mes.png"),
         ("gap_vs_gap_fin_mes", lambda ruta: grafica_comp_gap_vs_gap_financiado(tabla_comp, ruta),              "c04b_gap_vs_gap_fin_mes.png"),
         ("vendedores",         lambda ruta: grafica_vendedores(df_combinado, ruta),                           "c06_vendedores.png"),
         ("vendedor_status",    lambda ruta: grafica_vendedor_status(df_combinado, ruta),                      "c07_vendedor_status.png"),
