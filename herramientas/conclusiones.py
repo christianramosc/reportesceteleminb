@@ -62,10 +62,13 @@ MIN_CASOS_GRUPO = 5
 # Cambio mínimo, en solicitudes, para decir que un vendedor "subió" o "bajó".
 MIN_CAMBIO_VENDEDOR = 3
 
-# Meta de GAP: porcentaje mínimo de solicitudes y de créditos financiados que
-# deben llevarlo. Si la política cambia, se cambia aquí y nada más.
-# Alcanzar exactamente la meta cuenta como cumplir.
-META_GAP = 50.0
+# GAP: lo esperado es que TODAS las solicitudes y TODOS los créditos
+# financiados lo lleven (100%). No hay "meta de 50%": presentarlo así hacía
+# que quien llegaba a la mitad leyera que ya había cumplido.
+# El 50% es solo el UMBRAL DE ALERTA: por debajo de la mitad, el reporte lo
+# marca en rojo. Si la política cambia, se cambia aquí y nada más.
+# Exactamente la mitad no es alerta.
+UMBRAL_ALERTA_GAP = 50.0
 
 # Rojo MG, solo para la etiqueta de "Alerta de GAP".
 _ROJO_LLAMADO = "#E4002B"
@@ -584,58 +587,46 @@ def lectura_y_conclusiones_comparativo(tabla_comp, orden_meses, df_combinado):
 
 
 # ========================================================== por vendedor
-def _faltan_para_meta(logrado, total):
-    """Cuántos GAP más hacían falta para llegar a la meta."""
-    import math
-    return max(0, math.ceil(total * META_GAP / 100) - logrado)
+def _mensaje_gap(mio, n, fin):
+    """Un solo mensaje de GAP por vendedor.
 
-
-def _mensaje_gap_meta(mio, n, fin):
-    """Un solo mensaje de GAP por vendedor, según la meta de cumplimiento.
-
+    Lo esperado es que todas las solicitudes y todos los créditos lleven GAP.
     Niveles, del más severo al más leve (se usa el más severo que aplique):
-      1. Alerta de GAP: 0% de GAP en solicitudes, o menos de la meta
-         en créditos financiados.
-      2. Oportunidad en GAP: entre 1% y la meta en solicitudes, con los
-         financiados en regla o sin financiados todavía.
-      3. Meta de GAP cumplida.
+      1. Alerta de GAP (rojo): 0% en solicitudes, o menos de la mitad
+         (UMBRAL_ALERTA_GAP) en créditos financiados.
+      2. Oportunidad en GAP: entre 1% y menos de la mitad en solicitudes.
+      3. Neutral: de la mitad hacia arriba, pero no en todas. Dice cuántas
+         quedaron sin GAP; ya no se presenta como "meta cumplida".
+      4. GAP completo: todas las solicitudes y todos los créditos lo llevan.
 
-    Redacción asertiva: el hecho, la meta, cuánto faltó en número concreto y
-    —solo en el llamado— qué se espera. La acción depende del caso: no es lo
-    mismo no ofrecer GAP que ofrecerlo y perderlo antes de dispersar.
+    Lo que falta se cuenta contra el total, no contra la mitad: "a 3 de tus
+    solicitudes les faltó", no "te faltó 1 para cumplir".
 
-    No se exige un mínimo de casos, a diferencia de las comparaciones del
-    resto del reporte: esto es una meta de cumplimiento, no una estadística,
-    y un crédito sin GAP es una venta perdida. Por eso cada mensaje lleva el
-    conteo ("0 de 1") para que se lea como el hecho que es.
+    Sin mínimo de casos: un crédito sin GAP es una venta perdida. Por eso
+    cada mensaje lleva el conteo ("0 de 1").
     """
     g_sol = int((mio[COL_GAP] == "SI").sum())
     p_sol = _pct(g_sol, n) or 0.0
     fin_df = mio[mio[COL_CAT] == "FINANCIADO"]
     g_fin = int((fin_df[COL_GAP] == "SI").sum())
     p_fin = _pct(g_fin, fin) if fin else None
-    meta = f"{META_GAP:.0f}%"
-
-    llamado = f"<font color='{_ROJO_LLAMADO}'><b>Alerta de GAP:</b></font>"
-
-    def _faltaron(k):
-        return f"te {'faltó' if k == 1 else 'faltaron'} {k} para cumplirla"
+    esperado = "Lo esperado es que todas lo lleven."
+    alerta = f"<font color='{_ROJO_LLAMADO}'><b>Alerta de GAP:</b></font>"
 
     falla_sol_cero = g_sol == 0
-    falla_fin = p_fin is not None and p_fin < META_GAP
+    falla_fin = p_fin is not None and p_fin < UMBRAL_ALERTA_GAP
 
-    # ---- 1. Alerta de GAP
+    # ---- 1. Alerta
     if falla_sol_cero and falla_fin:
-        return (f"{llamado} ninguna de tus {_n(n, 'solicitud')} lleva GAP, y tampoco "
-                f"{'tu crédito financiado' if fin == 1 else f'tus {fin} créditos financiados'}. "
-                f"La meta es al menos {meta}: {_faltaron(_faltan_para_meta(0, n))} en "
-                f"solicitudes. Para el próximo mes, ofrécelo en cada solicitud desde la "
-                f"primera cotización y confírmalo antes de formalizar.")
+        creditos = "tu crédito financiado" if fin == 1 else f"tus {fin} créditos financiados"
+        return (f"{alerta} ninguna de tus {_n(n, 'solicitud')} lleva GAP, y tampoco "
+                f"{creditos}. {esperado} Para el próximo mes, ofrécelo en cada "
+                f"solicitud desde la primera cotización y confírmalo antes de formalizar.")
 
     if falla_sol_cero:
-        return (f"{llamado} ninguna de tus {_n(n, 'solicitud')} lleva GAP. La meta es "
-                f"al menos {meta}: {_faltaron(_faltan_para_meta(0, n))}. Para el "
-                f"próximo mes, ofrécelo en cada solicitud desde la primera cotización.")
+        return (f"{alerta} ninguna de tus {_n(n, 'solicitud')} lleva GAP. {esperado} "
+                f"Para el próximo mes, ofrécelo en cada solicitud desde la primera "
+                f"cotización.")
 
     if falla_fin:
         if fin == 1:
@@ -645,36 +636,48 @@ def _mensaje_gap_meta(mio, n, fin):
         else:
             hecho = (f"solo {g_fin} de tus {fin} créditos financiados "
                      f"{'lleva' if g_fin == 1 else 'llevan'} GAP ({p_fin:.0f}%)")
-        texto = f"{llamado} {hecho}, por debajo de la meta de {meta}."
-        if p_sol >= META_GAP:
+        texto = f"{alerta} {hecho}; lo esperado es que todos lo lleven."
+        if p_sol >= UMBRAL_ALERTA_GAP:
             # Lo ofrece, pero se pierde en el camino: la acción es cuidar
             # que el GAP llegue hasta la dispersión, no ofrecerlo más.
-            texto += (f" En solicitudes sí la superas ({g_sol} de {n}): el GAP se "
-                      f"está perdiendo entre la solicitud y la dispersión. Confírmalo "
-                      f"antes de formalizar cada crédito.")
-        else:
-            texto += (f" En solicitudes también estás por debajo ({g_sol} de {n}, "
-                      f"{p_sol:.0f}%). Ofrécelo desde la cotización y confírmalo antes "
+            texto += (f" En solicitudes lo ofreciste en {g_sol} de {n}: el GAP se está "
+                      f"perdiendo entre la solicitud y la dispersión. Confírmalo antes "
                       f"de formalizar cada crédito.")
+        else:
+            texto += (f" En solicitudes también es bajo ({g_sol} de {n}, {p_sol:.0f}%). "
+                      f"Ofrécelo desde la cotización y confírmalo antes de formalizar "
+                      f"cada crédito.")
         return texto
 
-    # ---- 2. Oportunidad en GAP (nota suave, sin instrucción)
-    if p_sol < META_GAP:
-        texto = (f"<b>Oportunidad en GAP:</b> {g_sol} de tus "
-                 f"{_n(n, 'solicitud')} {'lleva' if g_sol == 1 else 'llevan'} GAP "
-                 f"({p_sol:.0f}%); la meta es {meta} y "
-                 f"{_faltaron(_faltan_para_meta(g_sol, n))}.")
-        if fin:
-            texto += f" En tus créditos financiados sí la alcanzas ({g_fin} de {fin})."
-        return texto
-
-    # ---- 3. Cumple
+    sin_sol = n - g_sol
+    detalle_fin = ""
     if fin:
-        return (f"<b>Meta de GAP cumplida:</b> {g_sol} de {_n(n, 'solicitud')} "
-                f"({p_sol:.0f}%) y {g_fin} de "
-                f"{_n(fin, 'crédito financiado', 'créditos financiados')} ({p_fin:.0f}%).")
-    return (f"<b>Meta de GAP cumplida:</b> {g_sol} de {_n(n, 'solicitud')} "
-            f"({p_sol:.0f}%). Aún no tienes créditos financiados para medirla ahí.")
+        sin_fin = fin - g_fin
+        detalle_fin = (f" En tus créditos financiados, {g_fin} de {fin} lo "
+                       f"{'lleva' if g_fin == 1 else 'llevan'}"
+                       + (f"; a {sin_fin} le{'s' if sin_fin != 1 else ''} faltó." if sin_fin else "."))
+
+    # ---- 2. Oportunidad (menos de la mitad en solicitudes)
+    if p_sol < UMBRAL_ALERTA_GAP:
+        return (f"<b>Oportunidad en GAP:</b> {g_sol} de tus {_n(n, 'solicitud')} "
+                f"{'lleva' if g_sol == 1 else 'llevan'} GAP ({p_sol:.0f}%); a {sin_sol} "
+                f"le{'s' if sin_sol != 1 else ''} faltó. {esperado}{detalle_fin}")
+
+    # ---- 4. Completo
+    if sin_sol == 0 and (not fin or g_fin == fin):
+        cierre = (f" y {'tu crédito financiado' if fin == 1 else f'tus {fin} créditos financiados'}"
+                  if fin else "")
+        return (f"<b>GAP completo:</b> todas tus solicitudes ({n}){cierre} llevan GAP.")
+
+    # ---- 3. Neutral: de la mitad hacia arriba, sin llegar a todas
+    texto = (f"<b>GAP:</b> {g_sol} de tus {_n(n, 'solicitud')} "
+             f"{'lleva' if g_sol == 1 else 'llevan'} GAP ({p_sol:.0f}%)")
+    texto += (f"; a {sin_sol} le{'s' if sin_sol != 1 else ''} faltó." if sin_sol else ".")
+    if fin:
+        texto += detalle_fin
+    else:
+        texto += " Aún no tienes créditos financiados."
+    return texto
 
 
 def conclusiones_vendedor(df, vendedor):
@@ -732,10 +735,10 @@ def conclusiones_vendedor(df, vendedor):
             f"<b>Pendientes:</b> {'te queda' if n_ab == 1 else 'te quedan'} "
             f"{_n(n_ab, 'solicitud')} sin dispersar ({detalle}).")
 
-    # --- GAP: meta de cumplimiento (ver _mensaje_gap_meta)
+    # --- GAP: lo esperado es el 100% (ver _mensaje_gap)
     if COL_GAP in df.columns:
         if _es_nombre_de_persona(vendedor):
-            gap = _mensaje_gap_meta(mio, n, fin)
+            gap = _mensaje_gap(mio, n, fin)
         else:
             # Capturas genéricas ("Casa"): no reciben llamado, porque no hay
             # a quién dirigirlo. Se deja solo el dato.

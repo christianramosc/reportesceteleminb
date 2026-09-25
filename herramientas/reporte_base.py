@@ -169,9 +169,11 @@ FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
 try:
     from . import estatus as _est
     from . import metricas as _metricas
+    from . import pdf_util as _pdf_util
 except ImportError:  # ejecución suelta (Colab, o el .py fuera del paquete)
     import estatus as _est
     import metricas as _metricas
+    import pdf_util as _pdf_util
 
 ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
 COLOR_CATEGORIA = _est.COLOR_CATEGORIA
@@ -1372,10 +1374,10 @@ def crear_estilos():
         textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=16, spaceAfter=8)
     estilo_h2 = ParagraphStyle(
         "H2MG", parent=styles["Heading2"], fontName=FUENTE_BOLD, fontSize=12.5,
-        textColor=rl_colors.HexColor(MG_ROJO_OSCURO), spaceBefore=10, spaceAfter=6)
+        textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=18, spaceAfter=6)
     estilo_cuerpo = ParagraphStyle(
         "CuerpoMG", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=10,
-        textColor=rl_colors.HexColor(MG_GRIS_OSCURO), leading=15, alignment=TA_JUSTIFY, spaceAfter=6)
+        textColor=rl_colors.HexColor(MG_GRIS_OSCURO), leading=15, alignment=TA_LEFT, spaceAfter=8)
     estilo_nota = ParagraphStyle(
         "NotaMG", parent=styles["Normal"], fontSize=8.5,
         textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), leading=11, alignment=TA_LEFT,
@@ -1389,12 +1391,12 @@ def crear_estilos():
         textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), alignment=TA_CENTER, leading=9.5)
     estilo_encabezado_tabla = ParagraphStyle(
         "EncabezadoTabla", parent=styles["Normal"], fontSize=8.3, leading=10,
-        textColor=rl_colors.white, fontName=FUENTE_BOLD, alignment=TA_CENTER)
+        textColor=rl_colors.HexColor(INBURSA_AZUL), fontName=FUENTE_BOLD, alignment=TA_CENTER)
 
     # Versión reducida, para tablas con muchas columnas (muchos estatus)
     estilo_encabezado_tabla_compacto = ParagraphStyle(
         "EncabezadoTablaCompacto", parent=styles["Normal"], fontSize=6.6,
-        leading=7.8, textColor=rl_colors.white, fontName=FUENTE_BOLD,
+        leading=7.8, textColor=rl_colors.HexColor(INBURSA_AZUL), fontName=FUENTE_BOLD,
         alignment=TA_CENTER)
     return {
         "styles": styles,
@@ -1422,48 +1424,11 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
     antes de generar cada reporte.
     """
     def encabezado_pie_pagina(canvas_obj, doc):
-        """Encabezado y pie 'corporativo moderno': fondo blanco, una franja
-        de marca delgada (azul Inbursa) en el borde superior, un pequeño
-        tick rojo MG como acento y una regla fina en vez de los bloques de
-        color sólido de la versión anterior."""
-        canvas_obj.saveState()
-        ancho, alto = letter
-
-        # --- Encabezado ---
-        canvas_obj.setFillColor(rl_colors.HexColor(INBURSA_AZUL))
-        canvas_obj.rect(0, alto - 0.14 * cm, ancho, 0.14 * cm, fill=1, stroke=0)
-        canvas_obj.setFillColor(rl_colors.HexColor(MG_ROJO))
-        canvas_obj.rect(1.5 * cm, alto - 1.05 * cm, 0.24 * cm, 0.24 * cm, fill=1, stroke=0)
-
-        canvas_obj.setFillColor(rl_colors.HexColor(INBURSA_AZUL))
-        canvas_obj.setFont(FUENTE_BOLD, 10.5)
-        canvas_obj.drawString(1.95 * cm, alto - 1.0 * cm, empresa)
-        canvas_obj.setFillColor(rl_colors.HexColor(GRIS_TEXTO_SEC))
-        canvas_obj.setFont(FUENTE_REGULAR, 8)
-        canvas_obj.drawString(1.95 * cm, alto - 1.32 * cm,
-                               subtitulo)
-
-        canvas_obj.setFillColor(rl_colors.HexColor(GRIS_TEXTO_SEC))
-        canvas_obj.setFont(FUENTE_REGULAR, 8.5)
-        canvas_obj.drawRightString(ancho - 1.5 * cm, alto - 1.05 * cm, fecha)
-
-        canvas_obj.setStrokeColor(rl_colors.HexColor(GRIS_LINEA))
-        canvas_obj.setLineWidth(0.8)
-        canvas_obj.line(1.5 * cm, alto - 1.55 * cm, ancho - 1.5 * cm, alto - 1.55 * cm)
-
-        # --- Pie de página ---
-        canvas_obj.setStrokeColor(rl_colors.HexColor(GRIS_LINEA))
-        canvas_obj.setLineWidth(0.8)
-        canvas_obj.line(1.5 * cm, 1.05 * cm, ancho - 1.5 * cm, 1.05 * cm)
-
-        canvas_obj.setFillColor(rl_colors.HexColor(MG_ROJO))
-        canvas_obj.rect(1.5 * cm, 0.66 * cm, 0.16 * cm, 0.16 * cm, fill=1, stroke=0)
-        canvas_obj.setFillColor(rl_colors.HexColor(GRIS_TEXTO_SEC))
-        canvas_obj.setFont(FUENTE_REGULAR, 8)
-        canvas_obj.drawString(1.85 * cm, 0.65 * cm, analista)
-        canvas_obj.drawCentredString(ancho / 2, 0.65 * cm, f"Página {doc.page}")
-        canvas_obj.drawRightString(ancho - 1.5 * cm, 0.65 * cm, empresa)
-        canvas_obj.restoreState()
+        """Encabezado y pie: el dibujo vive en pdf_util.pintar_encabezado_pie,
+        compartido por los cuatro reportes."""
+        _pdf_util.pintar_encabezado_pie(
+            canvas_obj, doc, empresa, subtitulo, fecha, analista,
+            fuente_regular=FUENTE_REGULAR, fuente_bold=FUENTE_BOLD)
 
     def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1,
                         compacta=False, fila_total=False):
@@ -1497,43 +1462,12 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
         data = [encabezado] + data[1:]
         tabla = Table(data, colWidths=col_widths, repeatRows=1)
         n_filas = len(data)
-        estilo = [
-            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor(INBURSA_AZUL)),
-            ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), FUENTE_BOLD),
-            ("FONTNAME", (0, 1), (-1, -1), FUENTE_REGULAR),
-            ("FONTSIZE", (0, 1), (-1, -1), 7.0 if compacta else 8.5),
-            ("TEXTCOLOR", (0, 1), (-1, -1), rl_colors.HexColor(MG_GRIS_OSCURO)),
-            ("ALIGN", (alinear_derecha_desde, 0), (-1, -1), "CENTER"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LINEBELOW", (0, 0), (-1, 0), 1.6, rl_colors.HexColor(MG_ROJO)),
-            ("LINEBELOW", (0, 1), (-1, max(n_filas - 2, 1)), 0.5, rl_colors.HexColor(GRIS_LINEA)),
-            ("BOX", (0, 0), (-1, -1), 0.75, rl_colors.HexColor(GRIS_LINEA)),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -2 if fila_total else -1),
-             [rl_colors.white, rl_colors.HexColor(GRIS_ZEBRA)]),
-            ("TOPPADDING", (0, 0), (-1, 0), 7),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 7),
-            ("TOPPADDING", (0, 1), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 2 if compacta else 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 2 if compacta else 6),
-        ]
-        if fila_total and n_filas >= 2:
-            f = n_filas - 1
-            estilo += [
-                # Filete rojo arriba: separa el resumen del detalle con el
-                # mismo acento que va bajo el encabezado, para que la tabla
-                # quede "cerrada" por los dos extremos.
-                ("LINEABOVE", (0, f), (-1, f), 1.4, rl_colors.HexColor(MG_ROJO)),
-                ("BACKGROUND", (0, f), (-1, f), rl_colors.HexColor("#EAEEF4")),
-                ("FONTNAME", (0, f), (-1, f), FUENTE_BOLD),
-                ("FONTSIZE", (0, f), (-1, f), 7.4 if compacta else 9.0),
-                ("TEXTCOLOR", (0, f), (-1, f), rl_colors.HexColor(INBURSA_AZUL)),
-                ("TOPPADDING", (0, f), (-1, f), 7),
-                ("BOTTOMPADDING", (0, f), (-1, f), 7),
-                ("LINEBELOW", (0, f - 1), (-1, f - 1), 0, rl_colors.white),
-            ]
-
+        # Formato compartido (pdf_util.estilo_tabla): encabezado claro con
+        # texto azul, sin zebrado ni recuadro, fila de totales en azul.
+        estilo = _pdf_util.estilo_tabla(
+            n_filas, alinear_desde=alinear_derecha_desde, compacta=compacta,
+            fila_total=fila_total, fuente_regular=FUENTE_REGULAR,
+            fuente_bold=FUENTE_BOLD, color_texto=MG_GRIS_OSCURO)
         tabla.setStyle(TableStyle(estilo))
         return tabla
 
@@ -1541,15 +1475,14 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
         """Tarjeta KPI 'plana' corporativa: fondo blanco, barra de acento
         delgada arriba (en vez del bloque de color sólido anterior) y el
         número protagonizando en el color de acento, con borde muy sutil."""
-        estilo_valor_acento = e["kpi_valor"].clone("KPIValorAcento", textColor=rl_colors.HexColor(color_acento))
+        estilo_valor_acento = e["kpi_valor"].clone("KPIValorAcento", textColor=rl_colors.HexColor(INBURSA_AZUL))
         t = Table(
-            [[""], [Paragraph(str(valor), estilo_valor_acento)], [Paragraph(etiqueta, e["kpi_label"])]],
-            colWidths=[4.0 * cm], rowHeights=[0.11 * cm, None, None]
+            [[""], [Paragraph(str(valor), estilo_valor_acento)], [Paragraph(str(etiqueta).upper(), e["kpi_label"])]],
+            colWidths=[_pdf_util.ANCHO_KPI], rowHeights=[0.11 * cm, None, None]
         )
         t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor(color_acento)),
+            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.white),
             ("BACKGROUND", (0, 1), (-1, -1), rl_colors.white),
-            ("BOX", (0, 0), (-1, -1), 0.75, rl_colors.HexColor(GRIS_LINEA)),
             ("TOPPADDING", (0, 1), (-1, 1), 10),
             ("BOTTOMPADDING", (0, 1), (-1, 1), 1),
             ("TOPPADDING", (0, 2), (-1, 2), 0),
@@ -1585,7 +1518,7 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
     # REPORTE DETALLADO
     # ===============================================================
     elementos.append(Paragraph("Reporte Detallado", e["h1"]))
-    elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
+    elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     # --- 1. Distribución de solicitudes por status ---
     if "status" in rutas_graficas or "dona_categoria" in rutas_graficas:
@@ -1634,7 +1567,7 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
                                   for v in vendedores_v] + [""])
 
             ancho_nombre_v = 4.6 * cm
-            ancho_col_v = (18.3 * cm - ancho_nombre_v) / max(len(encabezados_v) - 1, 1)
+            ancho_col_v = (_pdf_util.ANCHO_UTIL - ancho_nombre_v) / max(len(encabezados_v) - 1, 1)
             anchos_v = [ancho_nombre_v] + [ancho_col_v] * (len(encabezados_v) - 1)
             elementos.append(tabla_estilo_mg([encabezados_v] + filas_v,
                                              col_widths=anchos_v,
@@ -1657,7 +1590,7 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
                 filas_v.append(f)
 
             ancho_nombre_v = 4.2 * cm if len(encabezados_v) <= 7 else 3.4 * cm
-            ancho_col_v = (18.3 * cm - ancho_nombre_v) / max(len(encabezados_v) - 1, 1)
+            ancho_col_v = (_pdf_util.ANCHO_UTIL - ancho_nombre_v) / max(len(encabezados_v) - 1, 1)
             anchos_v = [ancho_nombre_v] + [ancho_col_v] * (len(encabezados_v) - 1)
             elementos.append(tabla_estilo_mg([encabezados_v] + filas_v,
                                              col_widths=anchos_v,
@@ -1716,7 +1649,7 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
                     f.append(f"{valor:.1f}")
             filas_cat.append(f)
 
-        ancho_disp = min(2.6 * cm, (18 * cm - 3.2 * cm) / max(len(columnas_disp), 1))
+        ancho_disp = min(2.6 * cm, (_pdf_util.ANCHO_UTIL - 3.2 * cm) / max(len(columnas_disp), 1))
         anchos_cat = [3.2 * cm] + [ancho_disp] * len(columnas_disp)
         elementos.append(tabla_estilo_mg([encabezados_cat] + filas_cat, col_widths=anchos_cat))
         elementos.append(Spacer(1, 0.4 * cm))

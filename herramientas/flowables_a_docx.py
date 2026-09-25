@@ -191,7 +191,9 @@ _HEADINGS = {
     "H2MG": "Heading 2",
     "TituloPortada": "Title",
 }
-_JUSTIFICADOS = {"CuerpoMG"}
+# Vacío a propósito: el cuerpo va alineado a la izquierda, igual que en
+# el PDF. Justificado estiraba los espacios entre palabras.
+_JUSTIFICADOS = set()
 _CENTRADOS = {"KPIValor", "KPILabel"}
 
 
@@ -388,8 +390,13 @@ def capturar_guion(elementos):
     for flowable in elementos:
         tipo = type(flowable).__name__
         if tipo == "Paragraph":
+            texto = getattr(flowable, "text", "")
+            # Las viñetas con sangría guardan el "•" aparte (bulletText); sin
+            # esto, en Word se perdía el símbolo.
+            if getattr(flowable, "bulletText", None):
+                texto = f"{flowable.bulletText}  {texto}"
             bloque = {"tipo": "parrafo", "estilo": _nombre_estilo(flowable),
-                      "texto": getattr(flowable, "text", "")}
+                      "texto": texto}
             bloque.update(_formato_del_estilo(flowable))
             guion.append(bloque)
         elif tipo == "Table":

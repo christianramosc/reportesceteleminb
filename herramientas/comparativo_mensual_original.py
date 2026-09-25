@@ -159,12 +159,14 @@ try:
     from . import estatus as _est
     from . import conclusiones as _conclusiones
     from . import pdf_util as _pdf_util
+    from . import lateral as _lateral
     from . import folios as _folios
     from . import metricas as _metricas
 except ImportError:  # ejecución suelta (Colab, o el .py fuera del paquete)
     import estatus as _est
     import conclusiones as _conclusiones
     import pdf_util as _pdf_util
+    import lateral as _lateral
     import folios as _folios
     import metricas as _metricas
 
@@ -1137,10 +1139,10 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=16, spaceAfter=8)
     estilo_h2 = ParagraphStyle(
         "H2MG", parent=styles["Heading2"], fontName=FUENTE_BOLD, fontSize=12.5,
-        textColor=rl_colors.HexColor(MG_ROJO_OSCURO), spaceBefore=10, spaceAfter=6)
+        textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=18, spaceAfter=6)
     estilo_cuerpo = ParagraphStyle(
         "CuerpoMG", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=10,
-        textColor=rl_colors.HexColor(MG_GRIS_OSCURO), leading=15, alignment=TA_JUSTIFY, spaceAfter=6)
+        textColor=rl_colors.HexColor(MG_GRIS_OSCURO), leading=15, alignment=TA_LEFT, spaceAfter=8)
     # Tercer nivel: la sección de vendedores llegó a tener varias
     # subsecciones y con solo dos niveles se leían todas como iguales.
     estilo_h3 = ParagraphStyle(
@@ -1159,101 +1161,54 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), alignment=TA_CENTER, leading=9.5)
     estilo_encabezado_tabla = ParagraphStyle(
         "EncabezadoTabla", parent=styles["Normal"], fontSize=8.3, leading=10,
-        textColor=rl_colors.white, fontName=FUENTE_BOLD, alignment=TA_CENTER)
+        textColor=rl_colors.HexColor(INBURSA_AZUL), fontName=FUENTE_BOLD, alignment=TA_CENTER)
 
     FECHA_REPORTE = datetime.date.today().strftime("%d/%m/%Y")
     PERIODO_TXT = orden_meses[0].title() if len(orden_meses) == 1 else \
         f"{orden_meses[0].title()} – {orden_meses[-1].title()}"
 
     def encabezado_pie_pagina(canvas_obj, doc):
-        canvas_obj.saveState()
-        ancho, alto = letter
-        canvas_obj.setFillColor(rl_colors.HexColor(INBURSA_AZUL))
-        canvas_obj.rect(0, alto - 0.14 * cm, ancho, 0.14 * cm, fill=1, stroke=0)
-        canvas_obj.setFillColor(rl_colors.HexColor(MG_ROJO))
-        canvas_obj.rect(1.5 * cm, alto - 1.05 * cm, 0.24 * cm, 0.24 * cm, fill=1, stroke=0)
-        canvas_obj.setFillColor(rl_colors.HexColor(INBURSA_AZUL))
-        canvas_obj.setFont(FUENTE_BOLD, 10.5)
-        canvas_obj.drawString(1.95 * cm, alto - 1.0 * cm, NOMBRE_EMPRESA)
-        canvas_obj.setFillColor(rl_colors.HexColor(GRIS_TEXTO_SEC))
-        canvas_obj.setFont(FUENTE_REGULAR, 8)
-        canvas_obj.drawString(1.95 * cm, alto - 1.32 * cm,
-                               f"Reporte Comparativo Mensual · {SUBTITULO_EMPRESA}")
-        canvas_obj.setFillColor(rl_colors.HexColor(GRIS_TEXTO_SEC))
-        canvas_obj.setFont(FUENTE_REGULAR, 8.5)
-        canvas_obj.drawRightString(ancho - 1.5 * cm, alto - 1.05 * cm, FECHA_REPORTE)
-        canvas_obj.setStrokeColor(rl_colors.HexColor(GRIS_LINEA))
-        canvas_obj.setLineWidth(0.8)
-        canvas_obj.line(1.5 * cm, alto - 1.55 * cm, ancho - 1.5 * cm, alto - 1.55 * cm)
-        canvas_obj.setStrokeColor(rl_colors.HexColor(GRIS_LINEA))
-        canvas_obj.line(1.5 * cm, 1.05 * cm, ancho - 1.5 * cm, 1.05 * cm)
-        canvas_obj.setFillColor(rl_colors.HexColor(MG_ROJO))
-        canvas_obj.rect(1.5 * cm, 0.66 * cm, 0.16 * cm, 0.16 * cm, fill=1, stroke=0)
-        canvas_obj.setFillColor(rl_colors.HexColor(GRIS_TEXTO_SEC))
-        canvas_obj.setFont(FUENTE_REGULAR, 8)
-        canvas_obj.drawString(1.85 * cm, 0.65 * cm, NOMBRE_ANALISTA)
-        canvas_obj.drawCentredString(ancho / 2, 0.65 * cm, f"Página {doc.page}")
-        canvas_obj.drawRightString(ancho - 1.5 * cm, 0.65 * cm, NOMBRE_EMPRESA)
-        canvas_obj.restoreState()
+        """Encabezado y pie: el dibujo vive en pdf_util.pintar_encabezado_pie,
+        compartido por los cuatro reportes."""
+        _pdf_util.pintar_encabezado_pie(
+            canvas_obj, doc, NOMBRE_EMPRESA, f"Reporte Comparativo Mensual · {SUBTITULO_EMPRESA}", FECHA_REPORTE, NOMBRE_ANALISTA,
+            fuente_regular=FUENTE_REGULAR, fuente_bold=FUENTE_BOLD)
 
     def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1,
-                        fila_total=False):
+                        fila_total=False, compacta=False):
         """fila_total=True destaca el último renglón como resumen de la tabla.
 
         Mismo criterio que la versión de reporte_base.py: filete rojo arriba,
         fondo propio y negritas, para que el renglón más consultado no se
         pierda en el zebrado.
         """
-        encabezado = [Paragraph(str(c), estilo_encabezado_tabla) for c in data[0]]
+        # compacta: letra y márgenes menores para tablas de muchas columnas.
+        # Las del resumen ejecutivo caen en la columna angosta de la portada
+        # (junto a las cifras clave) y ahí "Financiado" se partía a la mitad.
+        estilo_enc = (estilo_encabezado_tabla.clone("EncabezadoTablaCompacta", fontSize=6.8, leading=8)
+                      if compacta else estilo_encabezado_tabla)
+        encabezado = [Paragraph(str(c), estilo_enc) for c in data[0]]
         data = [encabezado] + data[1:]
         tabla = Table(data, colWidths=col_widths, repeatRows=1)
         n_filas = len(data)
-        estilo = [
-            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor(INBURSA_AZUL)),
-            ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), FUENTE_BOLD),
-            ("FONTNAME", (0, 1), (-1, -1), FUENTE_REGULAR),
-            ("FONTSIZE", (0, 1), (-1, -1), 8.5),
-            ("TEXTCOLOR", (0, 1), (-1, -1), rl_colors.HexColor(MG_GRIS_OSCURO)),
-            ("ALIGN", (alinear_derecha_desde, 0), (-1, -1), "CENTER"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LINEBELOW", (0, 0), (-1, 0), 1.6, rl_colors.HexColor(MG_ROJO)),
-            ("LINEBELOW", (0, 1), (-1, max(n_filas - 2, 1)), 0.5, rl_colors.HexColor(GRIS_LINEA)),
-            ("BOX", (0, 0), (-1, -1), 0.75, rl_colors.HexColor(GRIS_LINEA)),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -2 if fila_total else -1),
-             [rl_colors.white, rl_colors.HexColor(GRIS_ZEBRA)]),
-            ("TOPPADDING", (0, 0), (-1, 0), 7),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 7),
-            ("TOPPADDING", (0, 1), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ]
-        if fila_total and n_filas >= 2:
-            f = n_filas - 1
-            estilo += [
-                ("LINEABOVE", (0, f), (-1, f), 1.4, rl_colors.HexColor(MG_ROJO)),
-                ("BACKGROUND", (0, f), (-1, f), rl_colors.HexColor("#EAEEF4")),
-                ("FONTNAME", (0, f), (-1, f), FUENTE_BOLD),
-                ("FONTSIZE", (0, f), (-1, f), 9.0),
-                ("TEXTCOLOR", (0, f), (-1, f), rl_colors.HexColor(INBURSA_AZUL)),
-                ("TOPPADDING", (0, f), (-1, f), 7),
-                ("BOTTOMPADDING", (0, f), (-1, f), 7),
-                ("LINEBELOW", (0, f - 1), (-1, f - 1), 0, rl_colors.white),
-            ]
+        # Formato compartido (pdf_util.estilo_tabla): encabezado claro con
+        # texto azul, sin zebrado ni recuadro, fila de totales en azul.
+        estilo = _pdf_util.estilo_tabla(
+            n_filas, alinear_desde=alinear_derecha_desde, compacta=compacta,
+            fila_total=fila_total, fuente_regular=FUENTE_REGULAR,
+            fuente_bold=FUENTE_BOLD, color_texto=MG_GRIS_OSCURO)
         tabla.setStyle(TableStyle(estilo))
         return tabla
 
     def tarjeta_kpi(valor, etiqueta, color_acento):
-        estilo_valor_acento = estilo_kpi_valor.clone("KPIValorAcento" + etiqueta[:6], textColor=rl_colors.HexColor(color_acento))
+        estilo_valor_acento = estilo_kpi_valor.clone("KPIValorAcento" + etiqueta[:6], textColor=rl_colors.HexColor(INBURSA_AZUL))
         t = Table(
-            [[""], [Paragraph(str(valor), estilo_valor_acento)], [Paragraph(etiqueta, estilo_kpi_label)]],
-            colWidths=[4.0 * cm], rowHeights=[0.11 * cm, None, None]
+            [[""], [Paragraph(str(valor), estilo_valor_acento)], [Paragraph(str(etiqueta).upper(), estilo_kpi_label)]],
+            colWidths=[_pdf_util.ANCHO_KPI], rowHeights=[0.11 * cm, None, None]
         )
         t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor(color_acento)),
+            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.white),
             ("BACKGROUND", (0, 1), (-1, -1), rl_colors.white),
-            ("BOX", (0, 0), (-1, -1), 0.75, rl_colors.HexColor(GRIS_LINEA)),
             ("TOPPADDING", (0, 1), (-1, 1), 10),
             ("BOTTOMPADDING", (0, 1), (-1, 1), 1),
             ("TOPPADDING", (0, 2), (-1, 2), 0),
@@ -1309,35 +1264,26 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
             f"desempeño acumulado por vendedor a lo largo del periodo.",
             estilo_cuerpo
         )]],
-        colWidths=[18 * cm]
+        colWidths=[_pdf_util.ANCHO_UTIL]
     )
     intro_portada.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), rl_colors.HexColor(AZUL_PALIDO)),
-        ("LINEBEFORE", (0, 0), (0, 0), 3, rl_colors.HexColor(INBURSA_AZUL)),
-        ("TOPPADDING", (0, 0), (-1, -1), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-        ("LEFTPADDING", (0, 0), (-1, -1), 14),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
     ]))
+    _pdf_util.como_entrada(intro_portada)
     elementos.append(intro_portada)
     elementos.append(Spacer(1, 0.45 * cm))
 
-    _kpi_gap = ""
-    fila_kpis = [
-        tarjeta_kpi(total_periodo, "Total del\nPeriodo", MG_ROJO_OSCURO), _kpi_gap,
-        tarjeta_kpi(financiado_periodo, "Financiadas", MG_ROJO_MEDIO), _kpi_gap,
-        tarjeta_kpi(f"{conv_prom:.0f}%", "Conversión\ndel Periodo", MG_ROJO), _kpi_gap,
-        tarjeta_kpi(n_vendedores, "Vendedores\nInvolucrados", INBURSA_AZUL),
-    ]
-    anchos_kpis = [4.0 * cm, 0.35 * cm, 4.0 * cm, 0.35 * cm, 4.0 * cm, 0.35 * cm, 4.0 * cm]
-    tabla_kpis = Table([fila_kpis], colWidths=anchos_kpis)
-    tabla_kpis.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
-    elementos.append(tabla_kpis)
+    # Cifras clave: en el PDF se dibujan como la columna lateral de la
+    # portada (pdf_util.construir_con_lateral); en el Word quedan como tabla.
+    elementos.append(_lateral.bloque_cifras(_lateral.cifras_comparativo(df_combinado, tabla_comp, n_meses)))
     elementos.append(Spacer(1, 0.5 * cm))
 
     # --- Resumen ejecutivo: tabla comparativa mensual ---
     elementos.append(Paragraph("Resumen Ejecutivo — Comparativo por Mes", estilo_h1))
-    elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
+    elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     if not tabla_comp.empty:
         # El nombre de la columna de solicitudes abiertas se toma de la propia
@@ -1358,8 +1304,8 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
                 mes, int(fila["Total"]), int(fila["Financiado"]), int(fila["Aprobado"]),
                 int(fila[col_abiertas]), int(fila["Rechazado"]), f"{fila['% Financiado']:.1f}%",
             ])
-        anchos_vol = [3.0 * cm] + [2.5 * cm] * 6
-        elementos.append(tabla_estilo_mg([encabezados_vol] + filas_vol, col_widths=anchos_vol))
+        anchos_vol = _pdf_util.repartir(2.6 * cm, 6)
+        elementos.append(tabla_estilo_mg([encabezados_vol] + filas_vol, col_widths=anchos_vol, compacta=True))
         elementos.append(Spacer(1, 0.35 * cm))
 
         encabezados_fin = ["Mes", "Monto Total", "Monto<br/>Financiado", "Ticket Prom.<br/>Financiado", "% GAP", "% GAP<br/>Financiado"]
@@ -1373,15 +1319,15 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
                 f"{fila['% GAP']:.1f}%" if pd.notna(fila.get('% GAP')) else "—",
                 f"{fila['% GAP Financiado']:.1f}%" if pd.notna(fila.get('% GAP Financiado')) else "—",
             ])
-        anchos_fin = [2.7 * cm] + [3.2 * cm] * 5
-        elementos.append(tabla_estilo_mg([encabezados_fin] + filas_fin, col_widths=anchos_fin))
+        anchos_fin = _pdf_util.repartir(2.4 * cm, 5)
+        elementos.append(tabla_estilo_mg([encabezados_fin] + filas_fin, col_widths=anchos_fin, compacta=True))
     else:
         elementos.append(Paragraph("No se pudo construir la tabla comparativa mensual.", estilo_nota))
     elementos.append(Spacer(1, 0.4 * cm))
 
     elementos.append(Paragraph("Lectura del periodo", estilo_h2))
     for texto in lectura + _folios.texto_aviso(_res_folios):
-        elementos.append(Paragraph("•  " + texto, estilo_cuerpo))
+        elementos.append(Paragraph(_pdf_util.resaltar("•  " + texto), estilo_cuerpo))
     # Salto condicional: si la lectura cabe en la portada, el reporte
     # detallado empieza en página nueva como siempre; si se desborda (por
     # ejemplo, con el aviso de folios entre meses), sigue en la misma página
@@ -1392,7 +1338,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     # REPORTE DETALLADO
     # ===============================================================
     elementos.append(Paragraph("Reporte Detallado", estilo_h1))
-    elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
+    elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     if "totales_mes" in rutas_graficas:
         elementos.append(Paragraph("1. Volumen y Categorías de Cierre por Mes", estilo_h2))
@@ -1648,14 +1594,14 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     # CONCLUSIONES
     # ===============================================================
     elementos.append(Paragraph("Conclusiones y Factores Importantes", estilo_h1))
-    elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
+    elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
     for texto in conclusiones_fin:
-        elementos.append(Paragraph("•  " + texto, estilo_cuerpo))
+        elementos.append(Paragraph(_pdf_util.resaltar("•  " + texto), estilo_cuerpo))
 
     # -------------------------------------------------------------
     doc = SimpleDocTemplate(
         nombre_archivo, pagesize=letter,
-        topMargin=1.8 * cm, bottomMargin=1.3 * cm, leftMargin=1.5 * cm, rightMargin=1.5 * cm
+        topMargin=_pdf_util.MARGEN_SUPERIOR, bottomMargin=_pdf_util.MARGEN_INFERIOR, leftMargin=_pdf_util.MARGEN, rightMargin=_pdf_util.MARGEN
     )
     # `recolectar_elementos`: si el llamador pasa una lista, aquí se le
     # deja una copia de todos los flowables del PDF. Es lo que usa
@@ -1665,7 +1611,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     # que recibe conforme la maqueta.
     # Sin esto, un Spacer que no cabe al final de una página genera una
     # hoja en blanco antes del siguiente salto. Ver pdf_util.py.
-    elementos[:] = _pdf_util.quitar_espacios_antes_de_salto(elementos)
+    elementos[:] = _pdf_util.pulir(_pdf_util.quitar_espacios_antes_de_salto(elementos))
     if recolectar_elementos is not None:
         try:
             from . import flowables_a_docx as _fd
@@ -1673,7 +1619,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
             import flowables_a_docx as _fd
         recolectar_elementos.extend(_fd.capturar_guion(elementos))
 
-    doc.build(elementos, onFirstPage=encabezado_pie_pagina, onLaterPages=encabezado_pie_pagina)
+    _pdf_util.construir_con_lateral(doc, elementos, encabezado_pie_pagina)
 
     print(f"\nReporte PDF generado: {nombre_archivo}")
     if EN_COLAB:

@@ -146,7 +146,7 @@ def test_individual_con_pocas_solicitudes_advierte():
     assert "no es una comparación justa" in texto
 
 
-# ------------------------------------------------------ meta de GAP (50%)
+# ------------------------------------------ GAP: 100% esperado, 50% alerta
 def _limpio(t):
     return re.sub(r"<[^>]+>", "", t)
 
@@ -167,10 +167,25 @@ def test_gap_va_primero_y_es_un_solo_mensaje():
     assert sum("GAP" in c for c in concl) == 1
 
 
-def test_cero_gap_en_solicitudes_es_alerta_con_faltante():
+def test_ningun_mensaje_habla_de_meta():
+    """El 50% es umbral de alerta, no meta: presentarlo como meta hacía que
+    quien llegaba a la mitad leyera que ya había cumplido."""
+    casos = [
+        [("RECHAZADO", "NO")] * 4,                                  # alerta
+        [("FINANCIADO", "NO")] + [("RECHAZADO", "SI")] * 5,         # alerta en financiados
+        [("RECHAZADO", "SI")] + [("RECHAZADO", "NO")] * 3,          # oportunidad
+        [("FINANCIADO", "SI"), ("FINANCIADO", "NO")],               # la mitad
+        [("FINANCIADO", "SI")] * 3,                                 # completo
+    ]
+    for filas in casos:
+        msg = _mensaje_gap(filas).lower()
+        assert "meta" not in msg and "cumpl" not in msg, msg
+
+
+def test_cero_gap_en_solicitudes_es_alerta():
     msg = _mensaje_gap([("RECHAZADO", "NO")] * 4)
     assert msg.startswith("Alerta de GAP")
-    assert "te faltaron 2" in msg
+    assert "ninguna de tus 4 solicitudes" in msg and "todas lo lleven" in msg
 
 
 def test_ofrece_gap_pero_lo_pierde_en_financiados():
@@ -179,7 +194,7 @@ def test_ofrece_gap_pero_lo_pierde_en_financiados():
     assert "0 de 1" in msg and "entre la solicitud y la dispersión" in msg
 
 
-def test_financiados_bajo_meta_con_varios_creditos():
+def test_financiados_bajo_la_mitad_con_varios_creditos():
     msg = _mensaje_gap([("FINANCIADO", "SI")] + [("FINANCIADO", "NO")] * 2)
     assert msg.startswith("Alerta de GAP")
     assert "solo 1 de tus 3 créditos financiados lleva GAP (33%)" in msg
@@ -187,22 +202,28 @@ def test_financiados_bajo_meta_con_varios_creditos():
 
 def test_incumple_las_dos_condiciones_en_un_solo_mensaje():
     msg = _mensaje_gap([("FINANCIADO", "NO")] * 2 + [("RECHAZADO", "NO")] * 2)
-    assert msg.startswith("Alerta de GAP")
-    assert "tampoco" in msg
+    assert msg.startswith("Alerta de GAP") and "tampoco" in msg
 
 
-def test_por_debajo_de_la_meta_es_nota_suave():
+def test_oportunidad_cuenta_lo_que_falta_contra_el_total():
+    """1 de 4: faltan 3 para que todas lo lleven (no 1 para llegar a la mitad)."""
     msg = _mensaje_gap([("RECHAZADO", "SI")] + [("RECHAZADO", "NO")] * 3)
     assert msg.startswith("Oportunidad en GAP")
-    assert "Alerta" not in msg and "te faltó 1" in msg
+    assert "Alerta" not in msg and "a 3 les faltó" in msg
 
 
-def test_exactamente_la_meta_cumple():
+def test_exactamente_la_mitad_no_es_alerta_ni_se_presenta_como_logro():
     msg = _mensaje_gap([("FINANCIADO", "SI"), ("FINANCIADO", "NO")])
-    assert msg.startswith("Meta de GAP cumplida")
+    assert msg.startswith("GAP:")
+    assert "a 1 le faltó" in msg
 
 
-def test_cumple_sin_financiados_lo_dice():
+def test_todas_con_gap_es_gap_completo():
+    msg = _mensaje_gap([("FINANCIADO", "SI")] * 2 + [("RECHAZADO", "SI")])
+    assert msg.startswith("GAP completo")
+
+
+def test_sin_financiados_lo_dice():
     msg = _mensaje_gap([("RECHAZADO", "SI"), ("APROBADO", "NO")])
     assert "Aún no tienes créditos financiados" in msg
 
@@ -210,11 +231,20 @@ def test_cumple_sin_financiados_lo_dice():
 def test_captura_generica_no_recibe_alerta():
     filas = [("Casa", "FINANCIADO", "NO", 1)] + [("Beto Diaz Mora", "FINANCIADO", "SI", 1)] * 3
     msg = _limpio(C.conclusiones_vendedor(_bitacora(filas), "Casa")[0])
-    assert "Alerta" not in msg and "meta" not in msg
+    assert "Alerta" not in msg
 
 
-def test_la_meta_es_un_solo_parametro(monkeypatch):
-    """Si la política cambia a 60%, con mover META_GAP basta."""
-    monkeypatch.setattr(C, "META_GAP", 60.0)
+def test_el_umbral_es_un_solo_parametro(monkeypatch):
+    """Si el umbral de alerta cambia a 60%, con mover UMBRAL_ALERTA_GAP basta."""
+    monkeypatch.setattr(C, "UMBRAL_ALERTA_GAP", 60.0)
     msg = _mensaje_gap([("FINANCIADO", "SI"), ("FINANCIADO", "NO")])   # 50%
-    assert msg.startswith("Alerta de GAP") and "60%" in msg
+    assert msg.startswith("Alerta de GAP")
+
+
+def test_columna_lateral_cuenta_lo_que_falta():
+    from herramientas import lateral as L
+    df = _bitacora([("Ana Lopez Ruiz", "FINANCIADO", "SI", 1)] * 2 +
+                   [("Ana Lopez Ruiz", "FINANCIADO", "NO", 1)] * 4)
+    gap = [c for c in L.cifras_resumen(df) if "GAP" in c["etiqueta"]][0]
+    assert gap["nota"] == "4 sin GAP de 6 créditos" and gap["alerta"]
+    assert "meta" not in gap["nota"]

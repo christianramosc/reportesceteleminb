@@ -17,12 +17,14 @@ try:
     from . import reporte_base as _base
     from . import conclusiones as _conclusiones
     from . import pdf_util as _pdf_util
+    from . import lateral as _lateral
 except ImportError:                       # ejecución suelta (Colab)
     from reporte_base import *            # noqa: F401,F403
     import estatus as _est
     import reporte_base as _base
     import conclusiones as _conclusiones
     import pdf_util as _pdf_util
+    import lateral as _lateral
 
 import datetime
 import os
@@ -217,35 +219,26 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
             f"de mayor demanda.",
             estilo_cuerpo
         )]],
-        colWidths=[18 * cm]
+        colWidths=[_pdf_util.ANCHO_UTIL]
     )
     intro_portada.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), rl_colors.HexColor(AZUL_PALIDO)),
-        ("LINEBEFORE", (0, 0), (0, 0), 3, rl_colors.HexColor(INBURSA_AZUL)),
-        ("TOPPADDING", (0, 0), (-1, -1), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-        ("LEFTPADDING", (0, 0), (-1, -1), 14),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
     ]))
+    _pdf_util.como_entrada(intro_portada)
     elementos.append(intro_portada)
     elementos.append(Spacer(1, 0.45 * cm))
 
-    _kpi_gap = ""  # columna vacía angosta entre tarjetas, para que se vean separadas
-    fila_kpis = [
-        tarjeta_kpi(total, "Total de\nSolicitudes", MG_ROJO_OSCURO), _kpi_gap,
-        tarjeta_kpi(financiados, "Financiadas", MG_ROJO_MEDIO), _kpi_gap,
-        tarjeta_kpi(aprobados, "Aprobadas", MG_ROJO), _kpi_gap,
-        tarjeta_kpi(n_vendedores, "Vendedores\nInvolucrados", INBURSA_AZUL),
-    ]
-    anchos_kpis = [4.0 * cm, 0.35 * cm, 4.0 * cm, 0.35 * cm, 4.0 * cm, 0.35 * cm, 4.0 * cm]
-    tabla_kpis = Table([fila_kpis], colWidths=anchos_kpis)
-    tabla_kpis.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
-    elementos.append(tabla_kpis)
+    # Cifras clave: en el PDF se dibujan como la columna lateral de la
+    # portada (pdf_util.construir_con_lateral); en el Word quedan como tabla.
+    elementos.append(_lateral.bloque_cifras(_lateral.cifras_avance(df, ctx=ctx, hoja=hoja)))
     elementos.append(Spacer(1, 0.5 * cm))
 
     # --- Resumen Ejecutivo ---
     elementos.append(Paragraph("Resumen Ejecutivo (a la fecha de corte)", estilo_h1))
-    elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
+    elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     elementos.append(Paragraph("Panorama general", estilo_h2))
     if tiene_categoria:
@@ -336,7 +329,7 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
                   if len(promedios) > 1 else promedios[0])
         partes_financiero.append(f"En promedio, las solicitudes presentan {cuerpo}.")
     if partes_financiero:
-        elementos.append(Paragraph(" ".join(partes_financiero), estilo_cuerpo))
+        elementos.append(Paragraph(_pdf_util.resaltar(" ".join(partes_financiero)), estilo_cuerpo))
     else:
         elementos.append(Paragraph(
             "No se encontraron columnas de monto, enganche, plazo o tasa en el archivo fuente para "
@@ -360,7 +353,7 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
                 monto_gap_fin = df.loc[(df["Categoria"] == "FINANCIADO") & (df["¿Tiene GAP?"] == "SI"), "Monto GAP"].sum()
                 if monto_gap_fin:
                     texto_gap += f" El monto total colocado en GAP sobre financiados es de ${monto_gap_fin:,.2f}."
-        elementos.append(Paragraph(texto_gap, estilo_cuerpo))
+        elementos.append(Paragraph(_pdf_util.resaltar(texto_gap), estilo_cuerpo))
     else:
         elementos.append(Paragraph(
             "No se encontró la columna '¿Tiene GAP?' en el archivo fuente, por lo que no fue posible "
@@ -370,30 +363,12 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
 
     elementos.append(Paragraph("Vendedores destacados", estilo_h2))
     if tabla_vendedor is not None and not tabla_vendedor.empty:
-        texto_vend = f"Participan {n_vendedores} vendedores. "
-        if top_solicitudes_nombres:
-            texto_vend += (
-                f"<b>{_nombres_y(top_solicitudes_nombres)}</b> "
-                f"{'concentran' if len(top_solicitudes_nombres) > 1 else 'concentra'} el mayor número de "
-                f"solicitudes generadas, con {int(top_solicitudes_val)}. "
-            )
-        if top_financiado_nombres:
-            texto_vend += (
-                f"En créditos <b>FINANCIADOS</b>, {_nombres_y(top_financiado_nombres)} "
-                f"{'lideran' if len(top_financiado_nombres) > 1 else 'lidera'} con {int(top_financiado_val)}. "
-            )
-        if top_monto_nombres:
-            texto_vend += (
-                f"El mayor monto colocado en créditos financiados corresponde a "
-                f"{_nombres_y(top_monto_nombres)}, con ${top_monto_val:,.2f}. "
-            )
-        if top_gap_fin_nombres:
-            texto_vend += (
-                f"En colocación de GAP sobre créditos financiados, "
-                f"{_nombres_y(top_gap_fin_nombres)} {'destacan' if len(top_gap_fin_nombres) > 1 else 'destaca'} "
-                f"con {int(top_gap_fin_val)}."
-            )
-        elementos.append(Paragraph(texto_vend, estilo_cuerpo))
+        # Antes este párrafo nombraba a los líderes en solicitudes, créditos,
+        # monto y GAP: exactamente lo que la tabla de abajo muestra completo.
+        # Además decía que alguien "destaca" con un solo GAP.
+        texto_vend = (f"Participan {n_vendedores} vendedores. La tabla muestra "
+                      f"el detalle de cada uno.")
+        elementos.append(Paragraph(_pdf_util.resaltar(texto_vend), estilo_cuerpo))
 
         # Tabla por vendedor. El texto de arriba solo nombra a los que
         # destacan; esto da el panorama completo, incluido el GAP colocado
@@ -432,7 +407,7 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     if focos:
         elementos.append(Paragraph("Focos de atención", estilo_h2))
         for nota in focos:
-            elementos.append(Paragraph("•  " + nota, estilo_cuerpo))
+            elementos.append(Paragraph(_pdf_util.resaltar("•  " + nota), estilo_cuerpo))
         elementos.append(Spacer(1, 0.2 * cm))
 
     elementos.append(PageBreak())
@@ -463,20 +438,20 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
 
     # ===============================================================
     elementos.append(Paragraph("Conclusiones y Factores Importantes (a la fecha)", estilo_h1))
-    elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(MG_ROJO), spaceAfter=8))
+    elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     # `conclusiones` ya se calculó arriba junto con los focos.
 
 
     for c in conclusiones:
-        elementos.append(Paragraph("•  " + c, estilo_cuerpo))
+        elementos.append(Paragraph(_pdf_util.resaltar("•  " + c), estilo_cuerpo))
 
     # -------------------------------------------------------------
     # Generar el PDF
     # -------------------------------------------------------------
     doc = SimpleDocTemplate(
         nombre_archivo, pagesize=letter,
-        topMargin=1.8 * cm, bottomMargin=1.3 * cm, leftMargin=1.5 * cm, rightMargin=1.5 * cm
+        topMargin=_pdf_util.MARGEN_SUPERIOR, bottomMargin=_pdf_util.MARGEN_INFERIOR, leftMargin=_pdf_util.MARGEN, rightMargin=_pdf_util.MARGEN
     )
     # `recolectar_elementos`: si el llamador pasa una lista, aquí se le
     # deja una copia de todos los flowables del PDF. Es lo que usa
@@ -486,7 +461,7 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     # que recibe conforme la maqueta.
     # Sin esto, un Spacer que no cabe al final de una página genera una
     # hoja en blanco antes del siguiente salto. Ver pdf_util.py.
-    elementos[:] = _pdf_util.quitar_espacios_antes_de_salto(elementos)
+    elementos[:] = _pdf_util.pulir(_pdf_util.quitar_espacios_antes_de_salto(elementos))
     if recolectar_elementos is not None:
         try:
             from . import flowables_a_docx as _fd
@@ -494,7 +469,7 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
             import flowables_a_docx as _fd
         recolectar_elementos.extend(_fd.capturar_guion(elementos))
 
-    doc.build(elementos, onFirstPage=encabezado_pie_pagina, onLaterPages=encabezado_pie_pagina)
+    _pdf_util.construir_con_lateral(doc, elementos, encabezado_pie_pagina)
 
     print(f"\nReporte PDF generado: {nombre_archivo}")
     if EN_COLAB:
