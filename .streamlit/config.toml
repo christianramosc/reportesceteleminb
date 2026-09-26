@@ -1,13 +1,12 @@
-[server]
-maxUploadSize = 200
-
-# El tema se fija en claro a propósito: el CSS de ui_estilos.py está
-# calibrado para fondo claro, y dejarlo seguir el modo oscuro del sistema
-# haría que el texto quedara ilegible.
 [theme]
 base = "light"
-primaryColor = "#C8102E"
-backgroundColor = "#F4F6F9"
-secondaryBackgroundColor = "#FFFFFF"
-textColor = "#132038"
-font = "sans serif"
+primaryColor = "#12305C"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F6FA"
+textColor = "#1B2A41"
+font = "Archivo:https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap"
+headingFont = "Archivo:https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap"
+baseRadius = "medium"
+
+[server]
+maxUploadSize = 50
