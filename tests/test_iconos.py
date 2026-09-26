@@ -79,3 +79,16 @@ def test_la_portada_siempre_queda_en_la_pagina_1(tmp_path):
     elementos = [lateral.bloque_cifras(cifras), Paragraph("TITULO DE PORTADA", getSampleStyleSheet()["Title"])]
     pdf_util.construir_con_lateral(SimpleDocTemplate(ruta), elementos, lambda c, d: None)
     assert "TITULO DE PORTADA" in pypdf.PdfReader(ruta).pages[0].extract_text()
+
+
+def test_titulares_nombran_a_todos_los_empatados():
+    """Regresión: con empate, el titular coronaba a uno solo y contradecía la
+    gráfica ("Tu modelo más solicitado: MG3…" con MG5 también en 2)."""
+    import pandas as pd
+    from herramientas import hallazgos as H
+    conteo = pd.Series({"MG5 ELEGANCE AT": 2, "MG3 1.5L STYLE CVT": 2, "RX9": 1})
+    assert "MG5 ELEGANCE AT" in H.tu_modelo(conteo) and "MG3 1.5L STYLE CVT" in H.tu_modelo(conteo)
+    assert "empatan" in H.modelo_lider(conteo)
+    vend = pd.Series({"Ana Lopez": 3, "Beto Diaz": 3, "Caro Ruiz": 1})
+    assert "Ana Lopez y Beto Diaz" in H.vendedor_con_mas(vend)
+    assert "MG5 STYLE" in H.modelo_lider(pd.Series({"MG5 STYLE": 5, "ZS": 4}))   # sin empate, uno solo

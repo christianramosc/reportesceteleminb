@@ -62,10 +62,12 @@ try:
     from . import conclusiones as _conclusiones
     from . import pdf_util as _pdf_util
     from . import lateral as _lateral
+    from . import hallazgos as _h
 except ImportError:  # ejecución suelta (Colab)
     import conclusiones as _conclusiones
     import pdf_util as _pdf_util
     import lateral as _lateral
+    import hallazgos as _h
 
 try:
     from google.colab import files  # noqa
@@ -650,7 +652,7 @@ def grafica_dona_status_vendedor(df_v, vendedor, guardar_como=None):
     etiquetas = [f"{cat} ({valor})" for cat, valor in zip(conteo.index, conteo.values)]
     ax.legend(wedges, etiquetas, loc="upper center", bbox_to_anchor=(0.5, -0.03),
                frameon=False, fontsize=9, ncol=2)
-    ax.set_title(f"Distribución de Solicitudes — {vendedor}")
+    _h.titular(ax, _h.tu_cierre(conteo), "Tus solicitudes por estatus de cierre")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
@@ -665,6 +667,8 @@ def grafica_equipo_destacado(df_total, vendedor, guardar_como=None):
     if not {"Nombre del Vendedor", "Categoria"}.issubset(df_total.columns):
         return None
 
+    # Sin capturas genéricas, pero conservando al vendedor del reporte.
+    df_total, excluidos = _h.solo_personas(df_total, conservar=vendedor)
     pivote = pd.crosstab(df_total["Nombre del Vendedor"], df_total["Categoria"])
     orden_cols = [c for c in ORDEN_CATEGORIAS if c in pivote.columns]
     pivote = pivote[orden_cols]
@@ -702,7 +706,9 @@ def grafica_equipo_destacado(df_total, vendedor, guardar_como=None):
 
     handles = [plt.Rectangle((0, 0), 1, 1, color=COLOR_CATEGORIA.get(c, MG_GRIS_CLARO)) for c in orden_cols]
     ax.legend(handles, orden_cols, loc="upper center", bbox_to_anchor=(0.5, -0.12), frameon=False, ncol=4)
-    ax.set_title("Tu Volumen vs. el Equipo")
+    _h.titular(ax, _h.tu_lugar(pivote.sum(axis=1), vendedor),
+               "Tu volumen de solicitudes frente al resto del equipo"
+               + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Número de solicitudes")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
@@ -723,7 +729,7 @@ def grafica_modelos_vendedor(df_v, vendedor, guardar_como=None):
     for i, valor in enumerate(conteo.values):
         ax.text(valor + max(conteo.values) * 0.02, i, str(valor), va="center", fontsize=9)
 
-    ax.set_title(f"Modelos Solicitados — {vendedor}")
+    _h.titular(ax, _h.tu_modelo(conteo), "Tus modelos solicitados en el mes")
     ax.set_xlabel("Número de solicitudes")
     ax.set_xlim(0, max(conteo.values) * 1.25)
     plt.tight_layout()

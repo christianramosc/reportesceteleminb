@@ -169,10 +169,12 @@ FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
 try:
     from . import estatus as _est
     from . import metricas as _metricas
+    from . import hallazgos as _h
     from . import pdf_util as _pdf_util
 except ImportError:  # ejecución suelta (Colab, o el .py fuera del paquete)
     import estatus as _est
     import metricas as _metricas
+    import hallazgos as _h
     import pdf_util as _pdf_util
 
 ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
@@ -908,7 +910,7 @@ def grafica_status(df, guardar_como=None):
         ax.text(barra.get_x() + barra.get_width() / 2, valor + max(conteo.values) * 0.01,
                  f"{valor}\n({valor/conteo.sum()*100:.0f}%)", ha="center", va="bottom", fontsize=9)
 
-    ax.set_title("Solicitudes por estatus")
+    _h.titular(ax, _h.estatus_mayoritario(conteo), "Solicitudes por estatus de la bitácora")
     ax.set_ylabel("Número de solicitudes")
     ax.set_ylim(0, max(conteo.values) * 1.2)
     plt.xticks(rotation=15)
@@ -954,7 +956,7 @@ def grafica_dona_categoria(df, guardar_como=None):
                ncol=2 if n_cat > 6 else 1,
                labelspacing=0.9 if n_cat > 6 else 1.2,
                columnspacing=1.5)
-    ax.set_title("Proporción por estatus")
+    _h.titular(ax, _h.mezcla_de_cierre(conteo), "Proporción de solicitudes por estatus de cierre")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.show()
@@ -964,6 +966,8 @@ def grafica_vendedores(df, guardar_como=None):
     """Barras horizontales: total de solicitudes por vendedor."""
     if "Nombre del Vendedor" not in df.columns:
         return None
+    total_equipo = len(df)   # con capturas genéricas: cuadra con la portada
+    df, excluidos = _h.solo_personas(df)
     conteo = df["Nombre del Vendedor"].value_counts().sort_values(ascending=True)
 
     fig, ax = plt.subplots(figsize=(8, max(4, len(conteo) * 0.5)))
@@ -973,7 +977,7 @@ def grafica_vendedores(df, guardar_como=None):
     for i, valor in enumerate(conteo.values):
         ax.text(valor + max(conteo.values) * 0.01, i, str(valor), va="center", fontsize=9)
 
-    ax.set_title("Solicitudes por vendedor")
+    _h.titular(ax, _h.vendedor_con_mas(conteo, total_equipo), "Solicitudes ingresadas por vendedor" + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Número de solicitudes")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
@@ -985,9 +989,11 @@ def grafica_vendedor_status(df, guardar_como=None):
     if "Nombre del Vendedor" not in df.columns or "Categoria" not in df.columns:
         return None
 
+    df, excluidos = _h.solo_personas(df)
     pivote = pd.crosstab(df["Nombre del Vendedor"], df["Categoria"])
     orden_cols = [c for c in ORDEN_CATEGORIAS if c in pivote.columns]
     pivote = pivote[orden_cols]
+    hallazgo = _h.vendedor_mejor_conversion(pivote)
     pivote["Total"] = pivote.sum(axis=1)
     pivote = pivote.sort_values("Total", ascending=True).drop(columns="Total")
 
@@ -1003,7 +1009,7 @@ def grafica_vendedor_status(df, guardar_como=None):
     # El título NO enumera las categorías (la leyenda de abajo ya lo hace):
     # con muchos estatus esa línea salía más ancha que la gráfica y deformaba
     # la imagen al exportarla.
-    ax.set_title("Estatus de cierre por vendedor")
+    _h.titular(ax, hallazgo, "Estatus de cierre de las solicitudes de cada vendedor" + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Número de solicitudes")
     # ncol se ajusta al número de categorías para que la leyenda no se
     # amontone cuando hay más de cuatro.
@@ -1022,6 +1028,7 @@ def grafica_monto_por_vendedor(df, guardar_como=None):
     if not {"Nombre del Vendedor", "Categoria", "Monto Total a Financiar"}.issubset(df.columns):
         return None
 
+    df, excluidos = _h.solo_personas(df)
     monto_aprobado = (
         df[df["Categoria"] == "APROBADO"]
         .groupby("Nombre del Vendedor")["Monto Total a Financiar"].sum()
@@ -1053,17 +1060,18 @@ def grafica_monto_por_vendedor(df, guardar_como=None):
 
     for yi, valor in zip(y + alto / 2, valores_aprobado):
         if valor > 0:
-            ax.text(valor + maximo * 0.015, yi, f"${valor:,.0f}", va="center", fontsize=8)
+            ax.text(valor + maximo * 0.015, yi, _h.monto_corto(valor), va="center", fontsize=8)
     for yi, valor in zip(y - alto / 2, valores_financiado):
         if valor > 0:
-            ax.text(valor + maximo * 0.015, yi, f"${valor:,.0f}", va="center", fontsize=8)
+            ax.text(valor + maximo * 0.015, yi, _h.monto_corto(valor), va="center", fontsize=8)
 
     ax.set_yticks(y)
     ax.set_yticklabels(vendedores)
     ax.set_xlim(0, maximo * 1.18)
-    _formato_miles(ax, eje="x")
+    _h.formato_millones(ax, eje="x")
 
-    ax.set_title("Monto por vendedor: aprobado vs. financiado")
+    _h.titular(ax, _h.monto_top_vendedor(pd.Series(valores_financiado, index=vendedores)),
+               "Monto aprobado y financiado de cada vendedor" + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Monto a financiar ($ MXN)")
     ax.legend(loc="lower right", frameon=False)
     plt.tight_layout()
@@ -1093,7 +1101,8 @@ def grafica_modelos(df, guardar_como=None):
     titulo = "Modelos más solicitados"
     if recortado:
         titulo += f" (top {TOP_N})"
-    ax.set_title(titulo)
+    _h.titular(ax, _h.modelo_lider(conteo_completo),
+               f"Modelos con más solicitudes (top {min(TOP_N, len(conteo_completo))})")
     ax.set_xlabel("Número de solicitudes")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
@@ -1122,12 +1131,16 @@ def grafica_gap_por_categoria(df, guardar_como=None):
         ax.text(barra.get_x() + barra.get_width() / 2, valor + 2,
                  f"{valor:.0f}%", ha="center", va="bottom", fontsize=9, fontweight="bold")
 
-    ax.set_title("% con GAP por estatus", pad=14)
+    _h.titular(ax, _h.gap_por_estatus(pct_gap), "% de solicitudes con GAP en cada estatus")
     ax.set_ylabel("% con GAP")
     # El tope se ajusta al dato real (antes estaba fijo en 120% y dejaba
     # media gráfica vacía). Las etiquetas se inclinan más porque con muchas
     # categorías los nombres se encimaban unos con otros.
-    ax.set_ylim(0, min(100, max(pct_gap.values) * 1.25))
+    ax.set_ylim(0, 108)
+    _h.referencia_alerta_gap(ax)
+    # Más abajo que en las demás: aquí los nombres del eje van inclinados y
+    # una leyenda a -0.1 quedaba encima de ellos.
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24), frameon=False, ncol=2, fontsize=8.5)
     plt.xticks(rotation=30, ha="right")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
@@ -1142,6 +1155,8 @@ def grafica_gap_por_vendedor_total(df, guardar_como=None):
         print("Las columnas 'Nombre del Vendedor' o '¿Tiene GAP?' no están presentes.")
         return None
 
+    total_equipo, gap_equipo = len(df), int((df["¿Tiene GAP?"] == "SI").sum())
+    df, excluidos = _h.solo_personas(df)
     df_gap = df[df["¿Tiene GAP?"] == "SI"].copy()
     if df_gap.empty:
         print("No hay solicitudes con GAP para graficar.")
@@ -1166,16 +1181,15 @@ def grafica_gap_por_vendedor_total(df, guardar_como=None):
     ax.barh(y - alto / 2, valores_gap, height=alto, color=MG_ROJO,
              edgecolor="white", label="Con GAP")
 
-    for yi, valor in zip(y + alto / 2, valores_total):
-        ax.text(valor + maximo * 0.015, yi, str(valor), va="center", fontsize=8)
-    for yi, valor in zip(y - alto / 2, valores_gap):
-        ax.text(valor + maximo * 0.015, yi, str(valor), va="center", fontsize=8)
+    for yi, g, t in zip(y, valores_gap, valores_total):
+        ax.text(max(g, t) + maximo * 0.015, yi, f"{g} de {t} ({g / t * 100:.0f}%)" if t else "—",
+                va="center", fontsize=8.5, color=MG_GRIS_OSCURO)
 
     ax.set_yticks(y)
     ax.set_yticklabels(vendedores)
-    ax.set_xlim(0, maximo * 1.18)
+    ax.set_xlim(0, maximo * 1.45)
 
-    ax.set_title("Cobertura de GAP por vendedor")
+    _h.titular(ax, _h.cobertura_gap(total_equipo, gap_equipo), "Solicitudes con GAP frente al total de cada vendedor" + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Número de solicitudes")
     ax.legend(loc="lower right", frameon=False)
     plt.tight_layout()
@@ -1189,6 +1203,7 @@ def grafica_gap_por_vendedor_y_status(df, guardar_como=None):
         print("Las columnas 'Nombre del Vendedor', 'Categoria' o '¿Tiene GAP?' no están presentes.")
         return None
 
+    df, excluidos = _h.solo_personas(df)
     df_gap = df[df["¿Tiene GAP?"] == "SI"].copy()
     if df_gap.empty:
         print("No hay solicitudes con GAP para graficar.")
@@ -1213,7 +1228,7 @@ def grafica_gap_por_vendedor_y_status(df, guardar_como=None):
                  label=_est.etiqueta(col), edgecolor="white")
         izquierda += valores
 
-    ax.set_title("GAP por vendedor y estatus")
+    _h.titular(ax, _h.gap_que_se_rechaza(df_gap), "Solicitudes con GAP de cada vendedor, por estatus" + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Número de solicitudes con GAP")
     ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
               mode="expand", frameon=False, fontsize=8,
@@ -1232,6 +1247,9 @@ def grafica_gap_financiado_por_vendedor(df, guardar_como=None):
     informal premiaba empates en 1 y ocultaba con cuántos créditos se logró.
     El cálculo vive en metricas.py y lo comparte el comparativo.
     """
+    fin_equipo = df[df["Categoria"] == "FINANCIADO"] if "Categoria" in df.columns else df.iloc[0:0]
+    gap_fin_equipo = int((fin_equipo["¿Tiene GAP?"] == "SI").sum()) if "¿Tiene GAP?" in df.columns else 0
+    df, excluidos = _h.solo_personas(df)
     datos = _metricas.gap_en_financiados_por_vendedor(df)
     if datos.empty:
         return None
@@ -1254,7 +1272,7 @@ def grafica_gap_financiado_por_vendedor(df, guardar_como=None):
     ax.set_xlim(0, tope * 2.1)
     ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
     ax.set_xlabel("Créditos financiados con GAP")
-    ax.set_title("GAP en créditos financiados, por vendedor")
+    _h.titular(ax, _h.gap_en_financiados(gap_fin_equipo, len(fin_equipo)), "Créditos financiados con GAP, por vendedor" + (" · sin capturas genéricas" if excluidos else ""))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     # plt.close y no plt.show: en el servidor no hay pantalla, y show() sin
