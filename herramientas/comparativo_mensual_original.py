@@ -1490,9 +1490,110 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         if "vendedor_status" in rutas_graficas:
             elementos.append(imagen_ajustada(rutas_graficas["vendedor_status"], ancho_cm=16, alto_max_cm=13))
 
-        # Tabla de promedio mensual por vendedor
+        # --- Resumen por vendedor: solicitudes + créditos + GAP en una tabla ---
+        # Antes eran dos tablas con una fila por vendedor cada una
+        # (solicitudes por mes y ticket/GAP). Fusionadas, todo lo de cada
+        # persona se lee en un renglón. La columna "Variación" no se repite
+        # aquí: la tabla "Quién subió y quién bajó" ya la muestra, con su %.
+        # Con 5 meses o más no caben las columnas de meses: se regresa a las
+        # dos tablas separadas.
         tabla_prom = tabla_promedio_vendedor(df_combinado, orden_meses)
-        if tabla_prom is not None and not tabla_prom.empty:
+        tabla_ticket = tabla_ticket_promedio_vendedor(df_combinado)
+        fusionada = False
+        if (tabla_prom is not None and not tabla_prom.empty and tabla_ticket is not None
+                and not tabla_ticket.empty and len(orden_meses) <= 4):
+            fusionada = True
+            meses_cols = [c for c in tabla_prom.columns if c not in ("Total", "Promedio", "Variación")]
+            hay_gap = "GAP" in tabla_ticket.columns
+            hay_monto_gap = "Monto GAP" in tabla_ticket.columns
+            n_m = len(meses_cols)
+
+            enc = estilo_encabezado_tabla.clone("EncFusion", fontSize=6.9, leading=8.2)
+            grp = estilo_encabezado_tabla.clone("GrupoFusion", fontSize=7.4, leading=9)
+            P = lambda t, e=enc: Paragraph(t, e)
+            grupo = ([P("Vendedor")] + [P("Solicitudes", grp)] + [""] * (n_m + 1)
+                     + [P("Créditos financiados", grp), "", ""])
+            sub = ([""] + [P(str(m).title()[:3]) for m in meses_cols] + [P("Total"), P("Prom.")]
+                   + [P("Créditos"), P("Monto"), P("Ticket")])
+            if hay_gap:
+                grupo += [P("GAP en financiados", grp), ""] + ([""] if hay_monto_gap else [])
+                sub += [P("Con GAP"), P("%")] + ([P("Monto")] if hay_monto_gap else [])
+            filas_f = [grupo, sub]
+
+            def _din(v):
+                return f"${v:,.0f}"
+            for vendedor, fila in tabla_prom.iterrows():
+                t = tabla_ticket.loc[vendedor] if vendedor in tabla_ticket.index else None
+                celdas = [_recortar_nombre(str(vendedor), maximo=20)]
+                celdas += [str(int(fila[m])) for m in meses_cols]
+                celdas += [str(int(fila["Total"])), f"{fila['Promedio']:.1f}"]
+                if t is not None:
+                    celdas += [str(int(t["Financiados"])), _din(t["Monto"]), _din(t["Ticket"])]
+                    if hay_gap:
+                        celdas += [str(int(t["GAP"])), f"{t['% GAP']:.0f}%"]
+                        celdas += [_din(t["Monto GAP"])] if hay_monto_gap else []
+                else:
+                    # Sin créditos financiados: el ticket y el % de GAP no existen.
+                    celdas += ["0", "—", "—"] + (["—", "—"] + (["—"] if hay_monto_gap else []) if hay_gap else [])
+                filas_f.append(celdas)
+
+            n_tot = int(tabla_ticket["Financiados"].sum()); m_tot = float(tabla_ticket["Monto"].sum())
+            tot = (["TOTAL EQUIPO"] + [str(int(tabla_prom[m].sum())) for m in meses_cols]
+                   + [str(int(tabla_prom["Total"].sum())), f"{tabla_prom['Promedio'].sum():.1f}",
+                      str(n_tot), _din(m_tot), _din(m_tot / n_tot) if n_tot else "—"])
+            if hay_gap:
+                g_tot = int(tabla_ticket["GAP"].sum())
+                tot += [str(g_tot), f"{g_tot / n_tot * 100:.0f}%" if n_tot else "—"]
+                tot += [_din(float(tabla_ticket["Monto GAP"].sum()))] if hay_monto_gap else []
+            filas_f.append(tot)
+
+            # Anchos: los bloques de créditos y GAP son fijos; los meses se
+            # reparten lo que sobra del ancho útil.
+            fijos = [3.3 * cm, 1.05 * cm, 1.05 * cm, 1.2 * cm, 1.85 * cm, 1.7 * cm]
+            if hay_gap:
+                fijos += [1.05 * cm, 0.95 * cm] + ([1.55 * cm] if hay_monto_gap else [])
+            ancho_mes = (_pdf_util.ANCHO_UTIL - sum(fijos)) / n_m
+            anchos_f = [fijos[0]] + [ancho_mes] * n_m + fijos[1:]
+
+            c_cred = 1 + n_m + 2           # primera columna de "Créditos financiados"
+            c_gap = c_cred + 3              # primera columna de "GAP en financiados"
+            azul, linea, fondo = (rl_colors.HexColor(_pdf_util.AZUL), rl_colors.HexColor(_pdf_util.LINEA),
+                                  rl_colors.HexColor(_pdf_util.FONDO_SUAVE))
+            ult = len(filas_f) - 1
+            estilo_f = [
+                ("SPAN", (0, 0), (0, 1)), ("SPAN", (1, 0), (c_cred - 1, 0)), ("SPAN", (c_cred, 0), (c_gap - 1, 0)),
+                ("BACKGROUND", (0, 0), (-1, 1), fondo),
+                ("LINEBELOW", (1, 0), (-1, 0), 0.4, linea),
+                ("LINEBELOW", (0, 1), (-1, 1), 0.9, azul),
+                ("LINEBEFORE", (c_cred, 0), (c_cred, -1), 0.5, linea),
+                ("FONTNAME", (0, 2), (-1, -1), FUENTE_REGULAR), ("FONTSIZE", (0, 2), (-1, -1), 7.2),
+                ("TEXTCOLOR", (0, 2), (-1, -1), rl_colors.HexColor(MG_GRIS_OSCURO)),
+                ("ALIGN", (1, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LINEBELOW", (0, 2), (-1, ult - 1), 0.4, linea),
+                ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ("LINEABOVE", (0, ult), (-1, ult), 1.0, azul), ("BACKGROUND", (0, ult), (-1, ult), fondo),
+                ("FONTNAME", (0, ult), (-1, ult), FUENTE_BOLD), ("FONTSIZE", (0, ult), (-1, ult), 7.4),
+                ("TEXTCOLOR", (0, ult), (-1, ult), azul),
+            ]
+            if hay_gap:
+                estilo_f += [("SPAN", (c_gap, 0), (-1, 0)), ("LINEBEFORE", (c_gap, 0), (c_gap, -1), 0.5, linea)]
+            tabla_f = Table(filas_f, colWidths=anchos_f, repeatRows=2)
+            tabla_f.setStyle(TableStyle(estilo_f))
+
+            elementos.append(Spacer(1, 0.35 * cm))
+            elementos.append(Paragraph("Resumen por vendedor", estilo_h3))
+            elementos.append(Paragraph(
+                f"Solicitudes por mes de captura, créditos financiados y GAP colocado en ellos. "
+                f"El promedio considera los {len(orden_meses)} meses, aunque alguno haya quedado "
+                f"en cero; el GAP es el colocado en créditos ya financiados, es decir el "
+                f"efectivamente vendido.",
+                estilo_cuerpo
+            ))
+            elementos.append(KeepTogether(tabla_f))
+
+        # Tabla de promedio mensual por vendedor (solo si no se fusionó)
+        if not fusionada and tabla_prom is not None and not tabla_prom.empty:
             elementos.append(Spacer(1, 0.3 * cm))
             elementos.append(Paragraph(
                 f"El promedio se calcula sobre los {len(orden_meses)} meses "
@@ -1557,8 +1658,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
             elementos.append(KeepTogether(tabla_estilo_mg(filas_var)))
 
         # --- Ticket promedio ----------------------------------------
-        tabla_ticket = tabla_ticket_promedio_vendedor(df_combinado)
-        if tabla_ticket is not None and not tabla_ticket.empty:
+        if not fusionada and tabla_ticket is not None and not tabla_ticket.empty:
             elementos.append(Spacer(1, 0.35 * cm))
             elementos.append(Paragraph("Ticket promedio y GAP por vendedor", estilo_h3))
             elementos.append(Paragraph(
