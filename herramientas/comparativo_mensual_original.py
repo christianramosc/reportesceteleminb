@@ -75,6 +75,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+from xml.sax.saxutils import escape as _xml_escape
 
 
 # =======================================================================
@@ -1213,6 +1214,14 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         "EncabezadoTabla", parent=styles["Normal"], fontSize=8.3, leading=10,
         textColor=rl_colors.HexColor(INBURSA_AZUL), fontName=FUENTE_BOLD, alignment=TA_CENTER)
 
+    # Celda de tabla con texto que puede partirse en dos renglones. Las
+    # celdas de texto plano nunca se parten: si no caben, se encimen con la
+    # columna vecina (pasaba en "Folios que cruzaron de mes" al comparar
+    # 4 o más meses: "Septiembre 2026: Financiado" no cabe en una línea).
+    estilo_celda_tabla = ParagraphStyle(
+        "CeldaTabla", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=8.8,
+        leading=11, textColor=rl_colors.HexColor(MG_GRIS_OSCURO), alignment=TA_CENTER)
+
     FECHA_REPORTE = datetime.date.today().strftime("%d/%m/%Y")
     PERIODO_TXT = orden_meses[0].title() if len(orden_meses) == 1 else \
         f"{orden_meses[0].title()} – {orden_meses[-1].title()}"
@@ -1717,17 +1726,29 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
                              "Monto Total a Financiar": "monto", "¿Tiene GAP?": "GAP"}
             filas_c = [["Folio", "Vendedor", "Captura", "Último<br/>estatus",
                         "Cambió"]]
+
+            def _celda(txt):
+                return Paragraph(_xml_escape(str(txt)), estilo_celda_tabla)
+
+            def _mes_estatus(mes, estatus):
+                # Dos renglones fijos (mes arriba, estatus abajo): así todas
+                # las filas se ven igual sin importar cuántos meses se
+                # comparen ni qué tan largo sea el nombre del mes.
+                return Paragraph(
+                    f"{_xml_escape(str(mes).title())}<br/>{_xml_escape(str(estatus).title())}",
+                    estilo_celda_tabla)
+
             for _, fila in cruces.iterrows():
                 cambios = ", ".join(nombres_campo.get(c, c) for c in fila["Cambios"]) or "—"
                 filas_c.append([
                     str(fila["Folio"]),
-                    _recortar_nombre(str(fila["Vendedor"]), maximo=22),
-                    f"{str(fila['Mes de captura']).title()}: {str(fila['Estatus al capturar']).title()}",
-                    f"{str(fila['Mes del último estatus']).title()}: {str(fila['Último estatus']).title()}",
-                    cambios,
+                    _celda(_recortar_nombre(str(fila["Vendedor"]), maximo=30)),
+                    _mes_estatus(fila["Mes de captura"], fila["Estatus al capturar"]),
+                    _mes_estatus(fila["Mes del último estatus"], fila["Último estatus"]),
+                    _celda(cambios),
                 ])
             elementos.append(KeepTogether(tabla_estilo_mg(
-                filas_c, col_widths=[2.2 * cm, 4.2 * cm, 3.4 * cm, 3.4 * cm, 3.4 * cm])))
+                filas_c, col_widths=[2.0 * cm, 4.3 * cm, 3.5 * cm, 3.5 * cm, 3.3 * cm])))
 
         elementos.append(Spacer(1, 0.4 * cm))
 
