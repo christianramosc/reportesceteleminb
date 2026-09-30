@@ -63,11 +63,13 @@ try:
     from . import pdf_util as _pdf_util
     from . import lateral as _lateral
     from . import hallazgos as _h
+    from . import estatus as _est
 except ImportError:  # ejecución suelta (Colab)
     import conclusiones as _conclusiones
     import pdf_util as _pdf_util
     import lateral as _lateral
     import hallazgos as _h
+    import estatus as _est
 
 try:
     from google.colab import files  # noqa
@@ -148,23 +150,30 @@ FUENTE_BOLD         = _fuente_activa["bold"]
 FUENTE_ITALICA      = _fuente_activa["italica"]
 FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
 
-COLOR_CATEGORIA = {
-    "FINANCIADO":       MG_ROJO_OSCURO,
-    "APROBADO":         MG_ROJO,
-    "CONTRAPROPUESTA":  MG_GRIS_OSCURO,
-    "RECHAZADO":        MG_ROJO_PASTEL,
-}
-ORDEN_CATEGORIAS = ["FINANCIADO", "APROBADO", "CONTRAPROPUESTA", "RECHAZADO"]
+# Estatus, orden y colores salen del catálogo central (estatus.py), igual
+# que en los otros reportes. Antes este reporte tenía solo 4 categorías fijas
+# y cualquier estatus distinto (EN PROCESO, PENDIENTE, CANCELADO...) se metía
+# a la fuerza en CONTRAPROPUESTA. Ahora cada estatus es su propia categoría y
+# recibe color solo si aparece en la bitácora (ver estatus.asignar_colores).
+COLOR_CATEGORIA = _est.COLOR_CATEGORIA     # mismo objeto: se actualiza solo
+ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
 
 # Los colores de arriba están pensados para RELLENOS de gráfica. Para TEXTO
 # sobre fondo blanco hacen falta tonos con más contraste (el rosa pastel de
 # RECHAZADO era ilegible dentro de la tabla).
-COLOR_CATEGORIA_TEXTO = {
-    "FINANCIADO":       "#7A0019",
-    "APROBADO":         "#C10024",
-    "CONTRAPROPUESTA":  "#5A5A5A",
-    "RECHAZADO":        "#9A9AA0",
-}
+def color_texto_categoria(clave):
+    """Color para escribir el estatus como TEXTO sobre fondo blanco.
+
+    Los rellenos claros de la paleta (azul claro, gris claro, dorado claro)
+    se ven bien en una gráfica pero no se leen como letra; se oscurecen
+    hasta tener contraste suficiente, conservando el mismo tono.
+    """
+    r, g, b = to_rgb(COLOR_CATEGORIA.get(clave, MG_GRIS_OSCURO))
+    luminancia = 0.299 * r + 0.587 * g + 0.114 * b
+    if luminancia > 0.55:
+        factor = 0.55 / luminancia
+        r, g, b = r * factor, g * factor, b * factor
+    return "#{:02X}{:02X}{:02X}".format(int(r * 255), int(g * 255), int(b * 255))
 
 NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
 SUBTITULO_EMPRESA = "MG Colima PYD"
@@ -328,9 +337,6 @@ COLUMNAS_MONEDA = [
 ]
 COLUMNAS_PORCENTAJE = ["Tasa Interés Anual"]
 
-STATUS_APROBADO   = ["APROBADO"]
-STATUS_FINANCIADO = ["FINANCIADOS", "FINANCIADO"]
-STATUS_RECHAZADOS = ["RECHAZADO", "RECHAZADOS", "CANCELADO", "CANCELADOS"]
 
 
 def _limpiar_moneda(serie):
@@ -388,14 +394,8 @@ def _limpiar_porcentaje(serie):
 
 
 def clasificar_status(status):
-    s = str(status).strip().upper()
-    if s in STATUS_FINANCIADO:
-        return "FINANCIADO"
-    if s in STATUS_APROBADO:
-        return "APROBADO"
-    if s in STATUS_RECHAZADOS:
-        return "RECHAZADO"
-    return "CONTRAPROPUESTA"
+    """Mismo criterio que los demás reportes (catálogo de estatus.py)."""
+    return _est.clasificar_status(status)
 
 
 def limpiar_datos(df_original):
@@ -418,6 +418,10 @@ def limpiar_datos(df_original):
     if "STATUS" in df.columns:
         df["STATUS"] = df["STATUS"].astype(str).str.strip().str.upper()
         df["Categoria"] = df["STATUS"].apply(clasificar_status)
+        _est.registrar_categorias(df["Categoria"].unique())
+        # Los colores se reparten con TODO el equipo, no por vendedor: así
+        # un estatus tiene el mismo color en los PDFs de todos los asesores.
+        _est.asignar_colores(df["Categoria"])
 
     if "Nombre del Vendedor" in df.columns:
         df["Nombre del Vendedor"] = _limpiar_texto(df["Nombre del Vendedor"], modo="titulo")
@@ -461,10 +465,14 @@ def analisis_por_vendedor(df):
 
     if "Categoria" in df.columns:
         pivote = pd.crosstab(df["Nombre del Vendedor"], df["Categoria"])
-        for col in ORDEN_CATEGORIAS:
+        # Solo los estatus que existen en la bitácora (el catálogo tiene más
+        # de diez y llenaría la tabla de columnas en cero). FINANCIADO y
+        # APROBADO siempre, porque de ahí salen tasas y rankings.
+        for col in ("FINANCIADO", "APROBADO"):
             if col not in pivote.columns:
                 pivote[col] = 0
-        tabla = tabla.join(pivote[ORDEN_CATEGORIAS])
+        cols_cat = [c for c in ORDEN_CATEGORIAS if c in pivote.columns]
+        tabla = tabla.join(pivote[cols_cat])
         tabla["% Financiado"] = (tabla["FINANCIADO"] / tabla["Total"] * 100).round(1)
 
     if "Monto Total a Financiar" in df.columns and "Categoria" in df.columns:
@@ -503,7 +511,10 @@ def resumen_equipo(df, tabla_vendedor):
         r["financiados"] = int(conteo_cat.get("FINANCIADO", 0))
         r["aprobados"] = int(conteo_cat.get("APROBADO", 0))
         r["rechazados"] = int(conteo_cat.get("RECHAZADO", 0))
-        r["en_tramite"] = int(conteo_cat.get("CONTRAPROPUESTA", 0))
+        # "En trámite" = todo lo que sigue abierto (antes solo existía
+        # CONTRAPROPUESTA porque ahí caían todos los estatus desconocidos).
+        r["en_tramite"] = int(sum(conteo_cat.get(c, 0) for c in _est.claves_por_grupo(_est.ABIERTA)
+                                  if c != "APROBADO"))
         r["pct_financiado_equipo"] = (r["financiados"] / total * 100) if total else 0
 
     if tabla_vendedor is not None and not tabla_vendedor.empty and r["n_vendedores"]:
@@ -649,7 +660,7 @@ def grafica_dona_status_vendedor(df_v, vendedor, guardar_como=None):
     for autotexto, color_rebanada in zip(autotextos, colores):
         autotexto.set_color(_color_texto_legible(color_rebanada))
 
-    etiquetas = [f"{cat} ({valor})" for cat, valor in zip(conteo.index, conteo.values)]
+    etiquetas = [f"{_est.etiqueta(cat).upper()} ({valor})" for cat, valor in zip(conteo.index, conteo.values)]
     ax.legend(wedges, etiquetas, loc="upper center", bbox_to_anchor=(0.5, -0.03),
                frameon=False, fontsize=9, ncol=2)
     _h.titular(ax, _h.tu_cierre(conteo), "Tus solicitudes por estatus de cierre")
@@ -705,7 +716,8 @@ def grafica_equipo_destacado(df_total, vendedor, guardar_como=None):
                  color=MG_ROJO_OSCURO)
 
     handles = [plt.Rectangle((0, 0), 1, 1, color=COLOR_CATEGORIA.get(c, MG_GRIS_CLARO)) for c in orden_cols]
-    ax.legend(handles, orden_cols, loc="upper center", bbox_to_anchor=(0.5, -0.12), frameon=False, ncol=4)
+    ax.legend(handles, [_est.etiqueta(c) for c in orden_cols], loc="upper center",
+              bbox_to_anchor=(0.5, -0.12), frameon=False, ncol=min(4, max(1, len(orden_cols))))
     _h.titular(ax, _h.tu_lugar(pivote.sum(axis=1), vendedor),
                "Tu volumen de solicitudes frente al resto del equipo"
                + (" · sin capturas genéricas" if excluidos else ""))
@@ -739,6 +751,10 @@ def grafica_modelos_vendedor(df_v, vendedor, guardar_como=None):
 
 
 def generar_graficas_vendedor(df_total, df_v, vendedor):
+    # Se vuelve a repartir con el equipo completo por si otra herramienta
+    # cambió los colores entre la limpieza y las gráficas (Streamlit).
+    if "Categoria" in df_total.columns:
+        _est.asignar_colores(df_total["Categoria"])
     especificaciones = [
         ("dona_status", lambda: grafica_dona_status_vendedor(df_v, vendedor, os.path.join(CARPETA_GRAFICAS, f"dona_{_slug(vendedor)}.png"))),
         ("equipo_destacado", lambda: grafica_equipo_destacado(df_total, vendedor, os.path.join(CARPETA_GRAFICAS, f"equipo_{_slug(vendedor)}.png"))),
@@ -1018,8 +1034,14 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
 
     financiado = resumen_v.get("financiado", 0)
     aprobado = resumen_v.get("aprobado", 0)
-    rechazado = resumen_v.get("rechazado", 0)
-    en_tramite = resumen_v.get("contrapropuesta", 0)
+    # Resto de estatus presentes en las solicitudes de este vendedor, en el
+    # orden del catálogo (antes solo se contemplaba RECHAZADO y
+    # CONTRAPROPUESTA; cualquier otro estatus se escondía en esta última).
+    _df_v = resumen_v.get("df")
+    _conteo_v = (_df_v["Categoria"].value_counts()
+                 if _df_v is not None and "Categoria" in getattr(_df_v, "columns", []) else pd.Series(dtype=int))
+    otros_estatus = [(c, int(_conteo_v[c])) for c in ORDEN_CATEGORIAS
+                     if c not in ("FINANCIADO", "APROBADO") and _conteo_v.get(c, 0)]
 
     # -------------------------------------------------------------
     # Construcción del documento
@@ -1069,12 +1091,13 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     elementos.append(Paragraph("Panorama del mes", estilo_h2))
+    partes_panorama = [
+        f"{financiado} ({pct_de(financiado):.1f}%) quedaron <b>FINANCIADAS</b>",
+        f"{aprobado} ({pct_de(aprobado):.1f}%) <b>APROBADAS</b> pendientes de dispersar",
+    ] + [f"{n} ({pct_de(n):.1f}%) {_est.descripcion(c)}" for c, n in otros_estatus]
     elementos.append(Paragraph(
         f"Durante {MES_TITULO} gestionaste {total_v} solicitud{'es' if total_v != 1 else ''}: "
-        f"{financiado} ({pct_de(financiado):.1f}%) quedaron <b>FINANCIADAS</b>, {aprobado} "
-        f"({pct_de(aprobado):.1f}%) <b>APROBADAS</b> pendientes de dispersar, {rechazado} "
-        f"({pct_de(rechazado):.1f}%) <b>RECHAZADAS</b> y {en_tramite} ({pct_de(en_tramite):.1f}%) "
-        f"en <b>CONTRAPROPUESTA</b> o negociación.",
+        f"{_nombres_y(partes_panorama)}.",
         estilo_cuerpo
     ))
     if resumen_v.get("monto_financiado"):
@@ -1211,8 +1234,9 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
                     # El estatus se colorea con el color de su categoría
                     # para localizar de un vistazo financiados/rechazados.
                     cat = str(valor).strip().upper() if pd.notna(valor) else "—"
-                    f.append(celda(cat, alineacion="center", negrita=True,
-                                   color=COLOR_CATEGORIA_TEXTO.get(cat, MG_GRIS_OSCURO), tam=7.6))
+                    texto_cat = _est.etiqueta(cat).upper() if cat != "—" else "—"
+                    f.append(celda(texto_cat, alineacion="center", negrita=True,
+                                   color=color_texto_categoria(cat), tam=7.6))
                 elif col == "¿Tiene GAP?":
                     texto_gap = str(valor).strip().upper() if pd.notna(valor) else "—"
                     f.append("Sí" if texto_gap in ("SI", "SÍ") else ("No" if texto_gap == "NO" else "—"))

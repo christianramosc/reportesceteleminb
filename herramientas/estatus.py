@@ -39,11 +39,17 @@ quieras que ocupe (el orden de la lista = el orden en tablas y gráficas):
         etiqueta_corta="En<br/>validación", # encabezado angosto del PDF
         descripcion="EN VALIDACIÓN (documentos en revisión)",
         sinonimos=["EN VALIDACION", "VALIDACION", "EN VALIDACIÓN"],
-        color="#9E001F",
-        grupo=ABIERTA,
+        color="#9E001F",   # solo referencia: el color real lo asigna
+        grupo=ABIERTA,     # asignar_colores() según el grupo (ver abajo)
     )
 
 Y ya: los 3 reportes lo toman automáticamente.
+
+COLORES: el campo `color` del catálogo ya no decide el color de la gráfica.
+Solo FINANCIADO y APROBADO tienen color fijo (COLORES_FIJOS). Los demás
+reciben el siguiente color libre de la paleta de su grupo, y únicamente si
+aparecen en la bitácora. Para cambiar tonos, edita PALETA_ABIERTAS o
+PALETA_CERRADAS_NEG.
 
 NOTA IMPORTANTE: no es obligatorio registrarlo. Si en la bitácora aparece
 un estatus que no está en este catálogo, el sistema ya NO lo mete a la
@@ -114,6 +120,52 @@ _PALETA_AUTOMATICA = ["#57534E",   # gris cálido
 CERRADA_POSITIVA = "cerrada_positiva"
 ABIERTA          = "abierta"
 CERRADA_NEGATIVA = "cerrada_negativa"
+
+
+# ---------------------------------------------------------------------------
+# ASIGNACIÓN DE COLORES POR PRESENCIA
+#
+# Antes cada estatus tenía su color propio de por vida (14 tonos: ámbar,
+# olivo, magenta, café...). Aunque en la bitácora solo vinieran 4 estatus,
+# las gráficas mostraban colores sueltos, fuera de la paleta de marca.
+#
+# Ahora solo FINANCIADO y APROBADO tienen color fijo (vino y rojo MG: son
+# el cierre del negocio y deben verse igual en todos los reportes). El resto
+# NO tiene color hasta que aparece en los datos: asignar_colores() recorre
+# los estatus presentes en el orden del catálogo y les va entregando el
+# siguiente color de la paleta de su grupo:
+#
+#   ABIERTA          -> azules Inbursa (y dorado de acento si hay muchos)
+#   CERRADA_NEGATIVA -> grises (se cayó: neutro, sin competir con el rojo)
+#
+# Así, un mes con Financiado, Aprobado, Contrapropuesta y Rechazado sale
+# en vino, rojo, azul Inbursa y gris: cuatro colores de marca.
+# ---------------------------------------------------------------------------
+COLORES_FIJOS = {
+    "FINANCIADO": MG_VINO,
+    "APROBADO": MG_ROJO,
+    "SIN ESTATUS": "#D9DCE1",
+}
+
+# El orden importa: alterna oscuro / medio / claro para que dos estatus
+# vecinos (en la dona o en las barras apiladas) nunca queden del mismo tono.
+PALETA_ABIERTAS = [
+    "#191970",   # azul Inbursa
+    "#5B7FD6",   # azul medio
+    "#B8C7EE",   # azul claro
+    "#C9A227",   # dorado (acento)
+    "#2F6F8F",   # azul petróleo
+    "#E6CF8A",   # dorado claro
+    "#6B6FA8",   # lavanda grisáceo
+    "#8FB3C9",   # azul acero
+]
+PALETA_CERRADAS_NEG = [
+    "#9CA3AF",   # gris medio
+    "#4B5563",   # gris oscuro
+    "#D1D5DB",   # gris claro
+    "#6B7280",   # gris pizarra
+]
+_PALETA_POR_GRUPO = {ABIERTA: PALETA_ABIERTAS, CERRADA_NEGATIVA: PALETA_CERRADAS_NEG}
 
 
 class Categoria:
@@ -312,7 +364,7 @@ _VACIOS = {"", "NAN", "NONE", "NAT", "-", "--", "N/A", "NA", "SIN STATUS",
 #  en la bitácora, aparece en los tres sin tener que pasarlo por parámetro.
 # ===========================================================================
 ORDEN_CATEGORIAS = [c.clave for c in CATALOGO]
-COLOR_CATEGORIA  = {c.clave: c.color for c in CATALOGO}
+COLOR_CATEGORIA  = {}   # se llena con asignar_colores() (más abajo)
 ETIQUETA_CATEGORIA = {c.clave: c.etiqueta for c in CATALOGO}
 ETIQUETA_CORTA_CATEGORIA = {c.clave: c.etiqueta_corta for c in CATALOGO}
 DESCRIPCION_CATEGORIA = {c.clave: c.descripcion for c in CATALOGO}
@@ -356,11 +408,6 @@ def registrar_categorias(categorias):
         ORDEN_CATEGORIAS.append(clave)
         nuevas.append(clave)
 
-    # Reparte colores automáticos entre las categorías no catalogadas
-    sin_color = [c for c in ORDEN_CATEGORIAS if c not in COLOR_CATEGORIA]
-    for i, clave in enumerate(sin_color):
-        COLOR_CATEGORIA[clave] = _PALETA_AUTOMATICA[i % len(_PALETA_AUTOMATICA)]
-
     for clave in nuevas:
         bonita = clave.capitalize()
         ETIQUETA_CATEGORIA.setdefault(clave, bonita)
@@ -368,11 +415,55 @@ def registrar_categorias(categorias):
         DESCRIPCION_CATEGORIA.setdefault(clave, clave)
         # Sin información para clasificarla, se asume que sigue viva
         GRUPO_CATEGORIA.setdefault(clave, ABIERTA)
+        # Color provisional: el definitivo lo da asignar_colores() al graficar.
+        COLOR_CATEGORIA.setdefault(clave, PALETA_ABIERTAS[-1])
         print(f"  ℹ Estatus no catalogado detectado: '{clave}'. Se grafica como "
               f"categoría propia. Para fijarle color y etiqueta, agrégalo al "
               f"CATALOGO en herramientas/estatus.py")
 
     return nuevas
+
+
+def asignar_colores(presentes=None):
+    """Reparte los colores entre los estatus que REALMENTE vienen en los datos.
+
+    presentes: claves de categoría (o una Serie de pandas, p. ej.
+        df["Categoria"]). Si es None, se toman todas las conocidas.
+
+    Reescribe COLOR_CATEGORIA en su lugar (mismo objeto) para que todas las
+    gráficas lo vean sin pasarlo por parámetro. Se llama al inicio de cada
+    tanda de gráficas; como empieza desde cero, lo que se cargó en una corrida
+    anterior de Streamlit no se arrastra a la siguiente.
+
+    Los estatus ausentes quedan SIN color: no consumen lugar en la paleta.
+    """
+    if presentes is None:
+        conjunto = set(ORDEN_CATEGORIAS)
+    else:
+        valores = presentes.dropna().unique() if hasattr(presentes, "dropna") else presentes
+        conjunto = {str(v).strip().upper() for v in valores if v is not None}
+    # Orden del catálogo (y al final los no catalogados, en el orden visto)
+    orden = [c for c in ORDEN_CATEGORIAS if c in conjunto]
+    orden += sorted(c for c in conjunto if c not in orden)
+
+    COLOR_CATEGORIA.clear()
+    usados = {grupo: 0 for grupo in _PALETA_POR_GRUPO}
+    for clave in orden:
+        if clave in COLORES_FIJOS:
+            COLOR_CATEGORIA[clave] = COLORES_FIJOS[clave]
+            continue
+        grupo = GRUPO_CATEGORIA.get(clave, ABIERTA)
+        if grupo not in _PALETA_POR_GRUPO:   # CERRADA_POSITIVA no catalogada
+            grupo = ABIERTA
+        paleta = _PALETA_POR_GRUPO[grupo]
+        COLOR_CATEGORIA[clave] = paleta[usados[grupo] % len(paleta)]
+        usados[grupo] += 1
+    return dict(COLOR_CATEGORIA)
+
+
+# Estado inicial (por si alguna gráfica se dibuja sin llamar antes a
+# asignar_colores): todos los estatus del catálogo, con la misma regla.
+asignar_colores()
 
 
 _CLAVES_CATALOGADAS = frozenset(c.clave for c in CATALOGO)
