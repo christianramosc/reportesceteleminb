@@ -1283,6 +1283,8 @@ def grafica_gap_financiado_por_vendedor(df, guardar_como=None):
 def generar_todas_las_graficas(df):
     """Genera y muestra en pantalla todas las gráficas (uso interactivo en Colab,
     sin guardarlas en disco). Se conserva igual que en el script original."""
+    if "Categoria" in df.columns:
+        _est.asignar_colores(df["Categoria"])   # colores solo para estatus presentes
     print("=" * 72)
     print(" GRÁFICAS")
     print("=" * 72)
@@ -1302,6 +1304,10 @@ def generar_graficas_para_pdf(df):
     listas para incrustarse en el reporte narrativo. Devuelve un diccionario
     {clave: ruta_png} solo con las gráficas que sí se pudieron generar
     (si falta una columna o no hay datos, esa clave simplemente no aparece)."""
+    # Colores: solo los estatus que vienen en ESTA bitácora reciben color,
+    # para que la paleta se quede en tonos de marca (ver estatus.py).
+    if "Categoria" in df.columns:
+        _est.asignar_colores(df["Categoria"])
     print("=" * 72)
     print(" GENERANDO GRÁFICAS PARA EL REPORTE")
     print("=" * 72)

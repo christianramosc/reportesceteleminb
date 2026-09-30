@@ -1097,6 +1097,17 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
     # Vendedores y modelos cuentan cada folio una vez (ver folios.py). Las
     # gráficas por mes no usan df_combinado, así que siguen siendo la foto
     # de cada bitácora.
+    # Colores con los estatus de TODOS los meses juntos (antes de consolidar,
+    # porque las gráficas por mes muestran el estatus que tuvo cada folio en
+    # cada bitácora). Así un estatus conserva su color en todo el reporte.
+    _presentes = set()
+    for _m in orden_meses:
+        _df_m = datos_por_mes[_m]["df"]
+        if "Categoria" in _df_m.columns:
+            _presentes.update(_df_m["Categoria"].dropna().unique())
+    if "Categoria" in df_combinado.columns:
+        _presentes.update(df_combinado["Categoria"].dropna().unique())
+    _est.asignar_colores(_presentes)
     df_combinado, _ = _folios.consolidar(df_combinado, orden_meses)
     print("=" * 72)
     print(" GENERANDO GRÁFICAS PARA EL REPORTE COMPARATIVO")
