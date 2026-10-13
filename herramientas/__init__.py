@@ -29,6 +29,7 @@ from .herramienta_avance_preliminar import HERRAMIENTA as _avance_preliminar
 from .herramienta_comparativo_mensual import HERRAMIENTA as _comparativo_mensual
 from .herramienta_resumen_mensual import HERRAMIENTA as _resumen_mensual
 from .herramienta_resumen_vendedor import HERRAMIENTA as _resumen_vendedor
+from .herramienta_modelo_datos import HERRAMIENTA as _modelo_datos
 
 REGISTRO = [
     _relacion_zip,
@@ -36,4 +37,5 @@ REGISTRO = [
     _comparativo_mensual,
     _resumen_mensual,
     _resumen_vendedor,
+    _modelo_datos,
 ]

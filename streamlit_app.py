@@ -214,7 +214,7 @@ for tab, herramienta in zip(tabs, REGISTRO):
                         l.strip() for l in texto_vend.splitlines() if l.strip()
                     ]
 
-        if herramienta.id == "comparativo_mensual":
+        if herramienta.id in ("comparativo_mensual", "modelo_datos"):
             with st.expander("Etiquetas de mes (opcional)"):
                 st.caption(
                     "Por default se usa el nombre de la hoja de cada Excel. "
@@ -264,6 +264,12 @@ for tab, herramienta in zip(tabs, REGISTRO):
                 )
                 # Los bytes ya están en memoria: no se lee del disco, porque
                 # el archivo generado se borró junto con el temporal.
+                # La ficha de una página se muestra antes de los botones: es
+                # lo que se va a reenviar, así que conviene verla primero.
+                for nombre, contenido in resultado["archivos"]:
+                    if nombre.lower().endswith(".png"):
+                        with st.expander("Vista previa de la ficha para WhatsApp", expanded=True):
+                            st.image(contenido, width=420)
                 columnas = st.columns(min(len(resultado["archivos"]), 3))
                 for i, (nombre, contenido) in enumerate(resultado["archivos"]):
                     extension = nombre.rsplit(".", 1)[-1].upper()

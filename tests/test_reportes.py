@@ -55,7 +55,7 @@ def test_genera_pdf_y_word(identificador, bitacora_excel, tmp_path):
         _limpiar_temporales_como_la_app()
 
     extensiones = sorted(os.path.splitext(r)[1] for r in rutas)
-    assert extensiones == [".docx", ".pdf", ".xlsx"], f"{identificador} -> {rutas}"
+    assert extensiones == [".docx", ".pdf", ".png", ".xlsx"], f"{identificador} -> {rutas}"
     for ruta in rutas:
         assert os.path.getsize(ruta) > 10_000, f"{ruta} salió sospechosamente chico"
 
@@ -140,7 +140,7 @@ def test_sigue_funcionando_con_los_estatus_originales(bitacora_clasica_excel, tm
         rutas = _ejecutar("avance_preliminar", bitacora_clasica_excel, str(tmp_path))
     finally:
         _limpiar_temporales_como_la_app()
-    assert len(rutas) == 3   # PDF, Word y el libro de análisis
+    assert len(rutas) == 4   # PDF, Word, libro de análisis y ficha PNG
 
 
 def test_avisa_si_no_puede_generar_ninguna_grafica():

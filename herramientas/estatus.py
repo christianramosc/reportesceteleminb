@@ -158,6 +158,8 @@ PALETA_ABIERTAS = [
     "#E6CF8A",   # dorado claro
     "#6B6FA8",   # lavanda grisáceo
     "#8FB3C9",   # azul acero
+    "#8C6D1F",   # dorado oscuro: el catálogo tiene 9 estatus abiertos además
+                 # de APROBADO; con este, ni el catálogo completo repite color
 ]
 PALETA_CERRADAS_NEG = [
     "#9CA3AF",   # gris medio

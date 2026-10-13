@@ -6,6 +6,8 @@ from datetime import date
 
 from . import avance_preliminar_original as _avance
 from .docx_reportes import generar_docx_avance
+from . import conclusiones as _c
+from .ficha_resumen import generar_ficha_segura, ficha_mensual
 from .libros_analisis import libro_mensual
 from .registro import Herramienta
 
@@ -71,7 +73,20 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
     libro_mensual(df, ruta_xlsx, "Avance Preliminar — datos y cálculos",
                   os.path.basename(rutas_archivos[0]))
 
-    return [ruta_pdf, ruta_docx, ruta_xlsx]
+    # Ficha de una página (PNG) para mandar por WhatsApp.
+    periodo = f"Corte al {ctx['dia_actual']} de {ctx['nombre_mes']} de {ctx['fecha_corte'].year}"
+    if hoja:
+        # Si la hoja es del mismo mes del corte, no se repite mes y año.
+        if _c.mes_desde_hoja(hoja) == ctx["fecha_corte"].month:
+            periodo = f"{str(hoja).strip().title()}  ·  corte al día {ctx['dia_actual']}"
+        else:
+            periodo = f"{str(hoja).strip().title()}  ·  {periodo.lower()}"
+    ruta_png = generar_ficha_segura(
+        ficha_mensual, df, os.path.join(carpeta_salida, f"Ficha_Avance_{marca}.png"),
+        modo="avance", periodo=periodo, pdv=nombre_pdv, analista=nombre_analista,
+        resumen=resumen, ctx=ctx, hoja=hoja)
+
+    return [ruta_pdf, ruta_docx, ruta_xlsx] + ([ruta_png] if ruta_png else [])
 
 
 HERRAMIENTA = Herramienta(
@@ -79,8 +94,9 @@ HERRAMIENTA = Herramienta(
     nombre="📈 Avance Preliminar Mensual",
     descripcion=(
         "Sube el Excel de la bitácora del mes (el que genera la herramienta "
-        "'Relación de Clientes') y obtén el PDF de avance preliminar más un "
-        "Word editable con el mismo contenido."
+        "'Relación de Clientes') y obtén el PDF de avance preliminar, un "
+        "Word editable con el mismo contenido y una ficha de una página "
+        "(imagen) para compartir por WhatsApp."
     ),
     multiple_archivos=False,
     tipos_permitidos=["xlsx"],
