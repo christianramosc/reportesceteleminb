@@ -6,6 +6,7 @@ from datetime import date
 
 from . import resumen_mensual_original as _resumen
 from .docx_reportes import generar_docx_resumen
+from .ficha_resumen import generar_ficha_segura, ficha_mensual
 from .libros_analisis import libro_mensual
 from .registro import Herramienta
 
@@ -59,7 +60,15 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
     libro_mensual(df, ruta_xlsx, "Resumen Mensual — datos y cálculos",
                   os.path.basename(rutas_archivos[0]))
 
-    return [ruta_pdf, ruta_docx, ruta_xlsx]
+    # Ficha de una página (PNG) para mandar por WhatsApp.
+    import pandas as _pd
+    hoja = _pd.ExcelFile(rutas_archivos[0]).sheet_names[0]
+    ruta_png = generar_ficha_segura(
+        ficha_mensual, df, os.path.join(carpeta_salida, f"Ficha_Resumen_Mensual_{marca}.png"),
+        modo="cierre", periodo=str(hoja).strip().title(), pdv=nombre_pdv,
+        analista=nombre_analista, resumen=resumen)
+
+    return [ruta_pdf, ruta_docx, ruta_xlsx] + ([ruta_png] if ruta_png else [])
 
 
 HERRAMIENTA = Herramienta(
@@ -67,8 +76,8 @@ HERRAMIENTA = Herramienta(
     nombre="🗓️ Resumen Mensual",
     descripcion=(
         "Sube el Excel de la bitácora del mes ya cerrado y obtén el PDF de "
-        "resumen mensual (cierre de mes) más un Word editable con el mismo "
-        "contenido."
+        "resumen mensual (cierre de mes), un Word editable con el mismo "
+        "contenido y una ficha de una página (imagen) para compartir por WhatsApp."
     ),
     multiple_archivos=False,
     tipos_permitidos=["xlsx"],

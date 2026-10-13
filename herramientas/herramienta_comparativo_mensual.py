@@ -7,7 +7,9 @@ from datetime import date
 import pandas as pd
 
 from . import comparativo_mensual_original as _comparativo
+from . import folios as _folios
 from .docx_reportes import generar_docx_comparativo
+from .ficha_resumen import generar_ficha_segura, ficha_comparativo
 from .libros_analisis import libro_comparativo
 from .registro import Herramienta
 
@@ -71,7 +73,15 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
         ", ".join(os.path.basename(r) for r in rutas_archivos),
     )
 
-    return [ruta_pdf, ruta_docx, ruta_xlsx]
+    # Ficha de una página (PNG) para mandar por WhatsApp. Las cifras del
+    # periodo cuentan cada folio una vez, igual que la portada del PDF.
+    df_unico, _ = _folios.consolidar(df_combinado, orden_meses)
+    ruta_png = generar_ficha_segura(
+        ficha_comparativo, df_unico, tabla_comp, orden_meses, df_combinado,
+        os.path.join(carpeta_salida, f"Ficha_Comparativo_{marca}.png"),
+        pdv=nombre_pdv, analista=nombre_analista)
+
+    return [ruta_pdf, ruta_docx, ruta_xlsx] + ([ruta_png] if ruta_png else [])
 
 
 HERRAMIENTA = Herramienta(
@@ -79,8 +89,9 @@ HERRAMIENTA = Herramienta(
     nombre="📊 Comparativo Mensual",
     descripcion=(
         "Sube 2 o más Excel de la bitácora (uno por mes, mismo formato que "
-        "el avance preliminar) y obtén el PDF comparativo entre esos meses "
-        "más un Word editable con el mismo contenido."
+        "el avance preliminar) y obtén el PDF comparativo entre esos meses, "
+        "un Word editable con el mismo contenido y una ficha de una página "
+        "(imagen) para compartir por WhatsApp."
     ),
     multiple_archivos=True,
     tipos_permitidos=["xlsx"],
