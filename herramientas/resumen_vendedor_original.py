@@ -773,6 +773,13 @@ def _slug(texto):
     return re.sub(r"[\s]+", "_", texto)
 
 
+def _nombre_para_archivo(texto):
+    """Nombre completo del vendedor tal cual (con espacios y acentos), sin
+    los caracteres que Windows no acepta en un nombre de archivo."""
+    texto = re.sub(r'[\\/:*?"<>|]', "", str(texto))
+    return re.sub(r"\s+", " ", texto).strip()
+
+
 # =======================================================================
 # 8) REPORTE PDF INDIVIDUAL (ReportLab)
 # =======================================================================
@@ -888,7 +895,8 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
 
     if nombre_archivo is None:
         nombre_archivo = os.path.join(
-            CARPETA_PDFS, f"Resumen_Mensual_{_slug(vendedor)}_{ctx_mes['nombre_mes']}_{ctx_mes['anio']}.pdf"
+            CARPETA_PDFS,
+            f"{_nombre_para_archivo(vendedor)}_{ctx_mes['nombre_mes'][:3].title()}{str(ctx_mes['anio'])[-2:]}.pdf"
         )
 
     MES_TITULO = f"{ctx_mes['nombre_mes'].capitalize()} {ctx_mes['anio']}"

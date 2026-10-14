@@ -117,4 +117,4 @@ def test_herramienta_de_la_app(tmp_path):
             df.to_excel(w, sheet_name=etiqueta, index=False)
         rutas.append(str(ruta))
     salida = ejecutar(rutas, carpeta_salida=str(tmp_path / "salida"))
-    assert len(salida) == 1 and salida[0].endswith("Modelo_Datos_Bitacora_Jun26-Jul26.xlsx")
+    assert len(salida) == 1 and salida[0].endswith("Modelo_Jun26-Jul26.xlsx")

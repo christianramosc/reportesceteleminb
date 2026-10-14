@@ -2,13 +2,13 @@
 """Adaptador de avance_preliminar_original.py (Avance Preliminar Mensual) para el registro."""
 
 import os
-from datetime import date
 
 from . import avance_preliminar_original as _avance
 from .docx_reportes import generar_docx_avance
 from . import conclusiones as _c
 from .ficha_resumen import generar_ficha_segura, ficha_mensual
 from .libros_analisis import libro_mensual
+from .nombres import marca_fecha
 from .registro import Herramienta
 
 # Valores originales del script, usados como default si el usuario no
@@ -38,8 +38,8 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
     ctx = _avance.contexto_de_corte(fecha_corte)
     rutas_graficas = _avance.generar_graficas_para_pdf(df)
 
-    marca = date.today().strftime("%Y%m%d_%H%M")
-    ruta_pdf = os.path.join(carpeta_salida, f"Avance_Preliminar_{marca}.pdf")
+    base = f"Avance_{marca_fecha()}"
+    ruta_pdf = os.path.join(carpeta_salida, f"{base}.pdf")
 
     # El PDF deja aquí sus flowables y el Word se construye con ESOS mismos
     # elementos, para que ambos documentos digan exactamente lo mismo.
@@ -62,14 +62,14 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
 
     ruta_docx = generar_docx_avance(
         elementos_pdf, nombre_pdv, nombre_analista,
-        nombre_archivo=f"Avance_Preliminar_{marca}.docx",
+        nombre_archivo=f"{base}.docx",
         carpeta_salida=carpeta_salida,
     )
 
     # Libro de análisis: las mismas tablas del reporte pero con fórmulas
     # vivas, para que quien lo reciba pueda auditarlas o rehacer el corte
     # por su cuenta sin volver a ejecutar la herramienta.
-    ruta_xlsx = os.path.join(carpeta_salida, "Avance_Preliminar_Datos_{marca}.xlsx".format(marca=marca))
+    ruta_xlsx = os.path.join(carpeta_salida, f"{base}.xlsx")
     libro_mensual(df, ruta_xlsx, "Avance Preliminar — datos y cálculos",
                   os.path.basename(rutas_archivos[0]))
 
@@ -82,7 +82,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
         else:
             periodo = f"{str(hoja).strip().title()}  ·  {periodo.lower()}"
     ruta_png = generar_ficha_segura(
-        ficha_mensual, df, os.path.join(carpeta_salida, f"Ficha_Avance_{marca}.png"),
+        ficha_mensual, df, os.path.join(carpeta_salida, f"{base}.png"),
         modo="avance", periodo=periodo, pdv=nombre_pdv, analista=nombre_analista,
         resumen=resumen, ctx=ctx, hoja=hoja)
 
