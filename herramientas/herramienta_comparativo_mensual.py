@@ -2,7 +2,6 @@
 """Adaptador de comparativo_mensual_original.py (Reporte Comparativo Mensual) para el registro."""
 
 import os
-from datetime import date
 
 import pandas as pd
 
@@ -11,6 +10,7 @@ from . import folios as _folios
 from .docx_reportes import generar_docx_comparativo
 from .ficha_resumen import generar_ficha_segura, ficha_comparativo
 from .libros_analisis import libro_comparativo
+from .nombres import marca_fecha
 from .registro import Herramienta
 
 _PDV_DEFECTO = _comparativo.SUBTITULO_EMPRESA
@@ -48,8 +48,8 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
     df_combinado = pd.concat([datos_por_mes[m]["df"] for m in orden_meses], ignore_index=True)
     rutas_graficas = _comparativo.generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado)
 
-    marca = date.today().strftime("%Y%m%d_%H%M")
-    ruta_pdf = os.path.join(carpeta_salida, f"Reporte_Comparativo_{marca}.pdf")
+    base = f"Comparativo_{marca_fecha()}"
+    ruta_pdf = os.path.join(carpeta_salida, f"{base}.pdf")
     # El Word se arma con los mismos flowables que el PDF (ver docx_reportes).
     elementos_pdf = []
     _comparativo.generar_reporte_pdf_comparativo(
@@ -59,14 +59,14 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
 
     ruta_docx = generar_docx_comparativo(
         elementos_pdf, nombre_pdv, nombre_analista,
-        nombre_archivo=f"Reporte_Comparativo_{marca}.docx",
+        nombre_archivo=f"{base}.docx",
         carpeta_salida=carpeta_salida,
     )
 
     # Libro de análisis: las mismas tablas del reporte pero con fórmulas
     # vivas, para que quien lo reciba pueda auditarlas o rehacer el corte
     # por su cuenta sin volver a ejecutar la herramienta.
-    ruta_xlsx = os.path.join(carpeta_salida, f"Comparativo_Datos_{marca}.xlsx")
+    ruta_xlsx = os.path.join(carpeta_salida, f"{base}.xlsx")
     libro_comparativo(
         df_combinado, orden_meses, ruta_xlsx,
         "Comparativo Mensual — datos y cálculos",
@@ -78,7 +78,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
     df_unico, _ = _folios.consolidar(df_combinado, orden_meses)
     ruta_png = generar_ficha_segura(
         ficha_comparativo, df_unico, tabla_comp, orden_meses, df_combinado,
-        os.path.join(carpeta_salida, f"Ficha_Comparativo_{marca}.png"),
+        os.path.join(carpeta_salida, f"{base}.png"),
         pdv=nombre_pdv, analista=nombre_analista)
 
     return [ruta_pdf, ruta_docx, ruta_xlsx] + ([ruta_png] if ruta_png else [])

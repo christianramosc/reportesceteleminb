@@ -888,7 +888,8 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
 
     if nombre_archivo is None:
         nombre_archivo = os.path.join(
-            CARPETA_PDFS, f"Resumen_Mensual_{_slug(vendedor)}_{ctx_mes['nombre_mes']}_{ctx_mes['anio']}.pdf"
+            CARPETA_PDFS,
+            f"{_slug(vendedor)}_{ctx_mes['nombre_mes'][:3].title()}{str(ctx_mes['anio'])[-2:]}.pdf"
         )
 
     MES_TITULO = f"{ctx_mes['nombre_mes'].capitalize()} {ctx_mes['anio']}"

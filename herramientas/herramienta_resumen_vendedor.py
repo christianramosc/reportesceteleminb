@@ -13,6 +13,7 @@ import zipfile
 
 from . import resumen_vendedor_original as _rv
 from .libros_analisis import libro_mensual
+from .nombres import mes_corto
 from .registro import Herramienta
 
 _PDV_DEFECTO = _rv.SUBTITULO_EMPRESA
@@ -80,8 +81,8 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
 
     # Un botón de descarga por vendedor sería inmanejable con un equipo
     # grande, así que se entrega un solo ZIP con todos los PDFs dentro.
-    nombre_zip = (f"Resumenes_Vendedor_{ctx_mes['nombre_mes']}_"
-                  f"{ctx_mes['anio']}.zip")
+    base = f"Vendedores_{mes_corto(ctx_mes['nombre_mes'], ctx_mes['anio'])}"
+    nombre_zip = f"{base}.zip"
     ruta_zip = os.path.join(carpeta_salida, nombre_zip)
     with zipfile.ZipFile(ruta_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         for ruta in rutas_pdf:
@@ -92,9 +93,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
     # Libro de análisis: los PDFs por vendedor son de lectura, no de
     # trabajo. Esto entrega la base para que cualquiera reconstruya los
     # mismos KPIs con sus propios cortes.
-    ruta_xlsx = os.path.join(
-        carpeta_salida,
-        f"Resumen_Vendedor_Datos_{ctx_mes['nombre_mes']}_{ctx_mes['anio']}.xlsx")
+    ruta_xlsx = os.path.join(carpeta_salida, f"{base}.xlsx")
     libro_mensual(df, ruta_xlsx,
                   f"Resumen por Vendedor — datos y cálculos "
                   f"({ctx_mes['nombre_mes'].title()} {ctx_mes['anio']})",
