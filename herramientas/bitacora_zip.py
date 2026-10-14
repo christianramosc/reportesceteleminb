@@ -593,11 +593,7 @@ def procesar_zip_a_excel(ruta_zip: str, nombre_base: str = None,
     carpeta_trabajo = os.path.join(
         os.path.dirname(carpeta_salida) or ".", f"_extraido_{nombre_base}"
     )
-    fecha_proceso = datetime.now().strftime("%Y-%m-%d")
     os.makedirs(carpeta_salida, exist_ok=True)
-    archivo_salida = os.path.join(
-        carpeta_salida, f"{nombre_base}_{fecha_proceso}_BITACORA.xlsx"
-    )
 
     print(f"\n{'='*60}")
     print(f"   RELACIÓN DE CLIENTES — MG COLIMA ({nombre_base})")
@@ -614,6 +610,11 @@ def procesar_zip_a_excel(ruta_zip: str, nombre_base: str = None,
         else nombre_base
     )
     nombre_hoja = detectar_mes_anio(fuente_nombre_mes)
+
+    # Nombre corto, del mismo estilo que los demás reportes: "Bitacora_Jun26.xlsx"
+    # (antes "0_JUNIO 2026_2026-10-13_BITACORA.xlsx").
+    mes, anio = nombre_hoja.split()
+    archivo_salida = os.path.join(carpeta_salida, f"Bitacora_{mes[:3].title()}{anio[-2:]}.xlsx")
 
     carpetas_status = detectar_carpetas_status(carpeta_raiz)
 
