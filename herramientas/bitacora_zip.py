@@ -611,10 +611,14 @@ def procesar_zip_a_excel(ruta_zip: str, nombre_base: str = None,
     )
     nombre_hoja = detectar_mes_anio(fuente_nombre_mes)
 
-    # Nombre corto, del mismo estilo que los demás reportes: "Bitacora_Jun26.xlsx"
+    # Nombre corto, del mismo estilo que los demás reportes: mes de la
+    # bitácora + fecha en que se generó, ej. "Bitacora_Jun26_13oct26.xlsx"
     # (antes "0_JUNIO 2026_2026-10-13_BITACORA.xlsx").
     mes, anio = nombre_hoja.split()
-    archivo_salida = os.path.join(carpeta_salida, f"Bitacora_{mes[:3].title()}{anio[-2:]}.xlsx")
+    hoy = datetime.now()
+    generado = f"{hoy.day:02d}{MESES_ES[hoy.month][:3].lower()}{hoy:%y}"
+    archivo_salida = os.path.join(
+        carpeta_salida, f"Bitacora_{mes[:3].title()}{anio[-2:]}_{generado}.xlsx")
 
     carpetas_status = detectar_carpetas_status(carpeta_raiz)
 
