@@ -57,6 +57,10 @@ warnings.filterwarnings("ignore")
 import os
 import calendar
 import datetime
+try:
+    from . import fechas as _fechas   # hora de México, no la del servidor
+except ImportError:  # ejecución suelta (Colab)
+    import fechas as _fechas
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -533,7 +537,7 @@ def limpiar_datos(df_original):
         df["Fecha de Nacimiento"] = pd.to_datetime(
             df["Fecha de Nacimiento"], dayfirst=True, errors="coerce"
         )
-        hoy = pd.Timestamp.today()
+        hoy = pd.Timestamp(_fechas.ahora())
         df["Edad"] = ((hoy - df["Fecha de Nacimiento"]).dt.days // 365.25)
 
     if "¿Tiene GAP?" in df.columns:
@@ -560,7 +564,7 @@ def contexto_de_corte(fecha_corte=None):
     string ("15/08/2026") o un date/datetime ya construido.
     """
     if fecha_corte is None:
-        fecha_corte = datetime.date.today()
+        fecha_corte = _fechas.hoy()
     elif isinstance(fecha_corte, str):
         fecha_corte = pd.to_datetime(fecha_corte, dayfirst=True).date()
     elif isinstance(fecha_corte, datetime.datetime):

@@ -13,8 +13,8 @@ import zipfile
 
 from . import resumen_vendedor_original as _rv
 from .libros_analisis import libro_mensual
-from .nombres import mes_corto
 from .registro import Herramienta
+from . import nombres_archivo as _nombres
 
 _PDV_DEFECTO = _rv.SUBTITULO_EMPRESA
 _ANALISTA_DEFECTO = _rv.NOMBRE_ANALISTA
@@ -69,20 +69,24 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
         )
 
     print(f"  Vendedores a procesar: {len(vendedores)}")
+    mes_largo = f"{ctx_mes['nombre_mes'].title()} {ctx_mes['anio']}"
+    mes_corto = f"{_nombres.CORTOS[ctx_mes['mes_num'] - 1]}{str(ctx_mes['anio'])[2:]}"
     rutas_pdf = []
     for vendedor in vendedores:
         resumen_v = _rv.analisis_individual(df, vendedor, tabla_vendedor, resumen_eq)
         graficas = _rv.generar_graficas_vendedor(df, resumen_v["df"], vendedor)
+        # Dentro del ZIP: "Jessica Elizabeth Machuca Roque - Septiembre 2026.pdf"
+        nombre_pdf = _nombres.seguro(f"{vendedor} - {mes_largo}") + ".pdf"
         ruta = _rv.generar_reporte_pdf_vendedor(
-            vendedor, resumen_v, tabla_vendedor, resumen_eq, ctx_mes, graficas
+            vendedor, resumen_v, tabla_vendedor, resumen_eq, ctx_mes, graficas,
+            nombre_archivo=os.path.join(carpeta_pdfs, nombre_pdf),
         )
         rutas_pdf.append(ruta)
         print(f"  ✓ {vendedor}")
 
     # Un botón de descarga por vendedor sería inmanejable con un equipo
     # grande, así que se entrega un solo ZIP con todos los PDFs dentro.
-    base = f"Vendedores_{mes_corto(ctx_mes['nombre_mes'], ctx_mes['anio'])}"
-    nombre_zip = f"{base}.zip"
+    nombre_zip = f"Vendedores_{mes_corto}.zip"
     ruta_zip = os.path.join(carpeta_salida, nombre_zip)
     with zipfile.ZipFile(ruta_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         for ruta in rutas_pdf:
@@ -93,7 +97,9 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
     # Libro de análisis: los PDFs por vendedor son de lectura, no de
     # trabajo. Esto entrega la base para que cualquiera reconstruya los
     # mismos KPIs con sus propios cortes.
-    ruta_xlsx = os.path.join(carpeta_salida, f"{base}.xlsx")
+    ruta_xlsx = os.path.join(
+        carpeta_salida,
+        f"Vendedores_{mes_corto}_datos.xlsx")
     libro_mensual(df, ruta_xlsx,
                   f"Resumen por Vendedor — datos y cálculos "
                   f"({ctx_mes['nombre_mes'].title()} {ctx_mes['anio']})",

@@ -22,7 +22,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None, **_opc
     meses = modelo["dim_mes"]
     tramo = meses.mes_corto.iloc[0] if len(meses) == 1 else \
         f"{meses.mes_corto.iloc[0]}-{meses.mes_corto.iloc[-1]}"
-    nombre = f"Modelo_{tramo.replace(' ', '')}.xlsx"
+    nombre = f"Modelo_Datos_Bitacora_{tramo.replace(' ', '')}.xlsx"
     ruta = exportar_excel(modelo, os.path.join(carpeta_salida, nombre),
                           fuentes=[_nombre_original(r) for r in rutas_archivos],
                           carpeta_temporal=carpeta_salida)

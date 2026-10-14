@@ -19,6 +19,10 @@ Además del modelo, el libro trae:
 
 import os
 from datetime import datetime
+try:
+    from . import fechas as _fechas   # hora de México, no la del servidor
+except ImportError:  # ejecución suelta (Colab)
+    import fechas as _fechas
 
 import matplotlib
 matplotlib.use("Agg")
@@ -230,7 +234,7 @@ def _hoja_leeme(wb, modelo, fuentes, ruta_png):
 
     ws["B2"] = "Modelo de datos de la bitácora de solicitudes"
     ws["B2"].font = Font(name=FUENTE, size=16, bold=True, color=AZUL)
-    ws["B3"] = f"Periodo: {periodo}  ·  Generado el {datetime.now():%d/%m/%Y %H:%M}"
+    ws["B3"] = f"Periodo: {periodo}  ·  Generado el {_fechas.ahora():%d/%m/%Y %H:%M}"
     ws["B3"].font = Font(name=FUENTE, size=10, color=GRIS_TEXTO)
     ws["B4"] = f"Archivos de origen: {', '.join(fuentes)}"
     ws["B4"].font = Font(name=FUENTE, size=9, color=GRIS_TEXTO)

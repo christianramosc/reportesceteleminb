@@ -21,6 +21,12 @@ import subprocess
 import unicodedata
 import pandas as pd
 from datetime import datetime
+try:
+    from . import fechas as _fechas   # hora de México, no la del servidor
+    from . import nombres_archivo as _nombres
+except ImportError:  # ejecución suelta (Colab)
+    import fechas as _fechas
+    import nombres_archivo as _nombres
 from pathlib import Path
 
 # ─────────────────────────────────────────────
@@ -75,7 +81,7 @@ def detectar_mes_anio(texto: str) -> str:
     m_anio = re.search(r"(20\d{2})", t)
     anio_detectado = m_anio.group(1) if m_anio else None
 
-    ahora = datetime.now()
+    ahora = _fechas.ahora()
     if not mes_detectado:
         print(f"  ⚠ No se detectó un mes en '{texto}'; se usa el mes actual como respaldo.")
         mes_detectado = MESES_ES[ahora.month]
@@ -611,14 +617,12 @@ def procesar_zip_a_excel(ruta_zip: str, nombre_base: str = None,
     )
     nombre_hoja = detectar_mes_anio(fuente_nombre_mes)
 
-    # Nombre corto, del mismo estilo que los demás reportes: mes de la
-    # bitácora + fecha en que se generó, ej. "Bitacora_Jun26_13oct26.xlsx"
-    # (antes "0_JUNIO 2026_2026-10-13_BITACORA.xlsx").
-    mes, anio = nombre_hoja.split()
-    hoy = datetime.now()
-    generado = f"{hoy.day:02d}{MESES_ES[hoy.month][:3].lower()}{hoy:%y}"
+    # Nombre corto con el mes y la fecha en que se generó:
+    # Bitacora_Oct26_al_13-10-2026.xlsx
     archivo_salida = os.path.join(
-        carpeta_salida, f"Bitacora_{mes[:3].title()}{anio[-2:]}_{generado}.xlsx")
+        carpeta_salida,
+        f"Bitacora_{_nombres.periodo_corto(nombre_hoja)}_al_{_fechas.hoy():%d-%m-%Y}.xlsx",
+    )
 
     carpetas_status = detectar_carpetas_status(carpeta_raiz)
 
@@ -665,7 +669,7 @@ def procesar_zip_a_excel(ruta_zip: str, nombre_base: str = None,
     print(f"\n{'='*60}")
     print(f"  Reporte generado: {archivo_salida}")
     print(f"  Total de clientes : {len(registros_totales)}")
-    print(f"  Fecha de proceso  : {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    print(f"  Fecha de proceso  : {_fechas.ahora().strftime('%d/%m/%Y %H:%M')}")
     print(f"{'='*60}")
 
     return archivo_salida

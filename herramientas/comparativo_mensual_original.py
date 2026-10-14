@@ -41,6 +41,10 @@ warnings.filterwarnings("ignore")
 import os
 import re
 import datetime
+try:
+    from . import fechas as _fechas   # hora de México, no la del servidor
+except ImportError:  # ejecución suelta (Colab)
+    import fechas as _fechas
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -1169,7 +1173,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
                                      df_combinado, nombre_archivo=None,
                                      recolectar_elementos=None):
     if nombre_archivo is None:
-        fecha_archivo = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        fecha_archivo = _fechas.ahora().strftime("%Y%m%d_%H%M")
         rango = f"{orden_meses[0].title()}" if len(orden_meses) == 1 else \
                 f"{orden_meses[0].title()}_a_{orden_meses[-1].title()}"
         nombre_archivo = f"Reporte_Comparativo_{rango}_{fecha_archivo}.pdf"
@@ -1233,7 +1237,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         "CeldaTabla", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=8.8,
         leading=11, textColor=rl_colors.HexColor(MG_GRIS_OSCURO), alignment=TA_CENTER)
 
-    FECHA_REPORTE = datetime.date.today().strftime("%d/%m/%Y")
+    FECHA_REPORTE = _fechas.hoy().strftime("%d/%m/%Y")
     PERIODO_TXT = orden_meses[0].title() if len(orden_meses) == 1 else \
         f"{orden_meses[0].title()} – {orden_meses[-1].title()}"
 

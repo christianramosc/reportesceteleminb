@@ -27,6 +27,10 @@ except ImportError:                       # ejecución suelta (Colab)
     import lateral as _lateral
 
 import datetime
+try:
+    from . import fechas as _fechas   # hora de México, no la del servidor
+except ImportError:  # ejecución suelta (Colab)
+    import fechas as _fechas
 import os
 
 import numpy as np
@@ -64,7 +68,7 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     para no repetir esos cálculos ni duplicar la salida de consola.
     """
     if nombre_archivo is None:
-        fecha_archivo = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        fecha_archivo = _fechas.ahora().strftime("%Y%m%d_%H%M")
         nombre_archivo = f"Reporte_Bitacora_{fecha_archivo}.pdf"
 
     print("=" * 72)
@@ -94,7 +98,7 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     estilo_encabezado_tabla = _estilos["encabezado_tabla"]
     estilo_encabezado_tabla_compacto = _estilos["encabezado_tabla_compacto"]
 
-    FECHA_REPORTE = datetime.date.today().strftime("%d/%m/%Y")
+    FECHA_REPORTE = _fechas.hoy().strftime("%d/%m/%Y")
 
     _maq = crear_maquetadores(
         _estilos, subtitulo="Reporte de Bitácora de Solicitudes",

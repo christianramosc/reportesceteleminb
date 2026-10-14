@@ -2,13 +2,14 @@
 """Adaptador de resumen_mensual_original.py (Resumen Mensual / cierre de mes) para el registro."""
 
 import os
+import pandas as pd
 
 from . import resumen_mensual_original as _resumen
 from .docx_reportes import generar_docx_resumen
-from .ficha_resumen import generar_ficha_segura, ficha_mensual
+from .ficha_resumen import fichas_ambos_formatos, ficha_mensual
 from .libros_analisis import libro_mensual
-from .nombres import marca_fecha
 from .registro import Herramienta
+from . import nombres_archivo as _nombres
 
 # Valores originales del script, usados como default si el usuario no
 # escribe nada en el campo de PDV / analista.
@@ -35,7 +36,9 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
     tabla_vendedor = _resumen.analisis_por_vendedor(df)
     tabla_categoria = _resumen.analisis_financiero_por_categoria(df)
 
-    base = f"Resumen_{marca_fecha()}"
+    # Nombre corto: Resumen_Jul26 (+ .pdf, .docx, _datos.xlsx, fichas)
+    hoja = pd.ExcelFile(rutas_archivos[0]).sheet_names[0]
+    base = f"Resumen_{_nombres.periodo_corto(hoja)}"
     ruta_pdf = os.path.join(carpeta_salida, f"{base}.pdf")
 
     # El PDF deja aquí sus flowables y el Word se construye con ESOS mismos
@@ -56,19 +59,18 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
     # Libro de análisis: las mismas tablas del reporte pero con fórmulas
     # vivas, para que quien lo reciba pueda auditarlas o rehacer el corte
     # por su cuenta sin volver a ejecutar la herramienta.
-    ruta_xlsx = os.path.join(carpeta_salida, f"{base}.xlsx")
+    ruta_xlsx = os.path.join(carpeta_salida, f"{base}_datos.xlsx")
     libro_mensual(df, ruta_xlsx, "Resumen Mensual — datos y cálculos",
                   os.path.basename(rutas_archivos[0]))
 
     # Ficha de una página (PNG) para mandar por WhatsApp.
-    import pandas as _pd
-    hoja = _pd.ExcelFile(rutas_archivos[0]).sheet_names[0]
-    ruta_png = generar_ficha_segura(
-        ficha_mensual, df, os.path.join(carpeta_salida, f"{base}.png"),
+    # Dos versiones: WhatsApp (vertical) y correo (dos columnas).
+    rutas_png = fichas_ambos_formatos(
+        ficha_mensual, os.path.join(carpeta_salida, base), df,
         modo="cierre", periodo=str(hoja).strip().title(), pdv=nombre_pdv,
         analista=nombre_analista, resumen=resumen)
 
-    return [ruta_pdf, ruta_docx, ruta_xlsx] + ([ruta_png] if ruta_png else [])
+    return [ruta_pdf, ruta_docx, ruta_xlsx] + rutas_png
 
 
 HERRAMIENTA = Herramienta(
