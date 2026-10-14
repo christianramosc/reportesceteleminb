@@ -29,7 +29,10 @@ from .herramienta_avance_preliminar import HERRAMIENTA as _avance_preliminar
 from .herramienta_comparativo_mensual import HERRAMIENTA as _comparativo_mensual
 from .herramienta_resumen_mensual import HERRAMIENTA as _resumen_mensual
 from .herramienta_resumen_vendedor import HERRAMIENTA as _resumen_vendedor
-from .herramienta_modelo_datos import HERRAMIENTA as _modelo_datos
+
+# "Modelo de Datos" (herramienta_modelo_datos.py) está oculto en la app. Para
+# volver a mostrarlo, impórtalo aquí y agrégalo al final de REGISTRO:
+#   from .herramienta_modelo_datos import HERRAMIENTA as _modelo_datos
 
 REGISTRO = [
     _relacion_zip,
@@ -37,5 +40,4 @@ REGISTRO = [
     _comparativo_mensual,
     _resumen_mensual,
     _resumen_vendedor,
-    _modelo_datos,
 ]
