@@ -8,10 +8,10 @@ import pandas as pd
 from . import comparativo_mensual_original as _comparativo
 from . import folios as _folios
 from .docx_reportes import generar_docx_comparativo
-from .ficha_resumen import generar_ficha_segura, ficha_comparativo
+from .ficha_resumen import fichas_ambos_formatos, ficha_comparativo
 from .libros_analisis import libro_comparativo
-from .nombres import marca_fecha
 from .registro import Herramienta
+from . import nombres_archivo as _nombres
 
 _PDV_DEFECTO = _comparativo.SUBTITULO_EMPRESA
 _ANALISTA_DEFECTO = _comparativo.NOMBRE_ANALISTA
@@ -48,7 +48,8 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
     df_combinado = pd.concat([datos_por_mes[m]["df"] for m in orden_meses], ignore_index=True)
     rutas_graficas = _comparativo.generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado)
 
-    base = f"Comparativo_{marca_fecha()}"
+    # Nombre corto: Comparativo_Jun-Sep26 (+ .pdf, .docx, _datos.xlsx, fichas)
+    base = f"Comparativo_{_nombres.rango_corto(orden_meses)}"
     ruta_pdf = os.path.join(carpeta_salida, f"{base}.pdf")
     # El Word se arma con los mismos flowables que el PDF (ver docx_reportes).
     elementos_pdf = []
@@ -66,7 +67,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
     # Libro de análisis: las mismas tablas del reporte pero con fórmulas
     # vivas, para que quien lo reciba pueda auditarlas o rehacer el corte
     # por su cuenta sin volver a ejecutar la herramienta.
-    ruta_xlsx = os.path.join(carpeta_salida, f"{base}.xlsx")
+    ruta_xlsx = os.path.join(carpeta_salida, f"{base}_datos.xlsx")
     libro_comparativo(
         df_combinado, orden_meses, ruta_xlsx,
         "Comparativo Mensual — datos y cálculos",
@@ -76,12 +77,13 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
     # Ficha de una página (PNG) para mandar por WhatsApp. Las cifras del
     # periodo cuentan cada folio una vez, igual que la portada del PDF.
     df_unico, _ = _folios.consolidar(df_combinado, orden_meses)
-    ruta_png = generar_ficha_segura(
-        ficha_comparativo, df_unico, tabla_comp, orden_meses, df_combinado,
-        os.path.join(carpeta_salida, f"{base}.png"),
+    # Dos versiones: WhatsApp (vertical) y correo (dos columnas).
+    rutas_png = fichas_ambos_formatos(
+        ficha_comparativo, os.path.join(carpeta_salida, base),
+        df_unico, tabla_comp, orden_meses, df_combinado,
         pdv=nombre_pdv, analista=nombre_analista)
 
-    return [ruta_pdf, ruta_docx, ruta_xlsx] + ([ruta_png] if ruta_png else [])
+    return [ruta_pdf, ruta_docx, ruta_xlsx] + rutas_png
 
 
 HERRAMIENTA = Herramienta(

@@ -50,6 +50,10 @@ import re
 import shutil
 import zipfile
 import datetime
+try:
+    from . import fechas as _fechas   # hora de México, no la del servidor
+except ImportError:  # ejecución suelta (Colab)
+    import fechas as _fechas
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -244,7 +248,7 @@ def contexto_mensual(mes_anio=None, hoja_nombre=None, fecha_corte=None):
     if mes_anio:
         partes = mes_anio.strip().lower().split()
         nombre_mes = partes[0]
-        anio = int(partes[1]) if len(partes) > 1 else datetime.date.today().year
+        anio = int(partes[1]) if len(partes) > 1 else _fechas.hoy().year
         if nombre_mes in _MESES_ES:
             return {"nombre_mes": nombre_mes, "anio": anio,
                     "mes_num": _MESES_ES.index(nombre_mes) + 1}
@@ -262,7 +266,7 @@ def contexto_mensual(mes_anio=None, hoja_nombre=None, fecha_corte=None):
             # Si el nombre de la hoja también trae un año (p.ej. "agosto
             # 2026"), se usa ese año en vez de asumir el año actual.
             match_anio = re.search(r"(20\d{2})", hoja_lower)
-            anio = int(match_anio.group(1)) if match_anio else datetime.date.today().year
+            anio = int(match_anio.group(1)) if match_anio else _fechas.hoy().year
             return {"nombre_mes": nombre_mes_encontrado, "anio": anio,
                     "mes_num": _MESES_ES.index(nombre_mes_encontrado) + 1}
 
@@ -274,7 +278,7 @@ def contexto_mensual(mes_anio=None, hoja_nombre=None, fecha_corte=None):
         return {"nombre_mes": _MESES_ES[fecha_corte.month - 1], "anio": fecha_corte.year,
                 "mes_num": fecha_corte.month}
 
-    hoy = datetime.date.today()
+    hoy = _fechas.hoy()
     return {"nombre_mes": _MESES_ES[hoy.month - 1], "anio": hoy.year, "mes_num": hoy.month}
 
 
@@ -773,13 +777,6 @@ def _slug(texto):
     return re.sub(r"[\s]+", "_", texto)
 
 
-def _nombre_para_archivo(texto):
-    """Nombre completo del vendedor tal cual (con espacios y acentos), sin
-    los caracteres que Windows no acepta en un nombre de archivo."""
-    texto = re.sub(r'[\\/:*?"<>|]', "", str(texto))
-    return re.sub(r"\s+", " ", texto).strip()
-
-
 # =======================================================================
 # 8) REPORTE PDF INDIVIDUAL (ReportLab)
 # =======================================================================
@@ -895,8 +892,7 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
 
     if nombre_archivo is None:
         nombre_archivo = os.path.join(
-            CARPETA_PDFS,
-            f"{_nombre_para_archivo(vendedor)}_{ctx_mes['nombre_mes'][:3].title()}{str(ctx_mes['anio'])[-2:]}.pdf"
+            CARPETA_PDFS, f"Resumen_Mensual_{_slug(vendedor)}_{ctx_mes['nombre_mes']}_{ctx_mes['anio']}.pdf"
         )
 
     MES_TITULO = f"{ctx_mes['nombre_mes'].capitalize()} {ctx_mes['anio']}"

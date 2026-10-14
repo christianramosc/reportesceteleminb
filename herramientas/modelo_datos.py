@@ -56,6 +56,10 @@ import os
 import re
 import unicodedata
 from datetime import date
+try:
+    from . import fechas as _fechas   # hora de México, no la del servidor
+except ImportError:  # ejecución suelta (Colab)
+    import fechas as _fechas
 
 import numpy as np
 import pandas as pd
@@ -262,7 +266,7 @@ def interpretar_periodo(*textos, anio_defecto=None):
                 anio = int(m.group(1))
     supuesto = anio is None
     if anio is None:
-        anio = anio_defecto or date.today().year
+        anio = anio_defecto or _fechas.hoy().year
     return anio, mes, supuesto
 
 

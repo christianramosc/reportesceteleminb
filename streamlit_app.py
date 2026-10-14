@@ -20,15 +20,10 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-from herramientas.nombres import usar_hora_local
-
-# Streamlit Cloud corre en UTC: sin esto, después de las 6:00 pm de Colima
-# los reportes salían con la fecha del día siguiente.
-usar_hora_local()
-
-import ui_estilos as ui  # noqa: E402
+import ui_estilos as ui
 from herramientas import REGISTRO
 from herramientas import estatus as _est
+from herramientas import fechas as _fechas
 from herramientas.avance_preliminar_original import (
     NOMBRE_ANALISTA as _ANALISTA_DEFECTO,
     SUBTITULO_EMPRESA as _PDV_DEFECTO,
@@ -202,7 +197,7 @@ for tab, herramienta in zip(tabs, REGISTRO):
             usar_hoy = st.checkbox("Usar la fecha de hoy como fecha de corte", value=True,
                                     key=f"hoy_{herramienta.id}")
             if not usar_hoy:
-                fecha_elegida = st.date_input("Fecha de corte", value=date.today(),
+                fecha_elegida = st.date_input("Fecha de corte", value=_fechas.hoy(),
                                                key=f"fecha_{herramienta.id}")
                 opciones["fecha_corte"] = fecha_elegida.strftime("%d/%m/%Y")
 
@@ -254,7 +249,7 @@ for tab, herramienta in zip(tabs, REGISTRO):
                     st.session_state[clave_resultado] = {
                         "archivos": archivos,
                         "log": registro,
-                        "fecha": date.today().strftime("%d/%m/%Y"),
+                        "fecha": _fechas.hoy().strftime("%d/%m/%Y"),
                     }
 
         resultado = st.session_state.get(clave_resultado)

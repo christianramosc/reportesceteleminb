@@ -19,6 +19,10 @@ mismas tablas y las gráficas intercaladas donde van, igual que el PDF.
 
 import os
 from datetime import date
+try:
+    from . import fechas as _fechas   # hora de México, no la del servidor
+except ImportError:  # ejecución suelta (Colab)
+    import fechas as _fechas
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -86,7 +90,7 @@ def _agregar_encabezado_pie(documento, nombre_empresa, subtitulo, nombre_analist
     pie.text = ""
     run_pie = pie.add_run(
         f"{nombre_analista}    ·    {nombre_empresa}    ·    "
-        f"Generado el {date.today().strftime('%d/%m/%Y')}"
+        f"Generado el {_fechas.hoy().strftime('%d/%m/%Y')}"
     )
     run_pie.font.size = Pt(8)
     run_pie.font.color.rgb = _fd.GRIS_TEXTO_SEC
@@ -115,7 +119,7 @@ def _construir(elementos, nombre_archivo, carpeta_salida, subtitulo,
 def generar_docx_avance(elementos, nombre_pdv, nombre_analista,
                         nombre_archivo=None, carpeta_salida="."):
     if nombre_archivo is None:
-        nombre_archivo = f"Avance_Preliminar_{date.today().strftime('%Y%m%d_%H%M')}.docx"
+        nombre_archivo = f"Avance_Preliminar_{_fechas.hoy().strftime('%Y%m%d_%H%M')}.docx"
     return _construir(elementos, nombre_archivo, carpeta_salida,
                       "Avance Preliminar de Bitácora", nombre_pdv, nombre_analista)
 
@@ -126,7 +130,7 @@ def generar_docx_avance(elementos, nombre_pdv, nombre_analista,
 def generar_docx_comparativo(elementos, nombre_pdv, nombre_analista,
                              nombre_archivo=None, carpeta_salida="."):
     if nombre_archivo is None:
-        nombre_archivo = f"Reporte_Comparativo_{date.today().strftime('%Y%m%d_%H%M')}.docx"
+        nombre_archivo = f"Reporte_Comparativo_{_fechas.hoy().strftime('%Y%m%d_%H%M')}.docx"
     return _construir(elementos, nombre_archivo, carpeta_salida,
                       "Reporte Comparativo Mensual", nombre_pdv, nombre_analista)
 
@@ -137,6 +141,6 @@ def generar_docx_comparativo(elementos, nombre_pdv, nombre_analista,
 def generar_docx_resumen(elementos, nombre_pdv, nombre_analista,
                          nombre_archivo=None, carpeta_salida="."):
     if nombre_archivo is None:
-        nombre_archivo = f"Resumen_Mensual_{date.today().strftime('%Y%m%d_%H%M')}.docx"
+        nombre_archivo = f"Resumen_Mensual_{_fechas.hoy().strftime('%Y%m%d_%H%M')}.docx"
     return _construir(elementos, nombre_archivo, carpeta_salida,
                       "Reporte Mensual de Bitácora", nombre_pdv, nombre_analista)

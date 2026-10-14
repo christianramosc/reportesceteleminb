@@ -2,14 +2,15 @@
 """Adaptador de avance_preliminar_original.py (Avance Preliminar Mensual) para el registro."""
 
 import os
+import pandas as pd
 
 from . import avance_preliminar_original as _avance
 from .docx_reportes import generar_docx_avance
 from . import conclusiones as _c
-from .ficha_resumen import generar_ficha_segura, ficha_mensual
+from .ficha_resumen import fichas_ambos_formatos, ficha_mensual
 from .libros_analisis import libro_mensual
-from .nombres import marca_fecha
 from .registro import Herramienta
+from . import nombres_archivo as _nombres
 
 # Valores originales del script, usados como default si el usuario no
 # escribe nada en el campo de PDV / analista.
@@ -38,22 +39,24 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
     ctx = _avance.contexto_de_corte(fecha_corte)
     rutas_graficas = _avance.generar_graficas_para_pdf(df)
 
-    base = f"Avance_{marca_fecha()}"
+    # El nombre de la hoja ("JULIO 2026") es la única pista del mes al que
+    # pertenecen los datos. Se usa para advertir si la fecha de corte cae en
+    # otro mes (sin esto, correr el avance sobre un mes ya cerrado afirmaba
+    # "quedan 10 días para el cierre") y para nombrar los archivos.
+    try:
+        hoja = pd.ExcelFile(rutas_archivos[0]).sheet_names[0]
+    except Exception:
+        hoja = None
+
+    # Nombre corto: Avance_Oct26_corte13-10 (+ .pdf, .docx, _datos.xlsx...)
+    corte = ctx["fecha_corte"]
+    periodo_archivo = _nombres.periodo_corto(hoja) if hoja else f"{_nombres.CORTOS[corte.month - 1]}{str(corte.year)[2:]}"
+    base = f"Avance_{periodo_archivo}_corte{corte:%d-%m}"
     ruta_pdf = os.path.join(carpeta_salida, f"{base}.pdf")
 
     # El PDF deja aquí sus flowables y el Word se construye con ESOS mismos
     # elementos, para que ambos documentos digan exactamente lo mismo.
     elementos_pdf = []
-    # El nombre de la hoja ("JULIO 2026") es la única pista del mes al que
-    # pertenecen los datos. Se usa para advertir si la fecha de corte cae en
-    # otro mes: sin esto, correr el avance sobre un mes ya cerrado afirmaba
-    # "quedan 10 días para el cierre".
-    try:
-        import pandas as _pd
-        hoja = _pd.ExcelFile(rutas_archivos[0]).sheet_names[0]
-    except Exception:
-        hoja = None
-
     _avance.generar_reporte_pdf_avance(
         df, resumen, tabla_vendedor, tabla_categoria,
         nombre_archivo=ruta_pdf, fecha_corte=fecha_corte,
@@ -69,7 +72,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
     # Libro de análisis: las mismas tablas del reporte pero con fórmulas
     # vivas, para que quien lo reciba pueda auditarlas o rehacer el corte
     # por su cuenta sin volver a ejecutar la herramienta.
-    ruta_xlsx = os.path.join(carpeta_salida, f"{base}.xlsx")
+    ruta_xlsx = os.path.join(carpeta_salida, f"{base}_datos.xlsx")
     libro_mensual(df, ruta_xlsx, "Avance Preliminar — datos y cálculos",
                   os.path.basename(rutas_archivos[0]))
 
@@ -81,12 +84,13 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
             periodo = f"{str(hoja).strip().title()}  ·  corte al día {ctx['dia_actual']}"
         else:
             periodo = f"{str(hoja).strip().title()}  ·  {periodo.lower()}"
-    ruta_png = generar_ficha_segura(
-        ficha_mensual, df, os.path.join(carpeta_salida, f"{base}.png"),
+    # Dos versiones: WhatsApp (vertical) y correo (dos columnas).
+    rutas_png = fichas_ambos_formatos(
+        ficha_mensual, os.path.join(carpeta_salida, base), df,
         modo="avance", periodo=periodo, pdv=nombre_pdv, analista=nombre_analista,
         resumen=resumen, ctx=ctx, hoja=hoja)
 
-    return [ruta_pdf, ruta_docx, ruta_xlsx] + ([ruta_png] if ruta_png else [])
+    return [ruta_pdf, ruta_docx, ruta_xlsx] + rutas_png
 
 
 HERRAMIENTA = Herramienta(

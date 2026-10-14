@@ -27,6 +27,10 @@ except ImportError:                       # ejecución suelta (Colab)
     import lateral as _lateral
 
 import datetime
+try:
+    from . import fechas as _fechas   # hora de México, no la del servidor
+except ImportError:  # ejecución suelta (Colab)
+    import fechas as _fechas
 import os
 
 import numpy as np
@@ -72,7 +76,7 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     ctx = contexto_de_corte(fecha_corte)
 
     if nombre_archivo is None:
-        fecha_archivo = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        fecha_archivo = _fechas.ahora().strftime("%Y%m%d_%H%M")
         nombre_archivo = f"Avance_Preliminar_{fecha_archivo}.pdf"
 
     print("=" * 72)

@@ -57,3 +57,12 @@ def test_quitar_cifras_es_exacto():
     cifras = [{"etiqueta": "CONVERSIÓN"}, {"etiqueta": "MENOR CONVERSIÓN"}, {"etiqueta": "GAP EN FINANCIADOS"}]
     quedan = [c["etiqueta"] for c in F._cifras_sin(cifras, ["CONVERSIÓN"])]
     assert quedan == ["MENOR CONVERSIÓN", "GAP EN FINANCIADOS"]
+
+
+def test_formato_correo_es_mas_ancho_y_menos_alto(tmp_path):
+    df, res = _df(tmp_path, n=40)
+    kw = dict(periodo="Septiembre 2026", pdv="PDV", analista="Analista", resumen=res)
+    wa = Image.open(F.ficha_mensual(df, str(tmp_path / "wa.png"), formato="whatsapp", **kw)).size
+    co = Image.open(F.ficha_mensual(df, str(tmp_path / "co.png"), formato="correo", **kw)).size
+    assert wa[0] == 1080 and co[0] == 1200
+    assert co[1] < wa[1]
