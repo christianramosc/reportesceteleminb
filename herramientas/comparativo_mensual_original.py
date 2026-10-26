@@ -629,6 +629,8 @@ def _guardar_si_procede(fig, guardar_como):
         carpeta = os.path.dirname(guardar_como)
         if carpeta:
             os.makedirs(carpeta, exist_ok=True)
+        # Titular demasiado ancho -> se parte en renglones (ver hallazgos).
+        _h.ajustar_titulos(fig)
         fig.savefig(guardar_como, dpi=150, bbox_inches="tight", facecolor="white")
     return guardar_como
 
@@ -972,10 +974,11 @@ def grafica_comp_tasa_conversion(tabla_comp, guardar_como=None):
     ax.plot(meses, pct_fin, marker="o", linewidth=2.4, color=MG_ROJO_OSCURO, label="% Financiado")
     ax.plot(meses, pct_apr, marker="o", linewidth=2.0, color=INBURSA_AZUL,
              linestyle="--", label="% Aprobado")
-    for i, v in enumerate(pct_fin):
-        ax.text(i, v - 4, f"{v:.0f}%", ha="center", va="top", fontsize=9, fontweight="bold", color=MG_ROJO_OSCURO)
-    for i, v in enumerate(pct_apr):
-        ax.text(i, v + 4, f"{v:.0f}%", ha="center", va="bottom", fontsize=8.5, color=INBURSA_AZUL)
+    # Los rótulos se colocan al final (etiquetas_lineas), cuando ya se
+    # conoce la escala: con desplazamientos fijos chocaban si dos líneas
+    # andaban cerca (15% financiado y 8% aprobado quedaban pegados).
+    rotulos = [(pct_fin, MG_ROJO_OSCURO, dict(fontsize=9, fontweight="bold")),
+               (pct_apr, INBURSA_AZUL, dict(fontsize=8.5))]
     # Rechazo: la "Lectura del periodo" explica la caída de conversión con el
     # rechazo; ahora la gráfica muestra esa evidencia junto a la conversión.
     pct_rech = ((tabla_comp["Rechazado"] / tabla_comp["Total"]).fillna(0) * 100).values \
@@ -983,10 +986,10 @@ def grafica_comp_tasa_conversion(tabla_comp, guardar_como=None):
     if pct_rech is not None:
         color_rech = COLOR_CATEGORIA.get("RECHAZADO", "#F4A6B1")
         ax.plot(meses, pct_rech, marker="o", linewidth=2.0, color=color_rech, linestyle=":", label="% Rechazado")
-        for i, v in enumerate(pct_rech):
-            ax.text(i, v + 4, f"{v:.0f}%", ha="center", va="bottom", fontsize=8.5, color=color_rech)
+        rotulos.append((pct_rech, color_rech, dict(fontsize=8.5)))
     tope = max([x.max() for x in (pct_fin, pct_apr, pct_rech) if x is not None and len(x)] or [0])
     ax.set_ylim(0, tope * 1.3 + 5)
+    _h.etiquetas_lineas(ax, rotulos)
     _h.titular(ax, _h.por_mes_minimo(meses, list(pct_fin), "la conversión"),
                "% de las solicitudes de cada mes: financiadas, aprobadas y rechazadas")
     ax.set_ylabel("% de las solicitudes del mes")
@@ -1073,19 +1076,20 @@ def grafica_comp_gap_vs_gap_financiado(tabla_comp, guardar_como=None):
     fig, ax = plt.subplots(figsize=(max(7, len(meses) * 1.3), 5.5))
     ax.plot(meses, pct_gap_fin, marker="o", linewidth=2.4, color=MG_ROJO_OSCURO,
              label="% GAP Financiado")
-    for i, v in enumerate(pct_gap_fin):
-        ax.text(i, v + 3, f"{v:.0f}%", ha="center", fontsize=9, fontweight="bold", color=MG_ROJO_OSCURO)
+    rotulos = [(pct_gap_fin, MG_ROJO_OSCURO, dict(fontsize=9, fontweight="bold"))]
 
     maximo = pct_gap_fin.max() if len(pct_gap_fin) else 0
     if pct_gap is not None:
         ax.plot(meses, pct_gap, marker="o", linewidth=2.0, color=INBURSA_AZUL,
                  linestyle="--", label="% GAP (todas las solicitudes)")
-        for i, v in enumerate(pct_gap):
-            ax.text(i, v + 3, f"{v:.0f}%", ha="center", fontsize=8.5, color=INBURSA_AZUL)
+        rotulos.append((pct_gap, INBURSA_AZUL, dict(fontsize=8.5)))
         maximo = max(maximo, pct_gap.max() if len(pct_gap) else 0)
 
     # Hasta 108 para que se vea la línea de "lo esperado: todas" (100%).
     ax.set_ylim(0, 108)
+    # Rótulos sin choques: con +3 fijo, dos líneas en el mismo valor (o a
+    # pocos puntos) dejaban un número encima del otro.
+    _h.etiquetas_lineas(ax, rotulos)
     _h.referencia_alerta_gap(ax)
     _h.titular(ax, _h.gap_financiados_por_mes(meses, list(pct_gap_fin)),
                "% con GAP: en créditos financiados y en todas las solicitudes")
@@ -1263,6 +1267,10 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
                       if compacta else estilo_encabezado_tabla)
         encabezado = [Paragraph(str(c), estilo_enc) for c in data[0]]
         data = [encabezado] + data[1:]
+        data = _pdf_util.envolver_celdas_largas(
+            data, col_widths, alinear_desde=alinear_derecha_desde, compacta=compacta,
+            fila_total=fila_total, fuente_regular=FUENTE_REGULAR,
+            fuente_bold=FUENTE_BOLD, color_texto=MG_GRIS_OSCURO)
         tabla = Table(data, colWidths=col_widths, repeatRows=1)
         n_filas = len(data)
         # Formato compartido (pdf_util.estilo_tabla): encabezado claro con

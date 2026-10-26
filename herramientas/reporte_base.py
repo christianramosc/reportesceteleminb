@@ -378,6 +378,8 @@ def _guardar_si_procede(fig, guardar_como):
         carpeta = os.path.dirname(guardar_como)
         if carpeta:
             os.makedirs(carpeta, exist_ok=True)
+        # Titular demasiado ancho -> se parte en renglones (ver hallazgos).
+        _h.ajustar_titulos(fig)
         fig.savefig(guardar_como, dpi=150, bbox_inches="tight", facecolor="white")
     return guardar_como
 
@@ -908,7 +910,7 @@ def grafica_status(df, guardar_como=None):
     # apiladas, donde el color significa lo mismo.
     colores = [COLOR_CATEGORIA.get(clasificar_status(s), MG_GRIS_CLARO)
                for s in conteo.index]
-    barras = ax.bar(conteo.index, conteo.values, color=colores, edgecolor="white")
+    barras = ax.bar(range(len(conteo)), conteo.values, color=colores, edgecolor="white")
 
     for barra, valor in zip(barras, conteo.values):
         ax.text(barra.get_x() + barra.get_width() / 2, valor + max(conteo.values) * 0.01,
@@ -917,7 +919,10 @@ def grafica_status(df, guardar_como=None):
     _h.titular(ax, _h.estatus_mayoritario(conteo), "Solicitudes por estatus de la bitácora")
     ax.set_ylabel("Número de solicitudes")
     ax.set_ylim(0, max(conteo.values) * 1.2)
-    plt.xticks(rotation=15)
+    # Nombres partidos en renglones en vez de inclinados: inclinados a 15°,
+    # los largos ("DOCUMENTACION ADICIONAL") se salían de la gráfica y con
+    # más estatus se encimaban con el vecino.
+    _h.etiquetas_categorias_x(ax, list(conteo.index))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.show()
@@ -1129,7 +1134,7 @@ def grafica_gap_por_categoria(df, guardar_como=None):
     colores = [COLOR_CATEGORIA.get(c, MG_GRIS_CLARO) for c in pct_gap.index]
 
     fig, ax = plt.subplots(figsize=(7, 5))
-    barras = ax.bar(pct_gap.index, pct_gap.values, color=colores, edgecolor="white")
+    barras = ax.bar(range(len(pct_gap)), pct_gap.values, color=colores, edgecolor="white")
 
     for barra, valor in zip(barras, pct_gap.values):
         ax.text(barra.get_x() + barra.get_width() / 2, valor + 2,
@@ -1142,11 +1147,12 @@ def grafica_gap_por_categoria(df, guardar_como=None):
     # categorías los nombres se encimaban unos con otros.
     ax.set_ylim(0, 108)
     _h.referencia_alerta_gap(ax)
-    # Más abajo que en las demás: aquí los nombres del eje van inclinados y
-    # una leyenda a -0.1 quedaba encima de ellos.
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24), frameon=False, ncol=2, fontsize=8.5)
-    plt.xticks(rotation=30, ha="right")
+    # Los nombres se parten en renglones y la leyenda se coloca midiendo
+    # dónde terminan: con -0.24 fijo y nombres inclinados a 30°,
+    # "DOCUMENTACION ADICIONAL" quedaba encima de la leyenda.
+    _h.etiquetas_categorias_x(ax, list(pct_gap.index), ancho=13)
     plt.tight_layout()
+    _h.leyenda_bajo_eje(ax, ncol=2, fontsize=8.5)
     _guardar_si_procede(fig, guardar_como)
     plt.show()
     return guardar_como
@@ -1488,6 +1494,10 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
             estilo_enc = e["encabezado_tabla"]
         encabezado = [Paragraph(str(c), estilo_enc) for c in data[0]]
         data = [encabezado] + data[1:]
+        data = _pdf_util.envolver_celdas_largas(
+            data, col_widths, alinear_desde=alinear_derecha_desde, compacta=compacta,
+            fila_total=fila_total, fuente_regular=FUENTE_REGULAR,
+            fuente_bold=FUENTE_BOLD, color_texto=MG_GRIS_OSCURO)
         tabla = Table(data, colWidths=col_widths, repeatRows=1)
         n_filas = len(data)
         # Formato compartido (pdf_util.estilo_tabla): encabezado claro con
@@ -1617,7 +1627,9 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
                     f.append(f"{fila.get('% Financiado', 0):.1f}%")
                 filas_v.append(f)
 
-            ancho_nombre_v = 4.2 * cm if len(encabezados_v) <= 7 else 3.4 * cm
+            # 3.4 cm dejaba "Carla Yovet Cardenas Ahumada" 1 mm más ancho que
+            # su columna con 5+ estatus; las de números aguantan 1.85 cm.
+            ancho_nombre_v = 4.2 * cm if len(encabezados_v) <= 7 else 3.8 * cm
             ancho_col_v = (_pdf_util.ANCHO_UTIL - ancho_nombre_v) / max(len(encabezados_v) - 1, 1)
             anchos_v = [ancho_nombre_v] + [ancho_col_v] * (len(encabezados_v) - 1)
             elementos.append(tabla_estilo_mg([encabezados_v] + filas_v,
@@ -1664,7 +1676,10 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
         encabezados_cat = ["Categoría"] + columnas_disp
         filas_cat = []
         for cat, fila in tabla_categoria.iterrows():
-            f = [cat]
+            # Nombre legible del catálogo ("Documentación adicional"), igual
+            # que en la tabla de estatus de la portada. Si aun así no cabe,
+            # tabla_estilo_mg lo parte en dos renglones en vez de encimarlo.
+            f = [_est.etiqueta(cat)]
             for col in columnas_disp:
                 valor = fila[col]
                 if pd.isna(valor):
@@ -1677,8 +1692,12 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
                     f.append(f"{valor:.1f}")
             filas_cat.append(f)
 
-        ancho_disp = min(2.6 * cm, (_pdf_util.ANCHO_UTIL - 3.2 * cm) / max(len(columnas_disp), 1))
-        anchos_cat = [3.2 * cm] + [ancho_disp] * len(columnas_disp)
+        # Se queda en 3.2 cm (más ancho, "Enganche" se partía en el
+        # encabezado): "Documentación adicional" ya no cabe en un renglón y
+        # tabla_estilo_mg lo parte en dos en lugar de encimarlo.
+        ancho_cat = 3.2 * cm
+        ancho_disp = min(2.6 * cm, (_pdf_util.ANCHO_UTIL - ancho_cat) / max(len(columnas_disp), 1))
+        anchos_cat = [ancho_cat] + [ancho_disp] * len(columnas_disp)
         elementos.append(tabla_estilo_mg([encabezados_cat] + filas_cat, col_widths=anchos_cat))
         elementos.append(Spacer(1, 0.4 * cm))
 

@@ -190,6 +190,55 @@ def estilo_tabla(n_filas, alinear_desde=1, compacta=False, fila_total=False,
     return estilo
 
 
+def envolver_celdas_largas(data, col_widths, alinear_desde=1, compacta=False,
+                           fila_total=False, fuente_regular="Helvetica",
+                           fuente_bold="Helvetica-Bold", color_texto="#2B2B2B"):
+    """Convierte en Paragraph las celdas de texto que NO caben en su columna.
+
+    Una celda con texto plano se dibuja en un solo renglón y, si es más
+    ancha que su columna, se encima con la de al lado: así salía
+    "DOCUMENTACION ADICIONAL" tapando el precio de venta. Un Paragraph sí
+    parte el texto en renglones dentro de su propia celda. Solo se
+    envuelven las que no caben, para que las demás conserven el formato de
+    la TableStyle (tamaño, negritas de la fila de totales, alineación).
+
+    Usa los mismos tamaños y márgenes que estilo_tabla(). Se tolera que el
+    texto use su propio margen derecho (margen / 2): ahí no choca con nada,
+    y partir por 1-2 pt dejaba nombres en dos renglones sin necesidad.
+    """
+    if not col_widths or len(data) < 2:
+        return data
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    from reportlab.platypus import Paragraph
+
+    tam = 7.0 if compacta else 8.8
+    margen = 2 * (2 if compacta else 7)
+    ultima = len(data) - 1
+    salida = [data[0]]
+    for i, fila in enumerate(data[1:], start=1):
+        es_total = fila_total and i == ultima
+        fuente = fuente_bold if es_total else fuente_regular
+        tam_f = (7.4 if compacta else 9.0) if es_total else tam
+        nueva = []
+        for j, valor in enumerate(fila):
+            ancho = col_widths[j] if j < len(col_widths) else None
+            if (isinstance(valor, (str, int, float)) and isinstance(ancho, (int, float))
+                    and stringWidth(str(valor), fuente, tam_f) > ancho - margen / 2):
+                estilo = ParagraphStyle(
+                    f"CeldaLarga_{int(es_total)}_{int(j >= alinear_desde)}_{tam_f}",
+                    fontName=fuente, fontSize=tam_f, leading=tam_f * 1.2,
+                    textColor=_col.HexColor(AZUL if es_total else color_texto),
+                    alignment=TA_CENTER if j >= alinear_desde else TA_LEFT)
+                texto = (str(valor).replace("&", "&amp;").replace("<", "&lt;")
+                         .replace(">", "&gt;"))
+                valor = Paragraph(texto, estilo)
+            nueva.append(valor)
+        salida.append(nueva)
+    return salida
+
+
 def pintar_encabezado_pie(canvas, doc, empresa, subtitulo, fecha, analista,
                           fuente_regular="Helvetica", fuente_bold="Helvetica-Bold"):
     """Encabezado y pie de los cuatro reportes. Arriba: franja azul, marca y

@@ -39,10 +39,146 @@ def monto_corto(valor):
     return f"${valor:,.0f}"
 
 
+def _monto_eje(v):
+    """"$1.25 M", "$2 M", "$350 mil". Con un solo decimal fijo, un eje que
+    iba de 50 en 50 mil se leía "$0.1 M, $0.1 M, $0.1 M" (0.05, 0.10, 0.15
+    redondeados): tres marcas distintas con la misma etiqueta."""
+    if not v:
+        return "0"
+    if abs(v) >= 1_000_000:
+        texto = f"{v / 1_000_000:.2f}".rstrip("0").rstrip(".")
+        return f"${texto} M"
+    return f"${v / 1_000:,.0f} mil"
+
+
 def formato_millones(ax, eje="y"):
-    """Eje en millones: "$8.0 M" en lugar de "8,000,000"."""
-    f = _mticker.FuncFormatter(lambda v, _: f"${v / 1_000_000:.1f} M" if v else "0")
+    """Eje de montos: "$1.5 M" en lugar de "1,500,000", o "$250 mil" si no
+    llega al millón."""
+    f = _mticker.FuncFormatter(lambda v, _: _monto_eje(v))
     (ax.yaxis if eje == "y" else ax.xaxis).set_major_formatter(f)
+
+
+# ------------------------------------------------ anti-traslapes (gráficas)
+def etiquetas_categorias_x(ax, textos, ancho=14, rotar_desde=7):
+    """Pone los nombres de estatus en el eje X sin que se encimen.
+
+    "DOCUMENTACION ADICIONAL" inclinado a 30° bajaba tanto que se metía en
+    la leyenda. Ahora el nombre se parte en renglones ("DOCUMENTACION /
+    ADICIONAL") y se deja horizontal; solo con muchas barras, donde ni
+    partido cabe, se inclina.
+    """
+    import textwrap
+    partidos = [textwrap.fill(str(t), ancho, break_long_words=False) for t in textos]
+    ax.set_xticks(range(len(partidos)))
+    if len(partidos) >= rotar_desde:
+        ax.set_xticklabels(partidos, rotation=30, ha="right", rotation_mode="anchor")
+        return
+    ax.set_xticklabels(partidos, rotation=0, ha="center")
+    # Una palabra sola no se puede partir ("CONTRAPROPUESTA"): si aun así
+    # dos nombres vecinos se tocan, primero se achica la letra y, si no
+    # basta, se inclinan.
+    for tam in (None, 8, 7):
+        if tam:
+            for t in ax.get_xticklabels():
+                t.set_fontsize(tam)
+        if not _etiquetas_se_tocan(ax):
+            return
+    ax.set_xticklabels(partidos, rotation=30, ha="right", rotation_mode="anchor")
+
+
+def _etiquetas_se_tocan(ax, holgura_pt=3):
+    fig = ax.figure
+    fig.tight_layout()          # se mide con el ancho final de la gráfica
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    holgura = holgura_pt * fig.dpi / 72
+    cajas = sorted((t.get_window_extent(renderer) for t in ax.get_xticklabels()
+                    if t.get_text()), key=lambda c: c.x0)
+    return any(b.x0 - a.x1 < holgura for a, b in zip(cajas, cajas[1:]))
+
+
+def leyenda_bajo_eje(ax, separacion_pt=6, **kwargs):
+    """Leyenda centrada debajo de TODO lo que hay bajo el eje (nombres,
+    etiqueta del eje), sin importar cuánto ocupen.
+
+    Con un desplazamiento fijo (bbox_to_anchor=(0.5, -0.24)) la leyenda
+    quedaba bien con nombres cortos y encima de ellos con nombres largos o
+    en dos renglones. Aquí se mide dónde terminan y se coloca justo abajo.
+    Llamarla al final, después de tight_layout().
+    """
+    fig = ax.figure
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    cajas = [t.get_window_extent(renderer) for t in ax.get_xticklabels() if t.get_text()]
+    if ax.xaxis.label.get_text():
+        cajas.append(ax.xaxis.label.get_window_extent(renderer))
+    fondo = min([c.y0 for c in cajas], default=ax.get_window_extent(renderer).y0)
+    fondo -= separacion_pt * fig.dpi / 72
+    y_ejes = ax.transAxes.inverted().transform((0, fondo))[1]
+    kwargs.setdefault("frameon", False)
+    return ax.legend(loc="upper center", bbox_to_anchor=(0.5, y_ejes), **kwargs)
+
+
+def etiquetas_lineas(ax, series, separacion=0.075):
+    """Rotula cada punto de varias líneas sin que los rótulos choquen.
+
+    series: lista de (valores, color, kwargs_de_texto). Llamarla DESPUÉS de
+    fijar set_ylim, porque la separación se calcula sobre la escala final.
+
+    Con desplazamientos fijos (+4 arriba de una línea, -4 abajo de otra),
+    dos líneas cercanas —15% financiado y 8% aprobado— dejaban sus rótulos
+    pegados y cruzados: el "15%" quedaba junto a la línea del 8%. Aquí, en
+    cada mes, los rótulos se ordenan por valor: el de la línea más baja va
+    debajo de su punto si choca con el siguiente, y los demás se empujan
+    hacia arriba hasta guardar una distancia mínima.
+    """
+    y0, y1 = ax.get_ylim()
+    sep = (y1 - y0) * separacion
+    desp = sep * 0.6
+    if not series:
+        return
+    n = min(len(s[0]) for s in series)
+    for i in range(n):
+        puntos = sorted(((float(s[0][i]), s) for s in series), key=lambda t: t[0])
+        pos = [v + desp for v, _ in puntos]
+        if len(puntos) > 1 and pos[1] - pos[0] < sep and puntos[0][0] - desp - sep / 2 >= y0:
+            pos[0] = puntos[0][0] - desp
+        for k in range(1, len(pos)):
+            if pos[k] < puntos[k][0]:          # va debajo de su punto: no se empuja
+                continue
+            if pos[k] - pos[k - 1] < sep:
+                pos[k] = pos[k - 1] + sep
+        for (v, (_, color, kw)), y in zip(puntos, pos):
+            ax.text(i, y, f"{v:.0f}%", ha="center", va="center", color=color,
+                    clip_on=False, **(kw or {}))
+
+
+def ajustar_titulos(fig, margen_pt=4):
+    """Parte en renglones el titular de una gráfica si no cabe a lo ancho.
+
+    Un titular con varios modelos empatados ("Tus modelos más solicitados:
+    MG3 1.5L STYLE MT, MG5 EXCITE MT y ZS 1.5T LUX ...") salía más ancho
+    que la gráfica; al exportar con bbox "tight" la imagen se ensanchaba y,
+    al escalarla al ancho del PDF, la gráfica quedaba diminuta.
+    """
+    import textwrap
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    derecha = fig.bbox.x1 - margen_pt * fig.dpi / 72
+    cambio = False
+    for ax in fig.axes:
+        titulo = getattr(ax, "_left_title", None)
+        if titulo is None or not titulo.get_text() or "\n" in titulo.get_text():
+            continue
+        caja = titulo.get_window_extent(renderer)
+        disponible = derecha - caja.x0
+        if caja.width <= disponible or disponible <= 0:
+            continue
+        caracteres = max(20, int(len(titulo.get_text()) * disponible / caja.width) - 1)
+        titulo.set_text(textwrap.fill(titulo.get_text(), caracteres, break_long_words=False))
+        cambio = True
+    if cambio:
+        fig.tight_layout()
 
 
 def nombre_corto(nombre):

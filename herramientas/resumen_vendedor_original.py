@@ -634,6 +634,8 @@ def analisis_individual(df_total, vendedor, tabla_vendedor, resumen_eq):
 # =======================================================================
 def _guardar_si_procede(fig, guardar_como):
     if guardar_como:
+        # Titular demasiado ancho -> se parte en renglones (ver hallazgos).
+        _h.ajustar_titulos(fig)
         fig.savefig(guardar_como, dpi=150, bbox_inches="tight", facecolor="white")
     return guardar_como
 
@@ -748,6 +750,8 @@ def grafica_modelos_vendedor(df_v, vendedor, guardar_como=None):
     _h.titular(ax, _h.tu_modelo(conteo), "Tus modelos solicitados en el mes")
     ax.set_xlabel("Número de solicitudes")
     ax.set_xlim(0, max(conteo.values) * 1.25)
+    # Conteos: sin marcas de 0.2, 0.4... que no existen.
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
@@ -817,7 +821,7 @@ def _ancho_texto(texto, fuente, tam):
 
 
 def anchos_ajustados(datos, ancho_total=None, tam_fuente=8.2, tam_encabezado=8.3,
-                     padding=12, min_cm=1.4, max_cm=None):
+                     padding=16, min_cm=1.4, max_cm=None):
     """Calcula los anchos de columna a partir del CONTENIDO real de la
     tabla, repartiendo exactamente `ancho_total` (por defecto, todo el
     ancho útil de la página).
@@ -828,6 +832,10 @@ def anchos_ajustados(datos, ancho_total=None, tam_fuente=8.2, tam_encabezado=8.3
     si no, el excedente se recorta proporcionalmente respetando mínimos.
     Así, una columna con nombres largos se lleva el espacio que necesita
     y las columnas cortas (Folio, ¿GAP?) no lo desperdician.
+
+    padding debe cubrir los márgenes internos de la celda (7 pt a cada lado
+    en pdf_util.estilo_tabla) más un respiro: con 12 el mínimo quedaba 2 pt
+    por debajo de la palabra y el folio se partía ("2876617" / "0").
     """
     if not datos:
         return None
