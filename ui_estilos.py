@@ -7,12 +7,12 @@ se toca este archivo (y .streamlit/config.toml) y nada más.
 
 Dirección de diseño
 -------------------
-Tema oscuro con el sistema de diseño de shadcn/ui, adaptado a Streamlit
+Tema claro con el sistema de diseño de shadcn/ui, adaptado a Streamlit
 (shadcn es una librería de React; aquí se replican sus tokens y patrones
 sobre los componentes nativos, que siguen funcionando igual):
 
-- Paleta "zinc": fondo casi negro, tarjetas un tono arriba, bordes finos
-  de 1px y texto secundario gris. Nada de sombras pesadas.
+- Paleta "zinc" clara: página gris muy tenue, tarjetas blancas con borde
+  fino de 1px y sombra mínima, texto casi negro y secundario gris.
 - Un solo acento rojo (#DC2626, la variante "red" de shadcn y cercano al
   rojo de MG), reservado para la acción principal: "Generar reporte".
 - Tipografía Geist (la de shadcn/Vercel) y Geist Mono para nombres de
@@ -26,25 +26,26 @@ import re
 
 import streamlit as st
 
-# --- Tokens (shadcn/ui, tema zinc oscuro) --------------------------------
-FONDO        = "#09090B"   # background
-TARJETA      = "#0F0F12"   # card
-MUTED        = "#18181B"   # muted / secondary
-BORDE        = "#27272A"   # border / input
-TEXTO        = "#FAFAFA"   # foreground
-TEXTO_SUAVE  = "#A1A1AA"   # muted-foreground
-TEXTO_TENUE  = "#71717A"
+# --- Tokens (shadcn/ui, tema zinc claro) ---------------------------------
+FONDO        = "#FAFAFA"   # background de la página
+TARJETA      = "#FFFFFF"   # card
+MUTED        = "#F4F4F5"   # muted / secondary
+BORDE        = "#E4E4E7"   # border / input
+BORDE_FUERTE = "#D4D4D8"   # borde al pasar el mouse
+TEXTO        = "#09090B"   # foreground
+TEXTO_SUAVE  = "#52525B"   # texto secundario
+TEXTO_TENUE  = "#71717A"   # muted-foreground
 ACENTO       = "#DC2626"   # primary (red)
 ACENTO_HOVER = "#B91C1C"
-ANILLO       = "#D4D4D8"   # ring
+ANILLO       = "#A1A1AA"   # ring
 
 # Color e etiqueta por tipo de archivo en la lista de descargas.
 TIPOS_ARCHIVO = {
-    "pdf":  ("PDF",    "#F87171", ":material/picture_as_pdf:"),
-    "docx": ("Word",   "#60A5FA", ":material/description:"),
-    "xlsx": ("Excel",  "#4ADE80", ":material/table_chart:"),
-    "png":  ("Imagen", "#C084FC", ":material/image:"),
-    "zip":  ("ZIP",    "#FBBF24", ":material/folder_zip:"),
+    "pdf":  ("PDF",    "#DC2626", ":material/picture_as_pdf:"),
+    "docx": ("Word",   "#2563EB", ":material/description:"),
+    "xlsx": ("Excel",  "#16A34A", ":material/table_chart:"),
+    "png":  ("Imagen", "#9333EA", ":material/image:"),
+    "zip":  ("ZIP",    "#D97706", ":material/folder_zip:"),
 }
 
 _CSS = f"""
@@ -56,6 +57,7 @@ _CSS = f"""
   --tarjeta: {TARJETA};
   --muted: {MUTED};
   --borde: {BORDE};
+  --borde-fuerte: {BORDE_FUERTE};
   --texto: {TEXTO};
   --texto-suave: {TEXTO_SUAVE};
   --texto-tenue: {TEXTO_TENUE};
@@ -110,10 +112,11 @@ h1, h2, h3, h4 {{ letter-spacing: -0.025em; }}
   display: flex; align-items: center; gap: 0.6rem; margin: 0;
 }}
 [data-testid="stSidebar"] [data-testid="stRadioOption"] p [role="img"] {{ font-size: 1.1rem; }}
-[data-testid="stSidebar"] [data-testid="stRadioOption"]:hover {{ background: var(--muted); }}
+[data-testid="stSidebar"] [data-testid="stRadioOption"]:hover {{ background: #EBEBED; }}
 [data-testid="stSidebar"] [data-testid="stRadioOption"]:hover p {{ color: var(--texto); }}
 [data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] {{
-  background: var(--muted); box-shadow: inset 2px 0 0 var(--acento);
+  background: var(--tarjeta);
+  box-shadow: inset 2px 0 0 var(--acento), 0 1px 2px rgba(9, 9, 11, 0.06);
 }}
 [data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] p {{ color: var(--texto); }}
 
@@ -142,7 +145,7 @@ h1, h2, h3, h4 {{ letter-spacing: -0.025em; }}
 }}
 .gr-badge-solido {{ background: var(--muted); color: var(--texto); }}
 .gr-punto {{ width: 0.5rem; height: 0.5rem; border-radius: 999px; display: inline-block;
-  box-shadow: 0 0 0 1px rgba(250, 250, 250, 0.28); }}
+  box-shadow: 0 0 0 1px rgba(9, 9, 11, 0.12); }}
 
 /* ---------- Tarjetas (st.container(border=True)) ---------- */
 [data-testid="stVerticalBlockBorderWrapper"]:has(> div > [data-testid="stVerticalBlock"] .gr-paso),
@@ -150,6 +153,7 @@ div[class*="st-key-tarjeta_"] {{
   background: var(--tarjeta);
   border-color: var(--borde) !important;
   border-radius: 0.75rem !important;
+  box-shadow: 0 1px 2px rgba(9, 9, 11, 0.05);
 }}
 div[class*="st-key-tarjeta_"] {{ padding: 1.25rem 1.35rem 1.35rem !important; }}
 
@@ -166,12 +170,12 @@ div[class*="st-key-tarjeta_"] {{ padding: 1.25rem 1.35rem 1.35rem !important; }}
 /* ---------- Carga de archivos ---------- */
 [data-testid="stFileUploaderDropzone"] {{
   background: var(--fondo);
-  border: 1px dashed #3F3F46;
+  border: 1px dashed var(--borde-fuerte);
   border-radius: var(--radio);
   padding: 1.15rem 1.25rem;
   transition: border-color 140ms ease, background 140ms ease;
 }}
-[data-testid="stFileUploaderDropzone"]:hover {{ border-color: #52525B; background: #0C0C0F; }}
+[data-testid="stFileUploaderDropzone"]:hover {{ border-color: var(--anillo); background: var(--muted); }}
 [data-testid="stFileUploaderDropzone"] button {{
   background: var(--muted); border: 1px solid var(--borde); color: var(--texto);
   border-radius: 0.45rem; font-weight: 500;
@@ -210,7 +214,7 @@ div[class*="st-key-archivo_"] {{
   background: var(--fondo); padding: 0.6rem 0.65rem 0.6rem 0.75rem;
   transition: border-color 120ms ease;
 }}
-div[class*="st-key-archivo_"]:hover {{ border-color: #3F3F46; }}
+div[class*="st-key-archivo_"]:hover {{ border-color: var(--borde-fuerte); }}
 .gr-archivo {{ display: flex; align-items: center; gap: 0.8rem; min-width: 0; }}
 .gr-archivo-icono {{
   flex: none; width: 2.35rem; height: 2.35rem; border-radius: 0.5rem;
@@ -227,7 +231,7 @@ div[class*="st-key-archivo_"]:hover {{ border-color: #3F3F46; }}
   background: var(--muted); border: 1px solid var(--borde); color: var(--texto);
   font-weight: 500; font-size: 0.84rem; height: 2.3rem;
 }}
-.stDownloadButton > button:hover {{ background: #27272A; border-color: #3F3F46; color: var(--texto); }}
+.stDownloadButton > button:hover {{ background: var(--borde); border-color: var(--borde-fuerte); color: var(--texto); }}
 
 /* ---------- Avisos, expanders y código ---------- */
 [data-testid="stAlert"] {{ border-radius: var(--radio); font-size: 0.86rem; }}
