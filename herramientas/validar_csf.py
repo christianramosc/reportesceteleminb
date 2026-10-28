@@ -1740,8 +1740,50 @@ def resumen_texto(analisis):
 # ===========================================================================
 #  PUNTO DE ENTRADA (Colab / línea de comandos)
 # ===========================================================================
-def main(rutas=None, carpeta_salida="salida", analista="", pdv="", consultar_sat=True, nombres=None):
-    """En Colab, sin argumentos, pide subir los archivos y descarga los PDF."""
+def resumen_dict(analisis, reporte=None, hoy=None):
+    """Lo esencial del análisis en datos simples (str/int/list/dict), para
+    mostrarlo en la página de la app sin depender de estas clases."""
+    hoy = hoy or _hoy()
+    d = analisis.datos or {}
+    n = analisis.conteo()
+    tecnicos = [c for c in analisis.candados if c.seccion < 4]
+    emision = d.get("fecha_emision")
+    return {
+        "archivo": analisis.archivo,
+        "reporte": reporte,
+        "veredicto": analisis.veredicto,
+        "cumple_politicas": analisis.cumple_politicas,
+        "total": len(analisis.candados),
+        "ok": n.get(OK, 0), "avisos": n.get(AVISO, 0), "fallas": n.get(FALLA, 0),
+        "tecnicos_ok": sum(c.estado in (OK, INFO) for c in tecnicos),
+        "tecnicos_total": len(tecnicos),
+        "datos": {
+            "RFC": d.get("rfc") or "—",
+            "Nombre / razón social": d.get("nombre_completo") or "—",
+            "Tipo": {"moral": "Persona moral", "fisica": "Persona física"}.get(d.get("tipo"), "—"),
+            "CURP": d.get("curp") or ("No aplica" if d.get("tipo") == "moral" else "—"),
+            "idCIF": d.get("idcif") or "—",
+            "Emisión": (f"{_fmt(emision)} · hace {(hoy - emision).days} días" if emision else "—"),
+            "Lugar de emisión": (d.get("lugar_emision") or "—").title(),
+            "Estatus en el padrón": d.get("estatus") or "—",
+            "Inicio de operaciones": d.get("inicio_operaciones") or "—",
+            "Régimen": "; ".join(r["regimen"] for r in d.get("regimenes", [])) or "—",
+            "Domicilio": ", ".join(x for x in (d.get("vialidad"), d.get("num_ext"), d.get("colonia"),
+                                               f"CP {d.get('cp')}" if d.get("cp") else "",
+                                               d.get("municipio"), d.get("entidad")) if x) or "—",
+        },
+        "dias_emision": (hoy - emision).days if emision else None,
+        "candados": [{"clave": c.clave, "seccion": c.seccion, "titulo": c.titulo, "estado": c.estado,
+                      "detalle": c.detalle, "previene": c.previene} for c in analisis.candados],
+        "urls_qr": list(analisis.urls_qr),
+        "sha256": analisis.sha256,
+    }
+
+
+def main(rutas=None, carpeta_salida="salida", analista="", pdv="", consultar_sat=True, nombres=None,
+         devolver_resumen=False):
+    """En Colab, sin argumentos, pide subir los archivos y descarga los PDF.
+    Con devolver_resumen=True regresa (rutas_pdf, [resumen_dict, ...]) para la app."""
     en_colab = False
     if rutas is None:
         try:
@@ -1753,7 +1795,7 @@ def main(rutas=None, carpeta_salida="salida", analista="", pdv="", consultar_sat
             import sys
             rutas = sys.argv[1:]
     os.makedirs(carpeta_salida, exist_ok=True)
-    salidas = []
+    salidas, resumenes = [], []
     for a in analizar_lote(rutas, consultar_sat=consultar_sat, nombres=nombres):
         rfc = (a.datos or {}).get("rfc") or re.sub(r"\W+", "_", os.path.splitext(a.archivo)[0])[:40]
         ruta = os.path.join(carpeta_salida, f"Validacion_CSF_{rfc}.pdf")
@@ -1763,13 +1805,14 @@ def main(rutas=None, carpeta_salida="salida", analista="", pdv="", consultar_sat
             k += 1
         generar_pdf(a, ruta, analista=analista, pdv=pdv)
         salidas.append(ruta)
+        resumenes.append(resumen_dict(a, reporte=os.path.basename(ruta)))
         print(resumen_texto(a))
         print()
     if en_colab:
         from google.colab import files  # type: ignore
         for s in salidas:
             files.download(s)
-    return salidas
+    return (salidas, resumenes) if devolver_resumen else salidas
 
 
 if __name__ == "__main__":

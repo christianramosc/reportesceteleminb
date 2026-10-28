@@ -145,10 +145,32 @@ def test_foto_no_es_verificable(tmp_path):
 
 def test_adaptador_genera_un_pdf_por_archivo(tmp_path):
     entrada = _fabricada(str(tmp_path / "0_cliente.pdf"))
-    salidas = ejecutar([entrada], carpeta_salida=str(tmp_path / "salida"),
-                       nombre_pdv="PDV Prueba", nombre_analista="Analista")
+    res = ejecutar([entrada], carpeta_salida=str(tmp_path / "salida"),
+                   nombre_pdv="PDV Prueba", nombre_analista="Analista")
+    salidas, resumen = res["archivos"], res["resumen"]
     assert len(salidas) == 1 and os.path.getsize(salidas[0]) > 3000
     assert open(salidas[0], "rb").read(5) == b"%PDF-"
+    # El resumen para la página: datos simples, mismo archivo, sin prefijo "0_".
+    assert len(resumen) == 1
+    r = resumen[0]
+    assert r["archivo"] == "cliente.pdf" and r["reporte"] == os.path.basename(salidas[0])
+    assert r["veredicto"] == "ALTERADA / NO CONFIABLE" and r["fallas"] > 0
+    assert r["ok"] + r["avisos"] + r["fallas"] <= r["total"] == len(r["candados"])
+
+
+def test_vista_en_la_pagina_no_truena(tmp_path):
+    """Dibuja el resultado con AppTest (sin navegador) para 2 archivos."""
+    from streamlit.testing.v1 import AppTest
+    entrada = _fabricada(str(tmp_path / "0_a.pdf"))
+    otra = _fabricada(str(tmp_path / "1_b.pdf"), productor="Microsoft Word")
+    res = ejecutar([entrada, otra], carpeta_salida=str(tmp_path / "s"))
+
+    def app(resumen):
+        from herramientas.vista_validar_csf import mostrar
+        mostrar(resumen)
+    at = AppTest.from_function(app, args=(res["resumen"],)).run(timeout=60)
+    assert not at.exception
+    assert len(at.metric) >= 4 and at.dataframe
 
 
 def zxing_qr(texto, lado=150):

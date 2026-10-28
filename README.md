@@ -63,6 +63,15 @@ BMGFS de octubre 2026 (Dirección de Riesgos). Cada candado está comentado en
    sello/idCIF = una es clon.
 4. **Políticas** (aparte): emitida en los últimos 30 días y estatus ACTIVO.
 
+Al generar, la página muestra el **resultado sin descargar nada**: cuántas
+son confiables, a revisar o no confiables; y por cada constancia, los
+candados técnicos que pasa, fallas y avisos, días desde su emisión,
+observaciones, datos básicos y botones para abrir los QR en el SAT (un QR
+que no va a `siat.sat.gob.mx` se muestra bloqueado). Lo dibuja
+`herramientas/vista_validar_csf.py`; cualquier herramienta puede hacer lo
+mismo regresando `{"archivos": [...], "resumen": ...}` y definiendo
+`mostrar_resumen` en su `Herramienta`.
+
 No sustituye escanear el QR: un cambio por un texto del mismo ancho exacto
 no mueve la maquetación. Por eso el reporte siempre trae los links de ambos
 QR. Las fotos o capturas solo se usan para leer el QR (no se pueden validar).

@@ -15,3 +15,7 @@ class Herramienta:
     # ejecutar(rutas_archivos, carpeta_salida="salida", **opciones) -> lista de rutas de salida
     ejecutar: Callable[..., List[str]]
     ayuda_archivo: Optional[str] = None  # texto de ayuda bajo el uploader (opcional)
+    # Opcional: si ejecutar() regresa {"archivos": [...], "resumen": obj},
+    # la app guarda obj y llama mostrar_resumen(obj) para dibujar el
+    # resultado EN LA PÁGINA, antes de las descargas (ej. Validar CSF).
+    mostrar_resumen: Optional[Callable[..., None]] = None

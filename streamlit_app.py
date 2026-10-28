@@ -82,7 +82,8 @@ def _etiqueta_menu(h):
 
 def _procesar(herramienta, archivos_subidos, opciones):
     """Ejecuta la herramienta en un directorio temporal y devuelve los
-    resultados EN MEMORIA como [(nombre, bytes), ...].
+    resultados EN MEMORIA como [(nombre, bytes), ...], el log y, si la
+    herramienta lo da, un resumen para dibujar en la página.
 
     El directorio se borra en el `finally`, así que el Excel del cliente no
     sobrevive a la corrida ni siquiera cuando algo falla a medio camino.
@@ -105,12 +106,19 @@ def _procesar(herramienta, archivos_subidos, opciones):
                 rutas, carpeta_salida=carpeta_salida, **opciones
             )
 
+        # Una herramienta puede regresar {"archivos": [...], "resumen": obj}
+        # además de la lista simple de rutas (ver registro.py).
+        resumen = None
+        if isinstance(resultados, dict):
+            resumen = resultados.get("resumen")
+            resultados = resultados.get("archivos")
+
         archivos = []
         for ruta in resultados or []:
             if os.path.exists(ruta):
                 with open(ruta, "rb") as f:
                     archivos.append((os.path.basename(ruta), f.read()))
-        return archivos, registro.getvalue()
+        return archivos, registro.getvalue(), resumen
     finally:
         shutil.rmtree(carpeta, ignore_errors=True)
         # Las gráficas intermedias se escriben junto al script y llevan
@@ -289,7 +297,7 @@ clave_resultado = f"resultado_{herramienta.id}"
 if generar and archivos_subidos:
     with st.spinner("Generando el reporte. Puede tardar uno o dos minutos."):
         try:
-            archivos, registro = _procesar(herramienta, archivos_subidos, opciones)
+            archivos, registro, resumen = _procesar(herramienta, archivos_subidos, opciones)
         except Exception as e:
             st.session_state.pop(clave_resultado, None)
             st.error(f"No se pudo generar el reporte: {e}", icon=":material/error:")
@@ -299,15 +307,25 @@ if generar and archivos_subidos:
             st.session_state[clave_resultado] = {
                 "archivos": archivos,
                 "log": registro,
+                "resumen": resumen,
                 "fecha": _fechas.ahora().strftime("%d/%m/%Y · %H:%M"),
             }
 
-# --- 3. Descargas -------------------------------------------------------
+# --- 3. Resultado en la página (si la herramienta lo ofrece) --------------
 resultado = st.session_state.get(clave_resultado)
+paso_siguiente = 3 if tiene_opciones else 2
+if resultado and resultado.get("resumen") is not None and herramienta.mostrar_resumen:
+    with st.container(border=True, key="tarjeta_resumen"):
+        ui.paso(paso_siguiente, "Resultado",
+                f"Generado el {resultado['fecha']} · el detalle completo está en el PDF de Descargas.")
+        herramienta.mostrar_resumen(resultado["resumen"])
+    paso_siguiente += 1
+
+# --- Descargas -----------------------------------------------------------
 if resultado:
     with st.container(border=True, key="tarjeta_descargas"):
         cuantos = len(resultado["archivos"])
-        ui.paso(3 if tiene_opciones else 2, "Descargas",
+        ui.paso(paso_siguiente, "Descargas",
                 f"{cuantos} archivo{'s' if cuantos != 1 else ''} · generado el {resultado['fecha']}")
 
         if not resultado["archivos"]:

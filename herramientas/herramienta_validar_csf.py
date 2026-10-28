@@ -16,14 +16,22 @@ def _nombre_original(ruta):
 def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
              nombre_analista=None, **_opciones):
     os.makedirs(carpeta_salida, exist_ok=True)
-    return _csf.main(
+    archivos, resumen = _csf.main(
         rutas=list(rutas_archivos),
         carpeta_salida=carpeta_salida,
         analista=(nombre_analista or "").strip(),
         pdv=(nombre_pdv or "").strip(),
         consultar_sat=True,
         nombres=[_nombre_original(r) for r in rutas_archivos],
+        devolver_resumen=True,
     )
+    # Los PDF se descargan; el resumen se dibuja en la página (vista_validar_csf).
+    return {"archivos": archivos, "resumen": resumen}
+
+
+def mostrar_resumen(resumen):
+    from .vista_validar_csf import mostrar   # importa streamlit solo en la app
+    mostrar(resumen)
 
 
 HERRAMIENTA = Herramienta(
@@ -40,6 +48,7 @@ HERRAMIENTA = Herramienta(
     multiple_archivos=True,
     tipos_permitidos=["pdf", "jpg", "jpeg", "png"],
     ejecutar=ejecutar,
+    mostrar_resumen=mostrar_resumen,
     ayuda_archivo=(
         "El PDF tal como se descargó del SAT, sin abrirlo ni guardarlo en otro programa. "
         "Las fotos o capturas se aceptan solo para leer el QR: no se pueden validar."
