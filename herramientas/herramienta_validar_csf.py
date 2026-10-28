@@ -38,19 +38,14 @@ HERRAMIENTA = Herramienta(
     id="validar_csf",
     nombre="🛡️ Validar CSF",
     descripcion=(
-        "Sube una o varias Constancias de Situación Fiscal (el PDF descargado del SAT) y "
-        "obtén un PDF por constancia con más de 30 candados revisados: que el archivo no "
-        "se haya editado ni re-guardado, que los QR lleven al portal oficial del SAT y "
-        "coincidan con el RFC e idCIF, que RFC, CURP, fechas, régimen y domicilio sean "
-        "coherentes, y la vigencia del boletín BMGFS (último mes). No sustituye escanear "
-        "el QR: el reporte trae los links para hacerlo."
+        "Revisa si una Constancia de Situación Fiscal es auténtica o fue alterada: "
+        "33 candados de seguridad, resultado en pantalla y reporte en PDF."
     ),
     multiple_archivos=True,
     tipos_permitidos=["pdf", "jpg", "jpeg", "png"],
     ejecutar=ejecutar,
     mostrar_resumen=mostrar_resumen,
     ayuda_archivo=(
-        "El PDF tal como se descargó del SAT, sin abrirlo ni guardarlo en otro programa. "
-        "Las fotos o capturas se aceptan solo para leer el QR: no se pueden validar."
+        "Sube el PDF tal como se descargó del SAT. Las fotos solo sirven para leer el QR."
     ),
 )
