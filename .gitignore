@@ -6,3 +6,5 @@ graficas_temp_*/
 _extraido_*/
 .venv/
 .pytest_cache/
+# CSF reales para pruebas locales: traen RFC, CURP y domicilio. NUNCA al repo (es público).
+tests/muestras_csf/

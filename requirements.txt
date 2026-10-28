@@ -22,6 +22,11 @@ python-docx==1.2.0
 pillow==12.1.1
 pdfplumber==0.11.9
 svglib==2.2.0
+# Validar CSF: estructura del PDF (pypdf) y lectura de QR / código de barras
+# (zxing-cpp: rueda de pip, no necesita apt-get ni packages.txt).
+# pypdfium2 ya viene con pdfplumber y se usa para "escanear" la página.
+pypdf==6.21.4
+zxing-cpp==3.1.1
 # Zonas horarias: la fecha de los reportes es la de México, no la del
 # servidor (UTC). Ver herramientas/fechas.py.
 tzdata==2025.2

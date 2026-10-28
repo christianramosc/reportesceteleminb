@@ -71,6 +71,7 @@ _MENU = {
     "resumen_mensual": (":material/calendar_month:", "Resumen mensual"),
     "resumen_vendedor": (":material/groups:", "Resumen por vendedor"),
     "modelo_datos": (":material/dataset:", "Modelo de datos"),
+    "validar_csf": (":material/verified_user:", "Validar CSF"),
 }
 
 
@@ -194,7 +195,7 @@ etiquetas.append("Varios archivos" if herramienta.multiple_archivos else "1 arch
 ui.encabezado(ui.nombre_limpio(herramienta.nombre), herramienta.descripcion, etiquetas)
 
 usa_datos_reporte = herramienta.id in ("avance_preliminar", "comparativo_mensual",
-                                       "resumen_mensual", "resumen_vendedor")
+                                       "resumen_mensual", "resumen_vendedor", "validar_csf")
 usa_etiquetas_mes = herramienta.id in ("comparativo_mensual", "modelo_datos")
 tiene_opciones = (usa_datos_reporte or usa_etiquetas_mes
                   or herramienta.id == "resumen_vendedor")
@@ -214,7 +215,8 @@ with st.container(border=True, key="tarjeta_archivo"):
     if archivos_subidos and not herramienta.multiple_archivos:
         archivos_subidos = [archivos_subidos]
 
-    if archivos_subidos and herramienta.id != "relacion_zip":
+    # La vista previa lee la bitácora en Excel; no aplica a ZIP ni a CSF en PDF.
+    if archivos_subidos and herramienta.id not in ("relacion_zip", "validar_csf"):
         _vista_previa(archivos_subidos)
 
     # El comparativo necesita al menos dos meses para poder comparar.

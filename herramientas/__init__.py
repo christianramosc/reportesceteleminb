@@ -29,6 +29,7 @@ from .herramienta_avance_preliminar import HERRAMIENTA as _avance_preliminar
 from .herramienta_comparativo_mensual import HERRAMIENTA as _comparativo_mensual
 from .herramienta_resumen_mensual import HERRAMIENTA as _resumen_mensual
 from .herramienta_resumen_vendedor import HERRAMIENTA as _resumen_vendedor
+from .herramienta_validar_csf import HERRAMIENTA as _validar_csf
 # Modelo de Datos: oculto en la app por ahora. Para volver a mostrarlo,
 # descomenta esta línea y agrega _modelo_datos a REGISTRO.
 # from .herramienta_modelo_datos import HERRAMIENTA as _modelo_datos
@@ -39,4 +40,5 @@ REGISTRO = [
     _comparativo_mensual,
     _resumen_mensual,
     _resumen_vendedor,
+    _validar_csf,
 ]

@@ -8,6 +8,7 @@ y descarga el resultado", los scripts que ya usas en Colab:
 | 📁 Relación de Clientes | `bitacora_zip.py` (adaptado de `Relacion_de_clientes_ZIP_DEL_MES`) | 1 ZIP del mes | 1 Excel (bitácora) |
 | 📈 Avance Preliminar Mensual | `avance_preliminar_original.py` (sin cambios) | 1 Excel | 1 PDF + 1 Word |
 | 📊 Comparativo Mensual | `comparativo_mensual_original.py` (sin cambios) | 2+ Excel | 1 PDF + 1 Word |
+| 🛡️ Validar CSF | `validar_csf.py` | 1+ PDF de CSF del SAT | 1 PDF de validación por constancia |
 
 Tus compañeros solo necesitan el link de la app — no necesitan Colab, ni
 cuenta de Google, ni saber qué es una celda de código.
@@ -37,6 +38,41 @@ de nuevo con el mismo criterio (top vendedor por volumen, por
 financiado, por GAP) porque en el script original esas frases están
 armadas dentro de la función que arma el PDF, no en una función aparte
 reutilizable. El resto si es exactamente el mismo contenido que el PDF.
+
+### Validar CSF (candados anti-alteración)
+
+Sube una o varias Constancias de Situación Fiscal y obtén, por cada una, un
+PDF con el veredicto (**SIN INDICIOS DE ALTERACIÓN / REVISAR MANUALMENTE /
+ALTERADA / NO VERIFICABLE**) y el detalle de cada candado. Sigue el boletín
+BMGFS de octubre 2026 (Dirección de Riesgos). Cada candado está comentado en
+`herramientas/validar_csf.py` explicando qué fraude previene:
+
+1. **Archivo**: generado por Oracle XML Publisher (motor del SAT), sin
+   metadatos de edición, una sola revisión, `/ID` sin modificar, sin
+   anotaciones/formularios, solo fuentes de la plantilla, sin texto encimado
+   u oculto, tipografía uniforme, QR y código de barras de origen, y
+   **maquetación original** (textos centrados y espaciado exactos: detecta la
+   edición "fina" que no deja rastro en metadatos).
+2. **Códigos**: los 2 QR llevan a `https://siat.sat.gob.mx` y coinciden con
+   RFC e idCIF; el código de barras es el RFC; lo que se ve al escanear la
+   página es lo incrustado.
+3. **Datos**: dígito verificador de RFC y CURP, RFC ↔ CURP ↔ nombre, fechas
+   en orden, actividades suman 100 %, régimen acorde al tipo de persona, CP
+   de la entidad, cadena original (fecha y RFC, paso 3 del boletín) y sello
+   digital con estructura válida. En lote: dos CSF distintas con el mismo
+   sello/idCIF = una es clon.
+4. **Políticas** (aparte): emitida en los últimos 30 días y estatus ACTIVO.
+
+No sustituye escanear el QR: un cambio por un texto del mismo ancho exacto
+no mueve la maquetación. Por eso el reporte siempre trae los links de ambos
+QR. Las fotos o capturas solo se usan para leer el QR (no se pueden validar).
+
+En Colab: `!pip install pdfplumber pypdf pypdfium2 zxing-cpp reportlab`,
+copia `herramientas/validar_csf.py` y corre `import validar_csf; validar_csf.main()`.
+
+Pruebas con CSF reales: ponlas en `tests/muestras_csf/` (está en
+`.gitignore`; el repo es público y las constancias traen RFC, CURP y
+domicilio) y corre `python -m pytest tests/test_validar_csf.py`.
 
 ## Cómo desplegarla (gratis, Streamlit Community Cloud)
 
