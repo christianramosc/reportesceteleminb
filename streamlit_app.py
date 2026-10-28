@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-App de reportes — Bitácora de Solicitudes MG Colima (Autoexpress Inbursa)
+Reportes y Herramientas — Bitácora de Solicitudes (Autoexpress Inbursa)
+
+Sirve para cualquier PDV: el nombre del PDV y del implant se capturan en
+cada reporte.
 
 Une, detrás de una interfaz simple de "sube el archivo y descarga el
 resultado", los scripts de Colab que ya se usan para la bitácora mensual.
@@ -54,7 +57,7 @@ def _borrar_carpetas_heredadas():
 _borrar_carpetas_heredadas()
 
 st.set_page_config(
-    page_title="Reportes · MG Colima",
+    page_title="Reportes y Herramientas",
     page_icon=":material/bar_chart:",
     layout="centered",
     initial_sidebar_state="auto",   # abierto en computadora, cerrado en celular
@@ -181,7 +184,7 @@ def _vista_previa(archivos_subidos):
 # BARRA LATERAL — marca y menú de herramientas
 # =======================================================================
 with st.sidebar:
-    ui.marca("Reportes MG Colima", "Autoexpress Inbursa")
+    ui.marca("Reportes y Herramientas", "Autoexpress Inbursa", logo="RH")
     ui.grupo("Herramientas")
     herramienta = st.radio(
         "Herramienta",

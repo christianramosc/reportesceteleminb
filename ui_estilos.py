@@ -271,9 +271,9 @@ def aplicar_estilos():
 
 
 # --- Barra lateral --------------------------------------------------------
-def marca(titulo: str, subtitulo: str):
+def marca(titulo: str, subtitulo: str, logo: str = "RH"):
     _html(
-        f'<div class="gr-marca"><div class="gr-marca-logo">MG</div>'
+        f'<div class="gr-marca"><div class="gr-marca-logo">{logo}</div>'
         f'<div><div class="gr-marca-titulo">{titulo}</div>'
         f'<div class="gr-marca-sub">{subtitulo}</div></div></div>'
     )
