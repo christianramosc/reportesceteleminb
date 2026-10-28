@@ -15,7 +15,6 @@ import os
 import shutil
 import tempfile
 import traceback
-from datetime import date
 
 import pandas as pd
 import streamlit as st
@@ -55,17 +54,29 @@ def _borrar_carpetas_heredadas():
 _borrar_carpetas_heredadas()
 
 st.set_page_config(
-    page_title="Generador de reportes",
-    page_icon="📋",
+    page_title="Reportes · MG Colima",
+    page_icon=":material/bar_chart:",
     layout="centered",
+    initial_sidebar_state="auto",   # abierto en computadora, cerrado en celular
 )
 
 ui.aplicar_estilos()
-ui.encabezado(
-    "Generador de reportes",
-    "Elige una herramienta, sube el archivo que te pida y descarga el "
-    "resultado ya generado.",
-)
+
+# Menú lateral: icono (Material Symbols de Streamlit) y nombre corto por
+# herramienta. El nombre completo se sigue usando como título de la página.
+_MENU = {
+    "relacion_zip": (":material/folder_zip:", "Relación de clientes"),
+    "avance_preliminar": (":material/trending_up:", "Avance preliminar"),
+    "comparativo_mensual": (":material/compare_arrows:", "Comparativo mensual"),
+    "resumen_mensual": (":material/calendar_month:", "Resumen mensual"),
+    "resumen_vendedor": (":material/groups:", "Resumen por vendedor"),
+    "modelo_datos": (":material/dataset:", "Modelo de datos"),
+}
+
+
+def _etiqueta_menu(h):
+    icono, corto = _MENU.get(h.id, (":material/description:", ui.nombre_limpio(h.nombre)))
+    return f"{icono} {corto}"
 
 
 def _procesar(herramienta, archivos_subidos, opciones):
@@ -132,18 +143,19 @@ def _vista_previa(archivos_subidos):
 
     if not filas_totales:
         return
-    st.info(f"Se leyeron **{filas_totales}** solicitudes.")
 
     if not conteo:
+        ui.resumen_lectura(filas_totales, [])
         st.warning(
             "No se encontró una columna STATUS en el archivo. El reporte se "
             "generará sin el desglose por estatus."
         )
         return
 
-    resumen = ", ".join(f"{_est.etiqueta(c)}: {n}"
-                        for c, n in sorted(conteo.items(), key=lambda x: -x[1]))
-    st.caption(f"Estatus detectados — {resumen}")
+    ui.resumen_lectura(filas_totales, [
+        (_est.etiqueta(c), n, _est.COLOR_CATEGORIA.get(c, ui.TEXTO_TENUE))
+        for c, n in sorted(conteo.items(), key=lambda x: -x[1])
+    ])
 
     # Un estatus fuera del catálogo se grafica igual, pero sin color ni
     # etiqueta propios: conviene avisarlo aquí, no solo en la consola.
@@ -156,35 +168,67 @@ def _vista_previa(archivos_subidos):
         )
 
 
-tabs = st.tabs([ui.nombre_limpio(h.nombre) for h in REGISTRO])
+# =======================================================================
+# BARRA LATERAL — marca y menú de herramientas
+# =======================================================================
+with st.sidebar:
+    ui.marca("Reportes MG Colima", "Autoexpress Inbursa")
+    ui.grupo("Herramientas")
+    herramienta = st.radio(
+        "Herramienta",
+        REGISTRO,
+        format_func=_etiqueta_menu,
+        label_visibility="collapsed",
+        key="herramienta_activa",
+    )
+    ui.nota_lateral(
+        "Los archivos que subes se procesan en el momento y se borran al "
+        "terminar. Nada se guarda en el servidor."
+    )
 
-for tab, herramienta in zip(tabs, REGISTRO):
-    with tab:
-        st.markdown(herramienta.descripcion)
+# =======================================================================
+# HERRAMIENTA ELEGIDA
+# =======================================================================
+etiquetas = ["." + t.upper() for t in herramienta.tipos_permitidos]
+etiquetas.append("Varios archivos" if herramienta.multiple_archivos else "1 archivo")
+ui.encabezado(ui.nombre_limpio(herramienta.nombre), herramienta.descripcion, etiquetas)
 
-        archivos_subidos = st.file_uploader(
-            "Archivo" + ("s" if herramienta.multiple_archivos else ""),
-            type=herramienta.tipos_permitidos,
-            accept_multiple_files=herramienta.multiple_archivos,
-            help=herramienta.ayuda_archivo,
-            key=f"uploader_{herramienta.id}",
-        )
-        if archivos_subidos and not herramienta.multiple_archivos:
-            archivos_subidos = [archivos_subidos]
+usa_datos_reporte = herramienta.id in ("avance_preliminar", "comparativo_mensual",
+                                       "resumen_mensual", "resumen_vendedor")
+usa_etiquetas_mes = herramienta.id in ("comparativo_mensual", "modelo_datos")
+tiene_opciones = (usa_datos_reporte or usa_etiquetas_mes
+                  or herramienta.id == "resumen_vendedor")
+opciones = {}
 
-        if archivos_subidos and herramienta.id != "relacion_zip":
-            _vista_previa(archivos_subidos)
+# --- 1. Archivo ---------------------------------------------------------
+with st.container(border=True, key="tarjeta_archivo"):
+    ui.paso(1, "Sube el archivo" + ("s" if herramienta.multiple_archivos else ""),
+            herramienta.ayuda_archivo or "")
+    archivos_subidos = st.file_uploader(
+        "Archivo" + ("s" if herramienta.multiple_archivos else ""),
+        type=herramienta.tipos_permitidos,
+        accept_multiple_files=herramienta.multiple_archivos,
+        label_visibility="collapsed",
+        key=f"uploader_{herramienta.id}",
+    )
+    if archivos_subidos and not herramienta.multiple_archivos:
+        archivos_subidos = [archivos_subidos]
 
-        # El comparativo necesita al menos dos meses para poder comparar.
-        if (herramienta.id == "comparativo_mensual" and archivos_subidos
-                and len(archivos_subidos) < 2):
-            st.warning("Sube al menos dos archivos para poder comparar meses.")
+    if archivos_subidos and herramienta.id != "relacion_zip":
+        _vista_previa(archivos_subidos)
 
-        # --- Opciones extra específicas de cada herramienta ---
-        opciones = {}
+    # El comparativo necesita al menos dos meses para poder comparar.
+    if (herramienta.id == "comparativo_mensual" and archivos_subidos
+            and len(archivos_subidos) < 2):
+        st.warning("Sube al menos dos archivos para poder comparar meses.")
 
-        if herramienta.id in ("avance_preliminar", "comparativo_mensual",
-                              "resumen_mensual", "resumen_vendedor"):
+# --- 2. Datos del reporte (solo si la herramienta los pide) --------------
+if tiene_opciones:
+    with st.container(border=True, key="tarjeta_datos"):
+        ui.paso(2, "Datos del reporte",
+                "Aparecen en el encabezado y el pie de los documentos.")
+
+        if usa_datos_reporte:
             col_pdv, col_analista = st.columns(2)
             opciones["nombre_pdv"] = col_pdv.text_input(
                 "Nombre del PDV", value=_PDV_DEFECTO, key=f"pdv_{herramienta.id}",
@@ -194,29 +238,31 @@ for tab, herramienta in zip(tabs, REGISTRO):
             )
 
         if herramienta.id == "avance_preliminar":
-            usar_hoy = st.checkbox("Usar la fecha de hoy como fecha de corte", value=True,
-                                    key=f"hoy_{herramienta.id}")
+            usar_hoy = st.toggle("Usar la fecha de hoy como fecha de corte", value=True,
+                                 key=f"hoy_{herramienta.id}")
             if not usar_hoy:
                 fecha_elegida = st.date_input("Fecha de corte", value=_fechas.hoy(),
-                                               key=f"fecha_{herramienta.id}")
+                                              format="DD/MM/YYYY",
+                                              key=f"fecha_{herramienta.id}")
                 opciones["fecha_corte"] = fecha_elegida.strftime("%d/%m/%Y")
 
         if herramienta.id == "resumen_vendedor":
-            with st.expander("Generar solo para ciertos vendedores (opcional)"):
+            with st.expander("Generar solo para ciertos vendedores (opcional)",
+                             icon=":material/filter_list:"):
                 st.caption(
                     "Por default se genera el PDF de todos los vendedores que "
                     "aparezcan en el Excel. Para limitarlo, escribe un nombre "
                     "por línea, tal como viene en la columna Nombre del Vendedor."
                 )
                 texto_vend = st.text_area("Un vendedor por línea",
-                                           key=f"vend_{herramienta.id}")
+                                          key=f"vend_{herramienta.id}")
                 if texto_vend.strip():
                     opciones["vendedores_incluir"] = [
                         l.strip() for l in texto_vend.splitlines() if l.strip()
                     ]
 
-        if herramienta.id in ("comparativo_mensual", "modelo_datos"):
-            with st.expander("Etiquetas de mes (opcional)"):
+        if usa_etiquetas_mes:
+            with st.expander("Etiquetas de mes (opcional)", icon=":material/label:"):
                 st.caption(
                     "Por default se usa el nombre de la hoja de cada Excel. "
                     "Si quieres forzar otra etiqueta, escribe una por línea, "
@@ -226,58 +272,62 @@ for tab, herramienta in zip(tabs, REGISTRO):
                 if texto_meses.strip():
                     opciones["nombres_meses"] = [l.strip() for l in texto_meses.splitlines() if l.strip()]
 
-        generar = st.button("Generar reporte", key=f"generar_{herramienta.id}",
-                             type="primary", disabled=not archivos_subidos)
+generar = st.button("Generar reporte", key=f"generar_{herramienta.id}",
+                    type="primary", icon=":material/bolt:", width="stretch",
+                    disabled=not archivos_subidos)
 
-        # Los resultados se guardan en session_state, NO se dibujan solo
-        # dentro del "if generar". st.button() solo devuelve True en el rerun
-        # inmediato al clic, y st.download_button() provoca un rerun al
-        # descargar: si los botones dependieran de "generar", al bajar el PDF
-        # desaparecería el botón del Word.
-        clave_resultado = f"resultado_{herramienta.id}"
+# Los resultados se guardan en session_state, NO se dibujan solo dentro
+# del "if generar". st.button() solo devuelve True en el rerun inmediato al
+# clic, y st.download_button() provoca un rerun al descargar: si los botones
+# dependieran de "generar", al bajar el PDF desaparecería el botón del Word.
+# Como la clave es por herramienta, el resultado sigue ahí si cambias de
+# herramienta en el menú y regresas.
+clave_resultado = f"resultado_{herramienta.id}"
 
-        if generar and archivos_subidos:
-            with st.spinner("Generando el reporte. Puede tardar uno o dos minutos."):
-                try:
-                    archivos, registro = _procesar(herramienta, archivos_subidos, opciones)
-                except Exception as e:
-                    st.session_state.pop(clave_resultado, None)
-                    st.error(f"No se pudo generar el reporte: {e}")
-                    with st.expander("Detalle técnico"):
-                        st.code(traceback.format_exc())
-                else:
-                    st.session_state[clave_resultado] = {
-                        "archivos": archivos,
-                        "log": registro,
-                        "fecha": _fechas.hoy().strftime("%d/%m/%Y"),
-                    }
+if generar and archivos_subidos:
+    with st.spinner("Generando el reporte. Puede tardar uno o dos minutos."):
+        try:
+            archivos, registro = _procesar(herramienta, archivos_subidos, opciones)
+        except Exception as e:
+            st.session_state.pop(clave_resultado, None)
+            st.error(f"No se pudo generar el reporte: {e}", icon=":material/error:")
+            with st.expander("Detalle técnico"):
+                st.code(traceback.format_exc())
+        else:
+            st.session_state[clave_resultado] = {
+                "archivos": archivos,
+                "log": registro,
+                "fecha": _fechas.ahora().strftime("%d/%m/%Y · %H:%M"),
+            }
 
-        resultado = st.session_state.get(clave_resultado)
-        if resultado:
-            if not resultado["archivos"]:
-                st.warning("El proceso terminó, pero no se generó ningún archivo de salida.")
-            else:
-                cuantos = len(resultado["archivos"])
-                ui.bloque_resultado(
-                    "Reporte generado",
-                    f"{cuantos} archivo{'s' if cuantos != 1 else ''} "
-                    f"· {resultado['fecha']}",
-                )
-                # Los bytes ya están en memoria: no se lee del disco, porque
-                # el archivo generado se borró junto con el temporal.
-                columnas = st.columns(min(len(resultado["archivos"]), 3))
-                for i, (nombre, contenido) in enumerate(resultado["archivos"]):
-                    extension = nombre.rsplit(".", 1)[-1].upper()
-                    columnas[i % len(columnas)].download_button(
-                        f"Descargar {extension}",
+# --- 3. Descargas -------------------------------------------------------
+resultado = st.session_state.get(clave_resultado)
+if resultado:
+    with st.container(border=True, key="tarjeta_descargas"):
+        cuantos = len(resultado["archivos"])
+        ui.paso(3 if tiene_opciones else 2, "Descargas",
+                f"{cuantos} archivo{'s' if cuantos != 1 else ''} · generado el {resultado['fecha']}")
+
+        if not resultado["archivos"]:
+            st.warning("El proceso terminó, pero no se generó ningún archivo de salida.")
+
+        # Los bytes ya están en memoria: no se lee del disco, porque el
+        # archivo generado se borró junto con el temporal.
+        for i, (nombre, contenido) in enumerate(resultado["archivos"]):
+            with st.container(key=f"archivo_{herramienta.id}_{i}"):
+                col_info, col_boton = st.columns([0.74, 0.26], vertical_alignment="center")
+                with col_info:
+                    ui.fila_archivo(nombre, contenido)
+                with col_boton:
+                    st.download_button(
+                        "Descargar",
                         data=contenido,
                         file_name=nombre,
+                        icon=":material/download:",
                         key=f"descarga_{herramienta.id}_{nombre}",
-                        use_container_width=True,
+                        width="stretch",
                     )
 
-            if resultado.get("log"):
-                with st.expander("Detalle del proceso"):
-                    st.code(resultado["log"])
-
-ui.pie("Los archivos que subes se procesan en el momento y se borran al terminar.")
+        if resultado.get("log"):
+            with st.expander("Detalle del proceso", icon=":material/terminal:"):
+                st.code(resultado["log"], language=None)

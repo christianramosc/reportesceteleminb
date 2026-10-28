@@ -3,324 +3,350 @@
 
 Está aparte de streamlit_app.py a propósito: el CSS es largo y no tiene
 nada que ver con la lógica de generar reportes. Si mañana cambia el look,
-se toca este archivo y nada más.
+se toca este archivo (y .streamlit/config.toml) y nada más.
 
 Dirección de diseño
 -------------------
-La app es una herramienta de trabajo que alguien abre unos minutos al mes
-para convertir un montón de PDFs en un Excel. Lo que tiene que comunicar
-es precisión y estado: qué subí, qué está pasando, dónde quedó mi archivo.
-De ahí las decisiones:
+Tema oscuro con el sistema de diseño de shadcn/ui, adaptado a Streamlit
+(shadcn es una librería de React; aquí se replican sus tokens y patrones
+sobre los componentes nativos, que siguen funcionando igual):
 
-- Paleta de tinta sobre papel frío (no crema): el fondo es un gris azulado
-  muy claro y el texto un azul de tinta profundo. Lee como documento
-  financiero bien impreso, que es literalmente el material de origen.
-- Un solo acento rojo (#C8102E, el rojo de MG) y reservado para UNA cosa:
-  el botón que genera. Todo lo demás se mantiene callado para que la
-  acción principal sea obvia sin tener que buscarla.
-- Tipografía Archivo para títulos (grotesca de rasgos rectos, con aire de
-  señalética automotriz) e Inter para el cuerpo.
-- Pestañas como control segmentado en vez de subrayado: se ven como un
-  selector de modo, que es lo que realmente son.
+- Paleta "zinc": fondo casi negro, tarjetas un tono arriba, bordes finos
+  de 1px y texto secundario gris. Nada de sombras pesadas.
+- Un solo acento rojo (#DC2626, la variante "red" de shadcn y cercano al
+  rojo de MG), reservado para la acción principal: "Generar reporte".
+- Tipografía Geist (la de shadcn/Vercel) y Geist Mono para nombres de
+  archivo y el detalle del proceso.
+- Navegación en barra lateral, como el "sidebar" de shadcn, y cada
+  herramienta ordenada en tarjetas numeradas: archivo -> datos -> descargas.
 """
 
+import html
 import re
 
 import streamlit as st
 
-# --- Tokens --------------------------------------------------------------
-PAPEL       = "#F4F6F9"   # fondo de la página
-SUPERFICIE  = "#FFFFFF"   # tarjetas y campos
-TINTA       = "#132038"   # texto principal
-TINTA_SUAVE = "#5D6E85"   # texto secundario
-BORDE       = "#DDE3EC"
-ACENTO      = "#C8102E"   # rojo MG — solo para la acción principal
-ACENTO_OSC  = "#A00D25"
-EXITO       = "#0F7A55"
+# --- Tokens (shadcn/ui, tema zinc oscuro) --------------------------------
+FONDO        = "#09090B"   # background
+TARJETA      = "#0F0F12"   # card
+MUTED        = "#18181B"   # muted / secondary
+BORDE        = "#27272A"   # border / input
+TEXTO        = "#FAFAFA"   # foreground
+TEXTO_SUAVE  = "#A1A1AA"   # muted-foreground
+TEXTO_TENUE  = "#71717A"
+ACENTO       = "#DC2626"   # primary (red)
+ACENTO_HOVER = "#B91C1C"
+ANILLO       = "#D4D4D8"   # ring
+
+# Color e etiqueta por tipo de archivo en la lista de descargas.
+TIPOS_ARCHIVO = {
+    "pdf":  ("PDF",    "#F87171", ":material/picture_as_pdf:"),
+    "docx": ("Word",   "#60A5FA", ":material/description:"),
+    "xlsx": ("Excel",  "#4ADE80", ":material/table_chart:"),
+    "png":  ("Imagen", "#C084FC", ":material/image:"),
+    "zip":  ("ZIP",    "#FBBF24", ":material/folder_zip:"),
+}
 
 _CSS = f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
 
 :root {{
-  --papel: {PAPEL};
-  --superficie: {SUPERFICIE};
-  --tinta: {TINTA};
-  --tinta-suave: {TINTA_SUAVE};
+  --fondo: {FONDO};
+  --tarjeta: {TARJETA};
+  --muted: {MUTED};
   --borde: {BORDE};
+  --texto: {TEXTO};
+  --texto-suave: {TEXTO_SUAVE};
+  --texto-tenue: {TEXTO_TENUE};
   --acento: {ACENTO};
-  --acento-osc: {ACENTO_OSC};
-  --exito: {EXITO};
+  --acento-hover: {ACENTO_HOVER};
+  --anillo: {ANILLO};
+  --radio: 0.625rem;
 }}
 
 /* ---------- Base ---------- */
-.stApp {{
-  background: var(--papel);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  color: var(--tinta);
-}}
+.stApp {{ background: var(--fondo); }}
 [data-testid="stHeader"] {{ background: transparent; }}
-.block-container {{ padding-top: 2.6rem; max-width: 52rem; }}
+.block-container {{ padding-top: 2.75rem; padding-bottom: 4rem; max-width: 50rem; }}
+h1, h2, h3, h4 {{ letter-spacing: -0.025em; }}
 
-h1, h2, h3, h4 {{
-  font-family: 'Archivo', 'Inter', sans-serif;
-  color: var(--tinta);
-  letter-spacing: -0.02em;
+/* ---------- Barra lateral ---------- */
+[data-testid="stSidebar"] {{ border-right: 1px solid var(--borde); }}
+[data-testid="stSidebarContent"] {{ padding-top: 0.25rem; }}
+[data-testid="stSidebarHeader"] {{ height: 1.25rem; min-height: 0; padding: 0; }}
+
+.gr-marca {{ display: flex; align-items: center; gap: 0.7rem; padding: 0.25rem 0.25rem 1.1rem; }}
+.gr-marca-logo {{
+  width: 2.1rem; height: 2.1rem; border-radius: 0.5rem; flex: none;
+  background: var(--acento); color: #fff;
+  display: grid; place-items: center;
+  font-weight: 700; font-size: 0.8rem; letter-spacing: 0.02em;
+}}
+.gr-marca-titulo {{ font-weight: 600; font-size: 0.92rem; color: var(--texto); line-height: 1.2; }}
+.gr-marca-sub {{ font-size: 0.75rem; color: var(--texto-suave); line-height: 1.3; }}
+
+.gr-grupo {{
+  font-size: 0.72rem; font-weight: 500; color: var(--texto-tenue);
+  padding: 0.9rem 0.5rem 0.35rem; border-top: 1px solid var(--borde);
 }}
 
-/* ---------- Encabezado ---------- */
-.gr-encabezado {{ margin-bottom: 2rem; }}
+/* Menú de herramientas: el radio se dibuja como lista de navegación.
+   Estructura de Streamlit 1.63: label[data-testid=stRadioOption] >
+   div > div > [div del círculo] + [stMarkdownContainer]. */
+[data-testid="stSidebar"] [data-testid="stElementContainer"]:has([data-testid="stRadio"]),
+[data-testid="stSidebar"] [data-testid="stRadio"],
+[data-testid="stSidebar"] [data-testid="stRadio"] > div,
+[data-testid="stSidebar"] [data-testid="stRadioGroup"] {{ gap: 2px; width: 100%; max-width: none; }}
+[data-testid="stSidebar"] [data-testid="stRadioOption"] {{
+  width: 100%; box-sizing: border-box; margin: 0; padding: 0.5rem 0.65rem; border-radius: 0.45rem;
+  cursor: pointer; transition: background 120ms ease;
+}}
+[data-testid="stSidebar"] [data-testid="stRadioOption"] > div > div > div:not([data-testid="stMarkdownContainer"]) {{
+  display: none;
+}}
+[data-testid="stSidebar"] [data-testid="stRadioOption"] p {{
+  font-size: 0.875rem; font-weight: 500; color: var(--texto-suave);
+  display: flex; align-items: center; gap: 0.6rem; margin: 0;
+}}
+[data-testid="stSidebar"] [data-testid="stRadioOption"] p [role="img"] {{ font-size: 1.1rem; }}
+[data-testid="stSidebar"] [data-testid="stRadioOption"]:hover {{ background: var(--muted); }}
+[data-testid="stSidebar"] [data-testid="stRadioOption"]:hover p {{ color: var(--texto); }}
+[data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] {{
+  background: var(--muted); box-shadow: inset 2px 0 0 var(--acento);
+}}
+[data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] p {{ color: var(--texto); }}
+
+.gr-nota-lateral {{
+  display: flex; gap: 0.55rem; align-items: flex-start;
+  margin-top: 1.5rem; padding: 0.75rem; border-radius: var(--radio);
+  border: 1px solid var(--borde); background: var(--tarjeta);
+  font-size: 0.75rem; line-height: 1.45; color: var(--texto-suave);
+}}
+.gr-nota-lateral svg {{ flex: none; margin-top: 1px; }}
+
+/* ---------- Encabezado de la herramienta ---------- */
+.gr-migas {{ font-size: 0.8rem; color: var(--texto-tenue); margin-bottom: 0.6rem; }}
+.gr-migas b {{ color: var(--texto-suave); font-weight: 500; }}
 .gr-titulo {{
-  font-family: 'Archivo', sans-serif;
-  font-weight: 700;
-  font-size: 2.5rem;
-  line-height: 1.1;
-  letter-spacing: -0.035em;
-  color: var(--tinta);
-  margin: 0;
+  font-size: 1.9rem; font-weight: 700; letter-spacing: -0.035em;
+  line-height: 1.15; color: var(--texto); margin: 0 0 0.55rem;
 }}
-.gr-regla {{
-  width: 3.25rem;
-  height: 4px;
-  background: var(--acento);
-  border-radius: 2px;
-  margin: 0.9rem 0 0.85rem;
+[data-testid="stMarkdownContainer"] p.gr-bajada {{ font-size: 0.93rem; line-height: 1.6; color: var(--texto-suave); margin: 0 0 0.9rem; max-width: 42rem; }}
+.gr-badges {{ display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.6rem; }}
+.gr-badge {{
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.15rem 0.55rem; border-radius: 999px;
+  border: 1px solid var(--borde); background: transparent;
+  font-size: 0.72rem; font-weight: 500; color: var(--texto-suave); white-space: nowrap;
 }}
-.gr-bajada {{
-  font-size: 0.95rem;
-  color: var(--tinta-suave);
-  margin: 0;
-  max-width: 34rem;
-  line-height: 1.55;
-}}
+.gr-badge-solido {{ background: var(--muted); color: var(--texto); }}
+.gr-punto {{ width: 0.5rem; height: 0.5rem; border-radius: 999px; display: inline-block;
+  box-shadow: 0 0 0 1px rgba(250, 250, 250, 0.28); }}
 
-/* ---------- Pestañas como control segmentado ----------
-   Streamlit 1.63 renderiza las pestañas con react-aria
-   ([data-testid="stTab"], [role="tablist"]). Se dejan también los
-   selectores viejos de baseweb por si la app corre en una versión
-   anterior: los que no existen simplemente no aplican. */
-[data-testid="stTabs"] [role="tablist"],
-.stTabs [data-baseweb="tab-list"] {{
-  gap: 4px;
-  background: #E7ECF3;
-  padding: 4px;
-  border-radius: 12px;
-  border: none;
-  display: flex;
-  flex-wrap: wrap;
+/* ---------- Tarjetas (st.container(border=True)) ---------- */
+[data-testid="stVerticalBlockBorderWrapper"]:has(> div > [data-testid="stVerticalBlock"] .gr-paso),
+div[class*="st-key-tarjeta_"] {{
+  background: var(--tarjeta);
+  border-color: var(--borde) !important;
+  border-radius: 0.75rem !important;
 }}
-[data-testid="stTab"],
-.stTabs [data-baseweb="tab-list"] button {{
-  background: transparent;
-  border: none;
-  border-radius: 9px;
-  padding: 0.5rem 0.95rem;
-  color: var(--tinta-suave);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}}
-[data-testid="stTab"] p {{
-  font-family: 'Inter', sans-serif;
-  font-size: 0.86rem;
-  font-weight: 500;
-  margin: 0;
-  color: inherit;
-}}
-[data-testid="stTab"]:hover {{ color: var(--tinta); }}
-[data-testid="stTab"][aria-selected="true"],
-.stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
-  background: var(--superficie);
-  color: var(--tinta);
-  box-shadow: 0 1px 2px rgba(19, 32, 56, 0.10);
-}}
-[data-testid="stTab"][aria-selected="true"] p {{ font-weight: 600; }}
+div[class*="st-key-tarjeta_"] {{ padding: 1.25rem 1.35rem 1.35rem !important; }}
 
-/* El subrayado animado sobra en un control segmentado */
-.react-aria-SelectionIndicator,
-.stTabs [data-baseweb="tab-highlight"],
-.stTabs [data-baseweb="tab-border"] {{ display: none !important; }}
+.gr-paso {{ display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.35rem; }}
+.gr-paso-num {{
+  flex: none; width: 1.6rem; height: 1.6rem; border-radius: 999px;
+  border: 1px solid var(--borde); background: var(--muted);
+  display: grid; place-items: center;
+  font-size: 0.75rem; font-weight: 600; color: var(--texto);
+}}
+[data-testid="stMarkdownContainer"] p.gr-paso-titulo {{ font-size: 0.98rem; font-weight: 600; color: var(--texto); line-height: 1.6rem; margin: 0; }}
+[data-testid="stMarkdownContainer"] p.gr-paso-ayuda {{ font-size: 0.8rem; color: var(--texto-suave); margin: 0.1rem 0 0; line-height: 1.45; }}
 
-[role="tabpanel"],
-.stTabs [data-baseweb="tab-panel"] {{ padding-top: 1.6rem; }}
-
-/* ---------- Zona de carga ---------- */
+/* ---------- Carga de archivos ---------- */
 [data-testid="stFileUploaderDropzone"] {{
-  background: var(--superficie);
-  border: 1.5px dashed var(--borde);
-  border-radius: 12px;
-  padding: 1.4rem;
+  background: var(--fondo);
+  border: 1px dashed #3F3F46;
+  border-radius: var(--radio);
+  padding: 1.15rem 1.25rem;
   transition: border-color 140ms ease, background 140ms ease;
 }}
-[data-testid="stFileUploaderDropzone"]:hover {{
-  border-color: #B9C4D4;
-  background: #FCFDFE;
-}}
+[data-testid="stFileUploaderDropzone"]:hover {{ border-color: #52525B; background: #0C0C0F; }}
 [data-testid="stFileUploaderDropzone"] button {{
-  background: var(--superficie);
-  color: var(--tinta);
-  border: 1px solid var(--borde);
-  border-radius: 8px;
-  font-weight: 500;
+  background: var(--muted); border: 1px solid var(--borde); color: var(--texto);
+  border-radius: 0.45rem; font-weight: 500;
 }}
+
+/* ---------- Resumen de lo leído ---------- */
+.gr-lectura {{
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem 0.9rem;
+  margin-top: 0.85rem; padding: 0.75rem 0.9rem;
+  border: 1px solid var(--borde); border-radius: var(--radio); background: var(--fondo);
+}}
+.gr-lectura-cifra {{ font-size: 0.85rem; color: var(--texto-suave); }}
+.gr-lectura-cifra b {{ font-size: 1.05rem; color: var(--texto); font-weight: 600; margin-right: 0.15rem; }}
+.gr-lectura .gr-badges {{ margin: 0; }}
 
 /* ---------- Campos ---------- */
-.stTextInput input, .stTextArea textarea, .stDateInput input {{
-  background: var(--superficie);
-  border: 1px solid var(--borde);
-  border-radius: 9px;
-  color: var(--tinta);
-  font-family: 'Inter', sans-serif;
-}}
-.stTextInput input:focus, .stTextArea textarea:focus {{
-  border-color: var(--tinta-suave);
-  box-shadow: none;
-}}
-label, .stCheckbox label p {{
-  font-size: 0.85rem !important;
-  font-weight: 500 !important;
-  color: var(--tinta-suave) !important;
-}}
+.stTextInput input, .stTextArea textarea, .stDateInput input {{ font-size: 0.9rem; }}
+[data-testid="stWidgetLabel"] p {{ font-size: 0.82rem; font-weight: 500; color: var(--texto-suave); }}
 
-/* ---------- Botón principal: el único elemento rojo ---------- */
+/* ---------- Botón principal ---------- */
 .stButton > button[kind="primary"] {{
-  background: var(--acento);
-  border: none;
-  border-radius: 9px;
-  color: #fff;
-  font-family: 'Inter', sans-serif;
-  font-weight: 600;
-  font-size: 0.92rem;
-  padding: 0.6rem 1.8rem;
-  box-shadow: 0 1px 2px rgba(200, 16, 46, 0.25);
-  transition: background 120ms ease;
+  background: var(--acento); border: 1px solid var(--acento); color: #fff;
+  font-weight: 600; font-size: 0.9rem; height: 2.65rem;
+  transition: background 120ms ease, border-color 120ms ease;
 }}
 .stButton > button[kind="primary"]:hover:not(:disabled) {{
-  background: var(--acento-osc);
-  color: #fff;
+  background: var(--acento-hover); border-color: var(--acento-hover); color: #fff;
 }}
 .stButton > button[kind="primary"]:disabled {{
-  background: #C9D2DE;
-  color: #8A98AB;
-  box-shadow: none;
+  background: var(--muted); border-color: var(--borde); color: var(--texto-tenue); opacity: 1;
 }}
 
-/* ---------- Botones de descarga ---------- */
+/* ---------- Lista de descargas ---------- */
+div[class*="st-key-archivo_"] {{
+  border: 1px solid var(--borde); border-radius: var(--radio);
+  background: var(--fondo); padding: 0.6rem 0.65rem 0.6rem 0.75rem;
+  transition: border-color 120ms ease;
+}}
+div[class*="st-key-archivo_"]:hover {{ border-color: #3F3F46; }}
+.gr-archivo {{ display: flex; align-items: center; gap: 0.8rem; min-width: 0; }}
+.gr-archivo-icono {{
+  flex: none; width: 2.35rem; height: 2.35rem; border-radius: 0.5rem;
+  display: grid; place-items: center;
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em;
+}}
+.gr-archivo-texto {{ min-width: 0; }}
+.gr-archivo-nombre {{
+  font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.82rem; color: var(--texto);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}}
+.gr-archivo-meta {{ font-size: 0.74rem; color: var(--texto-tenue); margin-top: 0.1rem; }}
 .stDownloadButton > button {{
-  background: var(--superficie);
-  border: 1px solid var(--borde);
-  border-radius: 10px;
-  color: var(--tinta);
-  font-family: 'Inter', sans-serif;
-  font-weight: 500;
-  font-size: 0.88rem;
-  padding: 0.7rem 1rem;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  background: var(--muted); border: 1px solid var(--borde); color: var(--texto);
+  font-weight: 500; font-size: 0.84rem; height: 2.3rem;
 }}
-.stDownloadButton > button:hover {{
-  border-color: var(--tinta-suave);
-  color: var(--tinta);
-  box-shadow: 0 2px 6px rgba(19, 32, 56, 0.08);
-}}
+.stDownloadButton > button:hover {{ background: #27272A; border-color: #3F3F46; color: var(--texto); }}
 
-/* ---------- Avisos ---------- */
-[data-testid="stAlert"] {{
-  border-radius: 10px;
-  border: 1px solid var(--borde);
-  font-size: 0.89rem;
-}}
-
-/* ---------- Expander ---------- */
-[data-testid="stExpander"] details {{
-  background: var(--superficie);
-  border: 1px solid var(--borde);
-  border-radius: 10px;
-}}
-[data-testid="stExpander"] summary {{
-  font-size: 0.86rem;
-  font-weight: 500;
-  color: var(--tinta-suave);
-}}
-
-/* ---------- Bloque de resultado ---------- */
-.gr-resultado {{
-  background: var(--superficie);
-  border: 1px solid var(--borde);
-  border-left: 3px solid var(--exito);
-  border-radius: 10px;
-  padding: 0.85rem 1.1rem;
-  margin-bottom: 0.9rem;
-}}
-.gr-resultado-titulo {{
-  font-family: 'Archivo', sans-serif;
-  font-weight: 600;
-  font-size: 0.97rem;
-  color: var(--tinta);
-  margin: 0 0 0.15rem;
-}}
-.gr-resultado-nota {{
-  font-size: 0.83rem;
-  color: var(--tinta-suave);
-  margin: 0;
-}}
-
-/* ---------- Pie ---------- */
-.gr-pie {{
-  margin-top: 3rem;
-  padding-top: 1.1rem;
-  border-top: 1px solid var(--borde);
-  font-size: 0.78rem;
-  color: #8A98AB;
-}}
+/* ---------- Avisos, expanders y código ---------- */
+[data-testid="stAlert"] {{ border-radius: var(--radio); font-size: 0.86rem; }}
+[data-testid="stExpander"] details {{ border-color: var(--borde); border-radius: var(--radio); background: transparent; }}
+[data-testid="stExpander"] summary p {{ font-size: 0.85rem; font-weight: 500; color: var(--texto-suave); }}
+[data-testid="stExpander"] summary:hover p {{ color: var(--texto); }}
+[data-testid="stCode"] pre, .stCode pre {{ font-size: 0.75rem !important; }}
 
 /* Accesibilidad */
-*:focus-visible {{ outline: 2px solid var(--tinta); outline-offset: 2px; }}
+*:focus-visible {{ outline: 2px solid var(--anillo); outline-offset: 2px; }}
 @media (prefers-reduced-motion: reduce) {{
   * {{ transition: none !important; animation: none !important; }}
 }}
 @media (max-width: 640px) {{
-  .gr-titulo {{ font-size: 2rem; }}
-  .block-container {{ padding-top: 1.6rem; }}
+  .gr-titulo {{ font-size: 1.55rem; }}
+  .block-container {{ padding-top: 1.5rem; }}
+  div[class*="st-key-tarjeta_"] {{ padding: 1rem !important; }}
 }}
 </style>
 """
+
+_CANDADO = (
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+)
+
+
+def _html(contenido: str):
+    st.markdown(contenido, unsafe_allow_html=True)
 
 
 def aplicar_estilos():
     """Inyecta el CSS. Se llama una sola vez, justo después de
     st.set_page_config()."""
-    st.markdown(_CSS, unsafe_allow_html=True)
+    _html(_CSS)
 
 
-def encabezado(titulo: str, bajada: str):
-    """Dibuja el encabezado de la app."""
-    st.markdown(
-        f'<div class="gr-encabezado">'
-        f'<h1 class="gr-titulo">{titulo}</h1>'
-        f'<div class="gr-regla"></div>'
-        f'<p class="gr-bajada">{bajada}</p>'
-        f'</div>',
-        unsafe_allow_html=True,
+# --- Barra lateral --------------------------------------------------------
+def marca(titulo: str, subtitulo: str):
+    _html(
+        f'<div class="gr-marca"><div class="gr-marca-logo">MG</div>'
+        f'<div><div class="gr-marca-titulo">{titulo}</div>'
+        f'<div class="gr-marca-sub">{subtitulo}</div></div></div>'
     )
 
 
-def bloque_resultado(titulo: str, nota: str):
-    """Panel de confirmación arriba de los botones de descarga."""
-    st.markdown(
-        f'<div class="gr-resultado">'
-        f'<p class="gr-resultado-titulo">{titulo}</p>'
-        f'<p class="gr-resultado-nota">{nota}</p>'
-        f'</div>',
-        unsafe_allow_html=True,
+def grupo(texto: str):
+    _html(f'<div class="gr-grupo">{texto}</div>')
+
+
+def nota_lateral(texto: str):
+    _html(f'<div class="gr-nota-lateral">{_CANDADO}<span>{texto}</span></div>')
+
+
+# --- Contenido principal --------------------------------------------------
+def badges(textos, solido=False):
+    clase = "gr-badge gr-badge-solido" if solido else "gr-badge"
+    return "".join(f'<span class="{clase}">{html.escape(t)}</span>' for t in textos)
+
+
+def encabezado(nombre: str, descripcion: str, etiquetas=()):
+    """Migas, título, descripción y badges de la herramienta elegida."""
+    _html(
+        f'<div class="gr-migas">Herramientas &nbsp;/&nbsp; <b>{html.escape(nombre)}</b></div>'
+        f'<div class="gr-titulo" role="heading" aria-level="1">{html.escape(nombre)}</div>'
+        f'<p class="gr-bajada">{html.escape(descripcion)}</p>'
+        f'<div class="gr-badges">{badges(etiquetas)}</div>'
     )
 
 
-def pie(texto: str):
-    st.markdown(f'<div class="gr-pie">{texto}</div>', unsafe_allow_html=True)
+def paso(numero: int, titulo: str, ayuda: str = ""):
+    """Título numerado al inicio de cada tarjeta."""
+    texto_ayuda = f'<p class="gr-paso-ayuda">{html.escape(ayuda)}</p>' if ayuda else ""
+    _html(
+        f'<div class="gr-paso"><div class="gr-paso-num">{numero}</div>'
+        f'<div><p class="gr-paso-titulo">{html.escape(titulo)}</p>{texto_ayuda}</div></div>'
+    )
+
+
+def resumen_lectura(filas: int, estatus):
+    """Cifra de solicitudes leídas + un badge por estatus con su color.
+
+    estatus: lista de (etiqueta, cantidad, color_hex)."""
+    chips = "".join(
+        f'<span class="gr-badge"><span class="gr-punto" style="background:{color}"></span>'
+        f'{html.escape(str(etiqueta))} · {n}</span>'
+        for etiqueta, n, color in estatus
+    )
+    _html(
+        f'<div class="gr-lectura"><span class="gr-lectura-cifra"><b>{filas:,}</b> solicitudes</span>'
+        f'<div class="gr-badges">{chips}</div></div>'
+    )
+
+
+def _tamano(n_bytes: int) -> str:
+    for unidad in ("B", "KB", "MB"):
+        if n_bytes < 1024 or unidad == "MB":
+            return f"{n_bytes:.0f} {unidad}" if unidad == "B" else f"{n_bytes:.1f} {unidad}"
+        n_bytes /= 1024
+
+
+def fila_archivo(nombre: str, contenido: bytes):
+    """Icono de tipo + nombre + tipo/tamaño (la parte izquierda de la fila)."""
+    extension = nombre.rsplit(".", 1)[-1].lower()
+    etiqueta, color, _ = TIPOS_ARCHIVO.get(extension, (extension.upper(), TEXTO_SUAVE, ""))
+    _html(
+        f'<div class="gr-archivo">'
+        f'<div class="gr-archivo-icono" style="color:{color};background:{color}1F;'
+        f'border:1px solid {color}40">{html.escape(extension.upper())}</div>'
+        f'<div class="gr-archivo-texto"><div class="gr-archivo-nombre" title="{html.escape(nombre)}">'
+        f'{html.escape(nombre)}</div>'
+        f'<div class="gr-archivo-meta">{etiqueta} · {_tamano(len(contenido))}</div></div></div>'
+    )
 
 
 # Los nombres de las herramientas traen un emoji al inicio ("📁 Relación de
-# Clientes"). En un control segmentado se ven ruidosos y desalinean las
-# pestañas, así que se quitan solo para mostrar; el registro no se toca.
+# Clientes"). En el menú se usa un icono propio, así que el emoji se quita
+# solo para mostrar; el registro no se toca.
 _EMOJI_INICIAL = re.compile(r"^[^\w(]+", flags=re.UNICODE)
 
 
