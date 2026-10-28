@@ -89,6 +89,13 @@ TAMANOS_SAT = (8.0, 10.0, 12.0)
 # lo que el defraudador quiera.
 DOMINIO_QR = "siat.sat.gob.mx"
 RUTA_QR = "/app/qr/faces/pages/mobile/validadorqr.jsf"
+# Sufijos de hospedaje gratuito: un QR que lleva aquí es una página hecha por
+# un particular, nunca del SAT (el SAT solo usa dominios .gob.mx).
+HOSTING_GRATUITO = {".web.app": "Firebase Hosting de Google", ".firebaseapp.com": "Firebase Hosting de Google",
+                    ".vercel.app": "Vercel", ".netlify.app": "Netlify", ".github.io": "GitHub Pages",
+                    ".pages.dev": "Cloudflare Pages", ".onrender.com": "Render",
+                    ".glitch.me": "Glitch", ".000webhostapp.com": "000webhost", ".wixsite.com": "Wix",
+                    ".blogspot.com": "Blogger", ".replit.app": "Replit"}
 D1_QR_CEDULA = "10"   # 1er QR (cédula): D3 = idCIF_RFC
 D1_QR_SELLO = "26"    # 2do QR (sello):  D3 = folio_RFC
 
@@ -691,8 +698,12 @@ def _extraer_datos(info):
     m = re.search(r"Cadena\s*Original\s*Sello:\s*(.*?)\s*Sello\s*Digital:", texto, re.S)
     cadena = re.sub(r"\s*\n\s*", "", m.group(1)).strip() if m else ""
     d["cadena"] = re.sub(r"SITUACI([OÓ])N\s*FISCAL", r"SITUACI\1N FISCAL", cadena)
-    m = re.search(r"Sello\s*Digital:\s*([A-Za-z0-9+/=\s]+?)\s*(?:P[aá]gina|$)", texto, re.S)
-    d["sello"] = re.sub(r"\s+", "", m.group(1)) if m else ""
+    # El sello puede partirse entre dos páginas: se quita el pie
+    # "Página 2 de 3" que queda en medio y se toma todo el base64 seguido.
+    m = re.search(r"Sello\s*Digital:\s*(.*)", texto, re.S)
+    resto = re.sub(r"P[aá]gina\s*\[?\d+\]?\s*de\s*\[?\d+\]?", " ", m.group(1)) if m else ""
+    m = re.match(r"[A-Za-z0-9+/=\s]+", resto)
+    d["sello"] = re.sub(r"\s+", "", m.group(0)) if m else ""
     return d
 
 
@@ -1086,7 +1097,9 @@ def _candados_codigos(info, d, add, analisis, consultar_sat):
             "QR borrados, dañados o sustituidos por imágenes que no son QR.")
     else:
         add("2.1", "Dos QR legibles", FALLA,
-            f"Se leyeron {len(unicos)} QR con formato del SAT (deben ser 2: cédula y sello).",
+            f"Se leyeron {len(unicos)} QR, pero " + (
+                "el de la cédula" if not qr1 else "el del sello") +
+            " no tiene el formato del validador del SAT (D1=10 cédula, D1=26 sello).",
             "QR borrados, dañados o sustituidos por imágenes que no son QR.")
 
     # 2.2 — DOMINIO OFICIAL. Ambos QR deben llevar EXACTAMENTE a
@@ -1098,7 +1111,9 @@ def _candados_codigos(info, d, add, analisis, consultar_sat):
         if not p:
             continue
         if p["esquema"] != "https" or p["dominio"] != DOMINIO_QR or p["ruta"] != RUTA_QR:
-            malos.append(f"{p['esquema']}://{p['dominio']}{p['ruta']}")
+            pista = next((f" [{q}: cualquiera puede publicar ahí gratis]"
+                          for suf, q in HOSTING_GRATUITO.items() if p["dominio"].endswith(suf)), "")
+            malos.append(f"{p['esquema']}://{p['dominio']}{p['ruta']}{pista}")
         elif p["extra"]:
             malos.append(f"parámetros extra {p['extra']}")
     if malos:
@@ -1157,7 +1172,9 @@ def _candados_codigos(info, d, add, analisis, consultar_sat):
     else:
         vistos = {x["texto"] for x in info["render_codigos"] if x["formato"].upper().startswith("QR")}
         vistos_b = {x["texto"] for x in info["render_codigos"] if "128" in x["formato"]}
-        if vistos == set(unicos) and (not barras or vistos_b == set(barras)):
+        # El código de barras renderizado no siempre se alcanza a leer; solo
+        # cuenta si se LEE y dice otra cosa.
+        if vistos == set(unicos) and (not vistos_b or not barras or vistos_b == set(barras)):
             add("2.6", "QR visibles = QR incrustados", OK,
                 "Al escanear la página se leen exactamente los mismos códigos.",
                 "QR falso pegado encima del original.")
@@ -1448,9 +1465,16 @@ def _candados_politicas(d, add, hoy):
 
     # 4.2 — ESTATUS EN EL PADRÓN: ACTIVO. Suspendido, cancelado o "no
     # localizado" no es apto para crédito.
+    # REACTIVADO = volvió a estar activo después de una suspensión: es apto,
+    # pero conviene saber que hubo suspensión.
     est = _norm(d["estatus"])
-    add("4.2", "Estatus en el padrón: ACTIVO", OK if est == "ACTIVO" else FALLA,
-        f"Estatus: {d['estatus'] or 'no encontrado'}.", "Contribuyentes suspendidos o cancelados.")
+    if est == "REACTIVADO":
+        add("4.2", "Estatus en el padrón: ACTIVO", OK,
+            f"Estatus: REACTIVADO (activo de nuevo; estuvo suspendido, último cambio "
+            f"{d['ultimo_cambio'] or '—'}).", "Contribuyentes suspendidos o cancelados.")
+    else:
+        add("4.2", "Estatus en el padrón: ACTIVO", OK if est == "ACTIVO" else FALLA,
+            f"Estatus: {d['estatus'] or 'no encontrado'}.", "Contribuyentes suspendidos o cancelados.")
 
 
 # ===========================================================================
@@ -1541,6 +1565,11 @@ def analizar_lote(rutas, hoy=None, consultar_sat=False, nombres=None):
                 if v:
                     grupos.setdefault(v, []).append(a)
             for grupo in grupos.values():
+                # El idCIF es del CONTRIBUYENTE: dos constancias del mismo RFC
+                # (de meses distintos) lo comparten legítimamente. Solo es
+                # clon si aparece con RFC distintos.
+                if clave == "idcif" and len({(a.datos or {}).get("rfc") for a in grupo}) < 2:
+                    continue
                 if len({a.sha256 for a in grupo}) > 1:
                     for a in grupo:
                         for o in grupo:
