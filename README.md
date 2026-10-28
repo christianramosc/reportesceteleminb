@@ -1,4 +1,4 @@
-# Reportes — Bitácora MG Colima
+# Reportes y Herramientas — Bitácora de Solicitudes
 
 App de Streamlit que junta, detrás de botones simples de "sube el archivo
 y descarga el resultado", los scripts que ya usas en Colab:
