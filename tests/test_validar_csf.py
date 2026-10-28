@@ -302,3 +302,57 @@ def test_clon_en_el_lote(tmp_path):
     lote = v.analizar_lote([MUESTRAS[0], rutas["fecha_renovada"]], hoy=HOY)
     for a in lote:
         assert "3.12" in {c.clave for c in a.candados if c.estado == v.FALLA}
+
+
+# ---------------------------------------------------------------------------
+# 4. Consulta al portal del SAT (2.7) con una ficha simulada, sin internet
+# ---------------------------------------------------------------------------
+def _ficha_sat(*campos):
+    """HTML con la misma estructura que la ficha del validador del SAT."""
+    filas = "".join(
+        f'<tr><td><span style="font-weight: bold;">{k}:</span></td>'
+        f'<td role="gridcell" style="text-align:left;">{v}</td></tr>' for k, v in campos)
+    return f"<html><body><table>{filas}</table></body></html>"
+
+
+def _doc_fisica():
+    return {"tipo": "fisica", "curp": "PELJ900101HCLRPN05", "nombres": "JUAN", "paterno": "PEREZ",
+            "materno": "LOPEZ", "razon_social": "", "estatus": "ACTIVO",
+            "inicio_operaciones": "01 DE MARZO DE 2015", "cp": "28000", "entidad": "COLIMA",
+            "regimenes": [{"regimen": "Régimen de Sueldos y Salarios e Ingresos Asimilados a Salarios"}]}
+
+
+_QR = {"url": "https://siat.sat.gob.mx/x"}
+_FICHA_OK = [("CURP", "PELJ900101HCLRPN05"), ("Nombre", "JUAN"), ("Apellido Paterno", "PEREZ"),
+             ("Apellido Materno", "LOPEZ"), ("Fecha de Inicio de operaciones", "01-03-2015"),
+             ("Situación del contribuyente", "ACTIVO"), ("Entidad Federativa", "COLIMA"), ("CP", "28000"),
+             ("Régimen", "Régimen de Sueldos y Salarios e Ingresos Asimilados a Salarios"),
+             ("Fecha de alta", "01-03-2015")]
+
+
+def test_sat_coincide(monkeypatch):
+    monkeypatch.setattr(v, "_descargar_sat", lambda url, timeout=10: _ficha_sat(*_FICHA_OK))
+    estado, detalle, _ = v._consultar_sat(_QR, _doc_fisica())
+    assert estado == v.OK and "CURP" in detalle and "Régimen" in detalle
+
+
+def test_sat_detecta_dato_cambiado(monkeypatch):
+    ficha = [(k, "SUSPENDIDO" if k.startswith("Situación") else val) for k, val in _FICHA_OK]
+    monkeypatch.setattr(v, "_descargar_sat", lambda url, timeout=10: _ficha_sat(*ficha))
+    estado, detalle, _ = v._consultar_sat(_QR, _doc_fisica())
+    assert estado == v.FALLA and "SUSPENDIDO" in detalle
+
+
+def test_sat_sin_ficha_es_falla(monkeypatch):
+    monkeypatch.setattr(v, "_descargar_sat", lambda url, timeout=10: "<html><body>Sin datos</body></html>")
+    assert v._consultar_sat(_QR, _doc_fisica())[0] == v.FALLA
+
+
+def test_sat_inalcanzable_dice_el_motivo(monkeypatch):
+    import urllib.error
+
+    def falla(url, timeout=10):
+        raise urllib.error.URLError(TimeoutError("timed out"))
+    monkeypatch.setattr(v, "_descargar_sat", falla)
+    estado, detalle, _ = v._consultar_sat(_QR, _doc_fisica())
+    assert estado == v.INFO and "no respondió a tiempo" in detalle

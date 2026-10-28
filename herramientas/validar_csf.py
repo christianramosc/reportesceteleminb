@@ -48,6 +48,8 @@ import io
 import os
 import re
 import unicodedata
+from html.parser import HTMLParser
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
@@ -1183,9 +1185,10 @@ def _candados_codigos(info, d, add, analisis, consultar_sat):
                 f"Al escanear la página se ven {len(vistos)} QR distintos a los incrustados.",
                 "QR falso pegado encima del original.")
 
-    # 2.7 — CONSULTA EN LÍNEA (si el servidor alcanza al SAT). Es informativa:
-    # el SAT a veces bloquea consultas desde servidores fuera de México. La
-    # verificación definitiva es abrir el link del QR (paso 2 del boletín).
+    # 2.7 — CONSULTA EN LÍNEA: el script abre el 1er QR en el SAT y compara
+    # CURP, nombre, situación, inicio de operaciones, CP, entidad y régimen.
+    # Si el servidor no alcanza al SAT (servidores fuera de México, conexión
+    # segura rechazada) queda como INFO con el motivo, y toca hacerlo a mano.
     if consultar_sat and qr1 and not malos:
         add("2.7", "Consulta al portal del SAT", *_consultar_sat(qr1, d))
 
@@ -1195,28 +1198,138 @@ def _imagen_vacia():
     return Image.new("L", (8, 8), 255)
 
 
-def _consultar_sat(qr1, d):
+# Cifrados con los que el servidor del SAT acepta la conexión. Con los que
+# trae Python por default (OpenSSL 3) el saludo TLS con siat.sat.gob.mx
+# puede fallar y urllib solo dice "URLError". Es la misma lista que usa la
+# librería satcfdi (github.com/SAT-CFDI/python-satcfdi) para hablar con el SAT.
+# Solo cambia los cifrados: el certificado del SAT SÍ se verifica.
+CIFRADOS_SAT = ("ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:ECDH+AESGCM:"
+                "DH+AESGCM:ECDH+AES:DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!eNULL:!MD5:!DSS:HIGH:!DH")
+
+
+class _PaginaSAT(HTMLParser):
+    """Lee la ficha del validador del SAT: las etiquetas van en
+    <span style="font-weight: bold;"> y los valores en
+    <td role="gridcell" style="text-align:left;">, en el mismo orden."""
+
+    def __init__(self):
+        super().__init__()
+        self.etiquetas, self.valores, self._en = [], [], None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        estilo = (a.get("style") or "").replace(" ", "").lower()
+        if tag == "span" and "font-weight:bold" in estilo:
+            self._en, self._buf = "etq", []
+        elif tag == "td" and a.get("role") == "gridcell" and "text-align:left" in estilo:
+            self._en, self._buf = "val", []
+
+    def handle_data(self, data):
+        if self._en:
+            self._buf.append(data)
+
+    def handle_endtag(self, tag):
+        if self._en == "etq" and tag == "span":
+            self.etiquetas.append(re.sub(r"\s+", " ", "".join(self._buf)).strip().rstrip(":"))
+            self._en = None
+        elif self._en == "val" and tag == "td":
+            self.valores.append(re.sub(r"\s+", " ", "".join(self._buf)).strip())
+            self._en = None
+
+
+def leer_pagina_sat(pagina_html):
+    """{etiqueta normalizada: [valores]} de la ficha del SAT (puede haber
+    varios 'Régimen' y 'Fecha de alta')."""
+    p = _PaginaSAT()
+    p.feed(pagina_html)
+    campos = {}
+    for k, v in zip(p.etiquetas, p.valores):
+        campos.setdefault(_norm(k), []).append(v)
+    return campos
+
+
+def _descargar_sat(url, timeout=10):
+    import ssl
+    contexto = ssl.create_default_context()
     try:
-        req = urllib.request.Request(qr1["url"], headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=8) as r:
-            pagina = r.read(400_000).decode("utf-8", "ignore")
+        contexto.set_ciphers(CIFRADOS_SAT)
+    except ssl.SSLError:
+        pass
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Accept-Language": "es-MX,es"})
+    with urllib.request.urlopen(req, timeout=timeout, context=contexto) as r:
+        return r.read(600_000).decode("utf-8", "ignore")
+
+
+def _motivo(e):
+    """El motivo real dentro de un URLError (antes solo se veía 'URLError')."""
+    import socket
+    import ssl
+    razon = getattr(e, "reason", e)
+    if isinstance(razon, ssl.SSLCertVerificationError):
+        return "el certificado del SAT no se pudo verificar desde este servidor"
+    if isinstance(razon, ssl.SSLError):
+        return f"falló la conexión segura con el SAT ({getattr(razon, 'reason', None) or razon})"
+    if isinstance(razon, (socket.timeout, TimeoutError)) or "timed out" in str(razon):
+        return "el SAT no respondió a tiempo (suele bloquear servidores fuera de México)"
+    if isinstance(e, urllib.error.HTTPError):
+        return f"el SAT respondió con error HTTP {e.code}"
+    return f"{type(razon).__name__}: {razon}"
+
+
+def _consultar_sat(qr1, d):
+    """2.7 — Lo que pide el paso 2 del boletín, hecho por el script: abrir
+    el 1er QR y comparar la ficha del SAT contra el documento. Si el
+    servidor no alcanza al SAT, se dice POR QUÉ y se deja como INFO."""
+    try:
+        pagina = _descargar_sat(qr1["url"])
     except Exception as e:
-        return (INFO, f"No se pudo consultar desde el servidor ({type(e).__name__}). "
+        return (INFO, f"No se pudo consultar desde el servidor: {_motivo(e)}. "
                       "Abre el link del QR y compara a mano.", "")
-    texto = _norm(re.sub(r"<[^>]+>", " ", html.unescape(pagina)))
-    if d["rfc"] and d["rfc"] in texto:
-        diferencias = []
-        if d.get("curp") and d["curp"] not in texto:
-            diferencias.append("CURP")
-        if d.get("estatus") and _norm(d["estatus"]) not in texto:
-            diferencias.append("situación")
-        if diferencias:
-            return (FALLA, "El SAT responde para este RFC, pero no coincide: " +
-                    ", ".join(diferencias) + ".", "Datos cambiados en el texto.")
-        return (OK, "El portal del SAT respondió con este RFC. Compara de todos modos nombre, "
-                    "régimen y domicilio en el link.", "Datos cambiados en el texto.")
-    return (AVISO, "El portal del SAT respondió pero no mostró este RFC. Abre el link del QR "
-                   "y revisa a mano.", "")
+
+    sat = leer_pagina_sat(html.unescape(pagina))
+    if not sat:
+        # El SAT contestó pero sin ficha: el idCIF/RFC del QR no existe.
+        return (FALLA, "El portal del SAT respondió SIN datos para el idCIF y RFC de este QR: "
+                       "esa combinación no existe en el SAT.", "Constancias inventadas.")
+    g = lambda *ks: next((sat[_norm(k)][0] for k in ks if sat.get(_norm(k))), "")  # noqa: E731
+
+    comparaciones = []          # (campo, documento, SAT)
+    if d["tipo"] == "fisica":
+        comparaciones += [("CURP", d["curp"], g("CURP")),
+                          ("Nombre", " ".join(x for x in (d["nombres"], d["paterno"], d["materno"]) if x),
+                           " ".join(x for x in (g("Nombre"), g("Apellido Paterno"), g("Apellido Materno")) if x))]
+    else:
+        comparaciones.append(("Razón social", d["razon_social"],
+                              g("Denominación o Razón Social", "Denominación/Razón Social", "Razón Social")))
+    comparaciones += [
+        ("Situación", d["estatus"], g("Situación del contribuyente", "Situación")),
+        ("Inicio de operaciones", _fmt(_fecha_texto(d["inicio_operaciones"])),
+         _fmt(_fecha_texto(g("Fecha de Inicio de operaciones", "Fecha inicio de operaciones").replace("-", "/")))),
+        ("Código postal", d["cp"], g("CP", "Código Postal")),
+        ("Entidad", d["entidad"], g("Entidad Federativa")),
+    ]
+    regs_sat = {_compacto(r) for r in sat.get(_norm("Régimen"), [])}
+    regs_doc = {_compacto(r["regimen"]) for r in d["regimenes"]}
+    if regs_sat or regs_doc:
+        comparaciones.append(("Régimen", "; ".join(sorted(regs_doc)), "; ".join(sorted(regs_sat))))
+
+    distintos, revisados = [], []
+    for campo, doc, en_sat in comparaciones:
+        if not en_sat or doc in ("", "—"):
+            continue            # el SAT no mostró ese campo: no se puede comparar
+        revisados.append(campo)
+        if _compacto(doc) != _compacto(en_sat):
+            distintos.append(f"{campo}: documento «{doc}» / SAT «{en_sat}»"
+                             if campo != "Régimen" else "Régimen distinto al registrado en el SAT")
+    if distintos:
+        return (FALLA, "Lo que dice el SAT no coincide con el documento — " + "; ".join(distintos) + ".",
+                "Datos cambiados en el texto de la constancia.")
+    if not revisados:
+        return (AVISO, "El SAT respondió, pero no se reconocieron sus campos. Abre el link del QR "
+                       "y compara a mano.", "")
+    return (OK, "Consultado en el portal del SAT: coinciden " + ", ".join(revisados) + ".",
+            "Datos cambiados en el texto de la constancia.")
 
 
 def _candados_datos(d, add, hoy):
