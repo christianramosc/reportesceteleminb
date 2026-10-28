@@ -5,29 +5,29 @@ maxUploadSize = 200
 # Oculta "Deploy" y el menú de desarrollador: quien usa la app no los necesita.
 toolbarMode = "minimal"
 
-# Tema oscuro con la paleta "zinc" de shadcn/ui y su variante roja para la
+# Tema claro con la paleta "zinc" de shadcn/ui y su variante roja para la
 # acción principal. El CSS de ui_estilos.py usa los mismos valores.
 [theme]
-base = "dark"
+base = "light"
 primaryColor = "#DC2626"
-backgroundColor = "#09090B"
-secondaryBackgroundColor = "#18181B"
-textColor = "#FAFAFA"
-borderColor = "#27272A"
+backgroundColor = "#FAFAFA"
+secondaryBackgroundColor = "#F4F4F5"
+textColor = "#09090B"
+borderColor = "#E4E4E7"
 showWidgetBorder = true
 baseRadius = "0.5rem"
 buttonRadius = "0.5rem"
-linkColor = "#FAFAFA"
+linkColor = "#09090B"
 font = "Geist:https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap, sans-serif"
 headingFont = "Geist, sans-serif"
 codeFont = "Geist Mono:https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap, monospace"
-codeBackgroundColor = "#18181B"
-redColor = "#F87171"
-greenColor = "#4ADE80"
-yellowColor = "#FBBF24"
-blueColor = "#60A5FA"
+codeBackgroundColor = "#F4F4F5"
+redColor = "#DC2626"
+greenColor = "#16A34A"
+yellowColor = "#D97706"
+blueColor = "#2563EB"
 
 [theme.sidebar]
-backgroundColor = "#0C0C0E"
-secondaryBackgroundColor = "#18181B"
-borderColor = "#27272A"
+backgroundColor = "#F4F4F5"
+secondaryBackgroundColor = "#FFFFFF"
+borderColor = "#E4E4E7"
