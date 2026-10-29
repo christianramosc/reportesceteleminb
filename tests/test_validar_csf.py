@@ -145,8 +145,7 @@ def test_foto_no_es_verificable(tmp_path):
 
 def test_adaptador_genera_un_pdf_por_archivo(tmp_path):
     entrada = _fabricada(str(tmp_path / "0_cliente.pdf"))
-    res = ejecutar([entrada], carpeta_salida=str(tmp_path / "salida"),
-                   nombre_pdv="PDV Prueba", nombre_analista="Analista")
+    res = ejecutar([entrada], carpeta_salida=str(tmp_path / "salida"))
     salidas, resumen = res["archivos"], res["resumen"]
     assert len(salidas) == 1 and os.path.getsize(salidas[0]) > 3000
     assert open(salidas[0], "rb").read(5) == b"%PDF-"
@@ -365,3 +364,13 @@ def test_sat_inalcanzable_dice_el_motivo(monkeypatch):
     monkeypatch.setattr(v, "_descargar_sat", falla)
     estado, detalle, _ = v._consultar_sat(_QR, _doc_fisica())
     assert estado == v.INFO and "no respondió a tiempo" in detalle
+
+
+def test_reporte_sin_casillas_ni_datos_de_quien_valida(tmp_path):
+    """El reporte no lleva formulario, nombre de analista, PDV ni área."""
+    import pypdf
+    res = ejecutar([_fabricada(str(tmp_path / "0_x.pdf"))], carpeta_salida=str(tmp_path / "s"))
+    r = pypdf.PdfReader(res["archivos"][0])
+    assert not r.get_fields()
+    texto = " ".join(p.extract_text() for p in r.pages)
+    assert "Validó" not in texto and "Dirección de Riesgos" not in texto and "analista" not in texto.lower()

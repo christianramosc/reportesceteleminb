@@ -2,15 +2,14 @@
 """
 Reporte PDF de "Validar CSF" — versión visual.
 
-Página 1 (lo que el analista necesita en 10 segundos):
+Página 1 (lo esencial en 10 segundos):
   - Veredicto grande con escudo y anillo de candados aprobados.
   - Cifras: candados técnicos, fallas, avisos y vigencia.
   - Barras por sección (cada una lleva al detalle con un clic).
   - Observaciones: solo lo que falló o pide revisión.
   - Datos de la constancia.
   - Validación en el SAT: los QR oficiales regenerados (escaneables desde la
-    pantalla), links clicables y casillas que el analista puede marcar en el
-    mismo PDF. Un QR que NO va al SAT no se dibuja ni se enlaza.
+    pantalla) y links clicables. Un QR que NO va al SAT no se dibuja ni se enlaza.
 Páginas siguientes: el detalle de los 33 candados, con marcadores (índice
 lateral del lector de PDF) por sección.
 """
@@ -25,7 +24,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.pdfgen import canvas as _canvas
-from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Flowable, Frame, Image, KeepTogether,
+from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Frame, Image, KeepTogether,
                                 NextPageTemplate, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
 try:
@@ -173,54 +172,6 @@ def _titulo(texto, icono, est, ancla=None):
     return t
 
 
-class _Casilla(Flowable):
-    """Casilla de verificación REAL del PDF (se marca con un clic en Acrobat,
-    Edge o Chrome) con su texto al lado."""
-
-    def __init__(self, nombre, texto, est, ancho=ANCHO):
-        super().__init__()
-        self.nombre, self.p, self.ancho = nombre, Paragraph(texto, est["base"]), ancho
-
-    def wrap(self, aw, ah):
-        _, h = self.p.wrap(self.ancho - 0.8 * cm, ah)
-        self.alto = max(h, 12)
-        return self.ancho, self.alto
-
-    def draw(self):
-        self.canv.acroForm.checkbox(name=self.nombre, x=self.canv.absolutePosition(0, 0)[0],
-                                    y=self.canv.absolutePosition(0, 0)[1] + self.alto - 12,
-                                    size=11, buttonStyle="check", borderColor=colors.HexColor(AZUL),
-                                    fillColor=colors.white, textColor=colors.HexColor(AZUL),
-                                    borderWidth=0.8, forceBorder=True, relative=False,
-                                    tooltip="Marca cuando lo hayas verificado")
-        self.p.drawOn(self.canv, 0.6 * cm, 0)
-
-
-class _CampoTexto(Flowable):
-    """Campo de texto rellenable (observaciones del analista)."""
-
-    def __init__(self, nombre, ancho=ANCHO - 12, alto=1.5 * cm):
-        super().__init__()
-        self.nombre, self.ancho, self.alto = nombre, ancho, alto
-
-    def wrap(self, aw, ah):
-        return self.ancho, self.alto
-
-    def draw(self):
-        # Recuadro visible aunque el lector no dibuje campos de formulario.
-        self.canv.saveState()
-        self.canv.setFillColor(colors.HexColor(FONDO))
-        self.canv.setStrokeColor(colors.HexColor(LINEA))
-        self.canv.roundRect(0, 0, self.ancho, self.alto, 6, fill=1, stroke=1)
-        self.canv.restoreState()
-        x, y = self.canv.absolutePosition(0, 0)
-        self.canv.acroForm.textfield(name=self.nombre, x=x, y=y, width=self.ancho, height=self.alto,
-                                     relative=False, fieldFlags="multiline", fontName="Helvetica",
-                                     fontSize=8.5, borderColor=colors.HexColor(LINEA),
-                                     fillColor=colors.HexColor(FONDO), borderWidth=0.6,
-                                     tooltip="Escribe tus observaciones")
-
-
 def _qr_imagen(url, lado=2.7 * cm):
     """El QR oficial regenerado (nítido para escanear desde la pantalla)."""
     try:
@@ -290,7 +241,7 @@ class _Documento(BaseDocTemplate):
 # ===========================================================================
 #  Reporte
 # ===========================================================================
-def generar(analisis, ruta_salida, analista="", pdv="", fecha_texto=""):
+def generar(analisis, ruta_salida, fecha_texto=""):
     est = _estilos()
     d = analisis.datos or {}
     candados = analisis.candados
@@ -444,11 +395,10 @@ def generar(analisis, ruta_salida, analista="", pdv="", fecha_texto=""):
         el += [CondPageBreak(5 * cm), _titulo("Datos de la constancia", "user", est), Spacer(1, 6),
                _tarjeta(t, fondo=FONDO, padding=10), Spacer(1, 12)]
 
-    # --- 6. Validación en el SAT (interactiva) ------------------------------
+    # --- 6. Validación en el SAT --------------------------------------------
     sat = [CondPageBreak(7 * cm), _titulo("Valida en el portal del SAT", "qr-code", est), Spacer(1, 2),
-           Paragraph("Paso obligatorio del boletín BMGFS. Escanea cada QR con el celular o haz clic en el "
-                     "link, compara contra el documento y marca la casilla. Las casillas y el campo de "
-                     "observaciones se pueden llenar en el mismo PDF.", est["chico"]), Spacer(1, 6)]
+           Paragraph("Escanea cada QR con el celular o haz clic en el link y compara lo que muestra el "
+                     "SAT contra el documento.", est["chico"]), Spacer(1, 6)]
     celdas = []
     for i, url in enumerate(analisis.urls_qr[:2], 1):
         oficial = url.startswith("https://siat.sat.gob.mx/")
@@ -475,13 +425,6 @@ def generar(analisis, ruta_salida, analista="", pdv="", fecha_texto=""):
         fila.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                                   ("VALIGN", (0, 0), (-1, -1), "TOP")]))
         sat += [fila, Spacer(1, 8)]
-    sat += [_Casilla("qr1_validado", "Validé el <b>QR 1</b> en el SAT: los datos coinciden con el documento.", est),
-            Spacer(1, 4),
-            _Casilla("qr2_validado", "Validé el <b>QR 2</b>: fecha y RFC coinciden con la cadena original.", est),
-            Spacer(1, 4),
-            _Casilla("sin_manipular", "El cliente entregó el PDF original; el PDV no lo generó ni editó.", est),
-            Spacer(1, 6), Paragraph("Observaciones del analista", est["etq"]), Spacer(1, 2),
-            _CampoTexto("observaciones")]
     el += [KeepTogether(sat)]
 
     # --- 7. Detalle de candados ----------------------------------------------
@@ -547,12 +490,9 @@ def generar(analisis, ruta_salida, analista="", pdv="", fecha_texto=""):
         cv.line(1.5 * cm, 1.25 * cm, an - 1.5 * cm, 1.25 * cm)
         cv.setFont("Helvetica", 7.5)
         cv.setFillColor(colors.HexColor(GRIS))
-        izq = " · ".join(x for x in (pdv, f"Validó: {analista}" if analista else "", "Dirección de Riesgos · boletín BMGFS")
-                         if x)
-        cv.drawString(1.5 * cm, 0.85 * cm, izq)
+        cv.drawString(1.5 * cm, 0.85 * cm, f"Validación de CSF · Folio {analisis.sha256[:10].upper()}")
         cv.restoreState()
 
-    doc = _Documento(ruta_salida, pagina, title=f"Validación CSF {d.get('rfc', '')}",
-                     author=analista or "", subject=ver, creator="Reportes MG Colima")
+    doc = _Documento(ruta_salida, pagina, title=f"Validación CSF {d.get('rfc', '')}", subject=ver, creator="Reportes MG Colima")
     doc.build([NextPageTemplate("resto")] + el, canvasmaker=_CanvasNumerado)
     return ruta_salida

@@ -13,14 +13,11 @@ def _nombre_original(ruta):
     return re.sub(r"^\d+_", "", os.path.basename(ruta))
 
 
-def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
-             nombre_analista=None, **_opciones):
+def ejecutar(rutas_archivos, carpeta_salida="salida", **_opciones):
     os.makedirs(carpeta_salida, exist_ok=True)
     archivos, resumen = _csf.main(
         rutas=list(rutas_archivos),
         carpeta_salida=carpeta_salida,
-        analista=(nombre_analista or "").strip(),
-        pdv=(nombre_pdv or "").strip(),
         consultar_sat=True,
         nombres=[_nombre_original(r) for r in rutas_archivos],
         devolver_resumen=True,

@@ -206,7 +206,7 @@ etiquetas.append("Varios archivos" if herramienta.multiple_archivos else "1 arch
 ui.encabezado(ui.nombre_limpio(herramienta.nombre), herramienta.descripcion, etiquetas)
 
 usa_datos_reporte = herramienta.id in ("avance_preliminar", "comparativo_mensual",
-                                       "resumen_mensual", "resumen_vendedor", "validar_csf")
+                                       "resumen_mensual", "resumen_vendedor")
 usa_etiquetas_mes = herramienta.id in ("comparativo_mensual", "modelo_datos")
 tiene_opciones = (usa_datos_reporte or usa_etiquetas_mes
                   or herramienta.id == "resumen_vendedor")

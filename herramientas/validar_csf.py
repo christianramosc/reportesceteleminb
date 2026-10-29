@@ -1744,7 +1744,7 @@ _COLOR_VEREDICTO = {"SIN INDICIOS DE ALTERACIÓN": "#15803D", "REVISAR MANUALMEN
 AZUL = "#191970"
 
 
-def generar_pdf(analisis, ruta_salida, analista="", pdv=""):
+def generar_pdf(analisis, ruta_salida):
     """Reporte visual (reporte_csf.py). Si ese módulo no está (script suelto
     en Colab), se usa la versión sencilla de abajo."""
     try:
@@ -1753,11 +1753,11 @@ def generar_pdf(analisis, ruta_salida, analista="", pdv=""):
         reporte_csf = None
     if reporte_csf is not None:
         fecha = (_fechas.ahora() if _fechas else datetime.now()).strftime("%d/%m/%Y %H:%M")
-        return reporte_csf.generar(analisis, ruta_salida, analista=analista, pdv=pdv, fecha_texto=fecha)
-    return _generar_pdf_simple(analisis, ruta_salida, analista, pdv)
+        return reporte_csf.generar(analisis, ruta_salida, fecha_texto=fecha)
+    return _generar_pdf_simple(analisis, ruta_salida)
 
 
-def _generar_pdf_simple(analisis, ruta_salida, analista="", pdv=""):
+def _generar_pdf_simple(analisis, ruta_salida):
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import letter
@@ -1875,14 +1875,14 @@ def _generar_pdf_simple(analisis, ruta_salida, analista="", pdv=""):
         canvas.drawString(1.6 * cm, alto - 1.5 * cm, f"Archivo: {analisis.archivo[:90]}")
         canvas.drawRightString(ancho - 1.6 * cm, alto - 1.1 * cm, fecha_gen)
         canvas.line(1.6 * cm, 1.3 * cm, ancho - 1.6 * cm, 1.3 * cm)
-        izq = " · ".join(x for x in (pdv, f"Validó: {analista}" if analista else "") if x)
-        canvas.drawString(1.6 * cm, 0.85 * cm, izq or "Autoexpress Inbursa · MG Financial Services")
+        izq = f"Validación de CSF · Folio {analisis.sha256[:10].upper()}"
+        canvas.drawString(1.6 * cm, 0.85 * cm, izq)
         canvas.drawRightString(ancho - 1.6 * cm, 0.85 * cm, f"Página {doc.page}")
         canvas.restoreState()
 
     doc = SimpleDocTemplate(ruta_salida, pagesize=letter, leftMargin=1.6 * cm, rightMargin=1.6 * cm,
                             topMargin=2.0 * cm, bottomMargin=1.7 * cm,
-                            title=f"Validación CSF {d.get('rfc', '')}", author=analista or "")
+                            title=f"Validación CSF {d.get('rfc', '')}")
     doc.build(elementos, onFirstPage=pie, onLaterPages=pie)
     return ruta_salida
 
@@ -1940,7 +1940,7 @@ def resumen_dict(analisis, reporte=None, hoy=None):
     }
 
 
-def main(rutas=None, carpeta_salida="salida", analista="", pdv="", consultar_sat=True, nombres=None,
+def main(rutas=None, carpeta_salida="salida", consultar_sat=True, nombres=None,
          devolver_resumen=False):
     """En Colab, sin argumentos, pide subir los archivos y descarga los PDF.
     Con devolver_resumen=True regresa (rutas_pdf, [resumen_dict, ...]) para la app."""
@@ -1963,7 +1963,7 @@ def main(rutas=None, carpeta_salida="salida", analista="", pdv="", consultar_sat
         while ruta in salidas:
             ruta = os.path.join(carpeta_salida, f"Validacion_CSF_{rfc}_{k}.pdf")
             k += 1
-        generar_pdf(a, ruta, analista=analista, pdv=pdv)
+        generar_pdf(a, ruta)
         salidas.append(ruta)
         resumenes.append(resumen_dict(a, reporte=os.path.basename(ruta)))
         print(resumen_texto(a))
