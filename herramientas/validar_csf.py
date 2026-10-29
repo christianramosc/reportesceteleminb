@@ -1745,6 +1745,19 @@ AZUL = "#191970"
 
 
 def generar_pdf(analisis, ruta_salida, analista="", pdv=""):
+    """Reporte visual (reporte_csf.py). Si ese módulo no está (script suelto
+    en Colab), se usa la versión sencilla de abajo."""
+    try:
+        from . import reporte_csf
+    except ImportError:
+        reporte_csf = None
+    if reporte_csf is not None:
+        fecha = (_fechas.ahora() if _fechas else datetime.now()).strftime("%d/%m/%Y %H:%M")
+        return reporte_csf.generar(analisis, ruta_salida, analista=analista, pdv=pdv, fecha_texto=fecha)
+    return _generar_pdf_simple(analisis, ruta_salida, analista, pdv)
+
+
+def _generar_pdf_simple(analisis, ruta_salida, analista="", pdv=""):
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import letter
