@@ -337,15 +337,24 @@ def test_sat_coincide(monkeypatch):
 
 
 def test_sat_detecta_dato_cambiado(monkeypatch):
+    """La CURP no cambia con el tiempo: si difiere, el documento se alteró."""
+    ficha = [(k, "PELJ900101HCLRPN06" if k == "CURP" else val) for k, val in _FICHA_OK]
+    monkeypatch.setattr(v, "_descargar_sat", lambda url, timeout=10: _ficha_sat(*ficha))
+    estado, detalle, _ = v._consultar_sat(_QR, _doc_fisica())
+    assert estado == v.FALLA and "CURP" in detalle
+
+
+def test_sat_dato_que_cambia_con_el_tiempo_es_aviso(monkeypatch):
+    """La situación sí puede cambiar después de emitida la constancia."""
     ficha = [(k, "SUSPENDIDO" if k.startswith("Situación") else val) for k, val in _FICHA_OK]
     monkeypatch.setattr(v, "_descargar_sat", lambda url, timeout=10: _ficha_sat(*ficha))
     estado, detalle, _ = v._consultar_sat(_QR, _doc_fisica())
-    assert estado == v.FALLA and "SUSPENDIDO" in detalle
+    assert estado == v.AVISO and "SUSPENDIDO" in detalle
 
 
-def test_sat_sin_ficha_es_falla(monkeypatch):
+def test_sat_sin_ficha_es_aviso(monkeypatch):
     monkeypatch.setattr(v, "_descargar_sat", lambda url, timeout=10: "<html><body>Sin datos</body></html>")
-    assert v._consultar_sat(_QR, _doc_fisica())[0] == v.FALLA
+    assert v._consultar_sat(_QR, _doc_fisica())[0] == v.AVISO
 
 
 def test_sat_inalcanzable_dice_el_motivo(monkeypatch):

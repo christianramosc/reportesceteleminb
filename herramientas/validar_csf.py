@@ -1289,9 +1289,11 @@ def _consultar_sat(qr1, d):
 
     sat = leer_pagina_sat(html.unescape(pagina))
     if not sat:
-        # El SAT contestó pero sin ficha: el idCIF/RFC del QR no existe.
-        return (FALLA, "El portal del SAT respondió SIN datos para el idCIF y RFC de este QR: "
-                       "esa combinación no existe en el SAT.", "Constancias inventadas.")
+        # PASABLE (AVISO): o el idCIF/RFC no existe, o el SAT cambió su página
+        # o tuvo una falla. No se puede distinguir desde aquí.
+        return (AVISO, "El portal del SAT respondió SIN ficha para el idCIF y RFC de este QR. "
+                       "Puede ser que no existan o una falla del SAT: abre el link y revisa.",
+                "Constancias inventadas.")
     g = lambda *ks: next((sat[_norm(k)][0] for k in ks if sat.get(_norm(k))), "")  # noqa: E731
 
     comparaciones = []          # (campo, documento, SAT)
@@ -1314,16 +1316,27 @@ def _consultar_sat(qr1, d):
     if regs_sat or regs_doc:
         comparaciones.append(("Régimen", "; ".join(sorted(regs_doc)), "; ".join(sorted(regs_sat))))
 
-    distintos, revisados = [], []
+    # El SAT muestra los datos de HOY y la constancia los del día en que se
+    # emitió. Situación, domicilio y régimen pueden haber cambiado entre una
+    # fecha y otra (PASABLE = AVISO). CURP, nombre e inicio de operaciones
+    # no cambian: si difieren, el documento se alteró (FALLA).
+    mutables = {"Situación", "Código postal", "Entidad", "Régimen"}
+    distintos, cambiaron, revisados = [], [], []
     for campo, doc, en_sat in comparaciones:
         if not en_sat or doc in ("", "—"):
             continue            # el SAT no mostró ese campo: no se puede comparar
         revisados.append(campo)
         if _compacto(doc) != _compacto(en_sat):
-            distintos.append(f"{campo}: documento «{doc}» / SAT «{en_sat}»"
-                             if campo != "Régimen" else "Régimen distinto al registrado en el SAT")
+            texto = (f"{campo}: documento «{doc}» / SAT «{en_sat}»"
+                     if campo != "Régimen" else "Régimen distinto al registrado hoy en el SAT")
+            (cambiaron if campo in mutables else distintos).append(texto)
     if distintos:
-        return (FALLA, "Lo que dice el SAT no coincide con el documento — " + "; ".join(distintos) + ".",
+        return (FALLA, "Lo que dice el SAT no coincide con el documento — " +
+                "; ".join(distintos + cambiaron) + ".", "Datos cambiados en el texto de la constancia.")
+    if cambiaron:
+        return (AVISO, "Coinciden " + ", ".join(c for c in revisados if c not in mutables) +
+                ", pero hoy el SAT muestra otro dato — " + "; ".join(cambiaron) +
+                ". Pudo cambiar después de emitida; pide una CSF reciente.",
                 "Datos cambiados en el texto de la constancia.")
     if not revisados:
         return (AVISO, "El SAT respondió, pero no se reconocieron sus campos. Abre el link del QR "
@@ -1384,8 +1397,12 @@ def _candados_datos(d, add, hoy):
                 errores.append(f"entidad de nacimiento {curp[11:13]} no existe")
             if not _fecha_aammdd(curp[4:10], hoy):
                 errores.append("fecha de nacimiento de la CURP inválida")
+            # PASABLE: RFC y CURP salen de la misma fecha de nacimiento, pero
+            # hay RFC antiguos dados de alta con la fecha mal capturada que el
+            # SAT nunca corrigió. Fuerte indicio, no prueba: AVISO.
             if rfc and curp[4:10] != rfc[4:10]:
-                errores.append(f"fecha del RFC ({rfc[4:10]}) ≠ fecha de la CURP ({curp[4:10]})")
+                avisos.append(f"fecha del RFC ({rfc[4:10]}) ≠ fecha de la CURP ({curp[4:10]}); "
+                              "puede ser un error de captura antiguo del SAT, confirma en el QR")
             if rfc and curp[:4] != rfc[:4]:
                 avisos.append(f"letras del RFC ({rfc[:4]}) ≠ de la CURP ({curp[:4]})")
         estado = FALLA if errores else (AVISO if avisos else OK)
@@ -1419,10 +1436,16 @@ def _candados_datos(d, add, hoy):
         if errores or avisos else "El nombre coincide en cédula y tabla y corresponde a las letras del RFC.",
         "Cambio del nombre del titular.")
 
-    # 3.5 — FECHAS. Ninguna fecha puede ser posterior a la emisión; el último
-    # cambio de estado no puede ser anterior al inicio de operaciones. En
-    # persona moral, la fecha del RFC es la de constitución y suele ser la
-    # de inicio de operaciones.
+    # 3.5 — FECHAS.
+    #   FALLA (imposible en una CSF real): inicio de operaciones o último
+    #   cambio de estado POSTERIORES a la fecha de emisión.
+    #   PASABLE (AVISO): un régimen, actividad u obligación con inicio
+    #   posterior a la emisión (un cambio de régimen se presenta antes y
+    #   "surte efectos" después, p. ej. el 1 de enero siguiente).
+    #   NO SE REVISA: que el último cambio de estado sea anterior al inicio de
+    #   operaciones. Es normal: alguien se inscribe al RFC (o lo inscribe un
+    #   patrón) años antes de empezar a tener obligaciones; ese "cambio de
+    #   estado" es la inscripción. Así viene en CSF auténticas.
     emision = d["fecha_emision"]
     inicio = _fecha_texto(d["inicio_operaciones"])
     cambio = _fecha_texto(d["ultimo_cambio"])
@@ -1436,9 +1459,8 @@ def _candados_datos(d, add, hoy):
         for x in d[grupo]:
             f = _fecha_texto(x.get("inicio", ""))
             if f and emision and f > emision:
-                errores.append(f"{clave} con inicio {_fmt(f)} posterior a la emisión")
-    if inicio and cambio and cambio < inicio:
-        errores.append(f"último cambio ({_fmt(cambio)}) anterior al inicio de operaciones ({_fmt(inicio)})")
+                avisos.append(f"{clave} con inicio {_fmt(f)} posterior a la emisión (posible cambio "
+                              "programado; confirma en el QR)")
     if tipo == "moral" and rfc and inicio:
         f_rfc = _fecha_aammdd(rfc[3:9], hoy)
         if f_rfc and f_rfc != inicio:
@@ -1454,15 +1476,18 @@ def _candados_datos(d, add, hoy):
         f"Inicio {_fmt(inicio)}, último cambio {_fmt(cambio)}, emisión {_fmt(emision)}: en orden.",
         "Fechas alteradas (antigüedad, estatus) o constancia inventada.")
 
-    # 3.6 — ACTIVIDADES. Los porcentajes de las actividades económicas
-    # suman 100. Una IA o una edición manual de la tabla suele romperlo.
-    if d["actividades"]:
+    # 3.6 — ACTIVIDADES. Las actividades VIGENTES (sin fecha fin) suman 100 %.
+    # Una IA o una edición manual de la tabla suele romperlo. PASABLE (AVISO):
+    # una tabla partida entre páginas o una actividad dada de baja pueden
+    # hacer que la lectura no cuadre aunque el documento sea auténtico.
+    vigentes = [a for a in d["actividades"] if not str(a.get("fin") or "").strip()]
+    if vigentes:
         try:
-            suma = sum(float(str(a["porcentaje"]).strip() or 0) for a in d["actividades"])
+            suma = sum(float(str(a["porcentaje"]).strip() or 0) for a in vigentes)
         except ValueError:
             suma = -1
-        add("3.6", "Porcentajes de actividades suman 100", OK if abs(suma - 100) < 0.01 else FALLA,
-            f"Suman {suma:g}% en {len(d['actividades'])} actividad(es).",
+        add("3.6", "Porcentajes de actividades suman 100", OK if abs(suma - 100) < 0.01 else AVISO,
+            f"Suman {suma:g}% en {len(vigentes)} actividad(es) vigente(s).",
             "Tabla de actividades editada o inventada.")
     else:
         add("3.6", "Porcentajes de actividades suman 100", AVISO,
@@ -1473,31 +1498,40 @@ def _candados_datos(d, add, hoy):
     # existen. Igual con las obligaciones "Personas Morales" en una física.
     regs = [_norm(r["regimen"]) for r in d["regimenes"]]
     obls = [_norm(o["obligacion"]) for o in d["obligaciones"]]
-    errores = []
+    # FALLA: un RÉGIMEN que no existe para ese tipo de persona.
+    # PASABLE (AVISO): una OBLIGACIÓN que menciona al otro tipo (hay
+    # obligaciones de retención o informativas cuyo texto nombra a "personas
+    # morales" aunque las tenga una física).
+    errores, avisos = [], []
     if tipo == "moral":
         errores += [r for r in regs if any(x in r for x in REGIMENES_SOLO_FISICA)]
-        errores += [o for o in obls if "PERSONAS FISICAS" in o]
+        avisos += [o for o in obls if "PERSONAS FISICAS" in o]
     elif tipo == "fisica":
         errores += [r for r in regs if any(x in r for x in REGIMENES_SOLO_MORAL)]
-        errores += [o for o in obls if "PERSONAS MORALES" in o]
+        avisos += [o for o in obls if "PERSONAS MORALES" in o]
+    persona = "moral" if tipo == "moral" else "física"
     if not regs:
         add("3.7", "Régimen acorde al tipo de persona", AVISO, "No se encontró la tabla de regímenes.", "")
     else:
-        add("3.7", "Régimen acorde al tipo de persona", FALLA if errores else OK,
-            ("No corresponde a persona " + ("moral" if tipo == "moral" else "física") + ": " +
+        add("3.7", "Régimen acorde al tipo de persona", FALLA if errores else (AVISO if avisos else OK),
+            (f"Régimen que no existe para persona {persona}: " +
              "; ".join(e.title() for e in errores) + ".") if errores else
-            "; ".join(r.title() for r in regs) + ".",
+            ("Obligación que menciona al otro tipo de persona: " +
+             "; ".join(o.title() for o in avisos) + " (puede ser legítima; confirma en el QR).")
+            if avisos else "; ".join(r.title() for r in regs) + ".",
             "Régimen cambiado para aparentar otro perfil de ingresos.")
 
     # 3.8 — DOMICILIO. El código postal tiene 5 dígitos y sus dos primeros
     # corresponden a la entidad (Colima 28xxx, Jalisco 44–49xxx, ...).
+    # PASABLE (AVISO): SEPOMEX tiene códigos en zonas limítrofes que no
+    # siguen la regla por entidad.
     cp, ent = d["cp"], d["entidad"]
     coincide = cp_coincide_entidad(cp, ent)
     if coincide is None:
         add("3.8", "Código postal corresponde a la entidad", AVISO,
             f"No se pudo validar CP «{cp}» / entidad «{ent}».", "Domicilio cambiado.")
     else:
-        add("3.8", "Código postal corresponde a la entidad", OK if coincide else FALLA,
+        add("3.8", "Código postal corresponde a la entidad", OK if coincide else AVISO,
             f"CP {cp} pertenece a {ent.title()}." if coincide else
             f"El CP {cp} no pertenece a {ent.title()}.", "Domicilio cambiado o inventado.")
 
