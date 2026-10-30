@@ -63,6 +63,19 @@ BMGFS de octubre 2026 (Dirección de Riesgos). Cada candado está comentado en
    sello/idCIF = una es clon.
 4. **Políticas** (aparte): emitida en los últimos 30 días y estatus ACTIVO.
 
+**Copias (escaneo o foto).** Un escaneo, una foto o un PDF que solo es
+imagen ya no es el archivo del SAT, así que los candados del archivo no
+aplican y su autenticidad **no se puede comprobar**: la herramienta lo dice
+siempre (veredictos `COPIA: DATOS COINCIDEN` / `COPIA: REVISAR A MANO`,
+nunca "sin indicios"). Lo que sí revisa (`herramientas/csf_escaneo.py`):
+lee los 2 QR y el código de barras y compara sus cadenas entre sí y contra
+el texto impreso, leído con OCR (RapidOCR, va en `requirements.txt`, sin
+programas del sistema): RFC, idCIF, cadena original (fecha y RFC), CURP,
+nombre, fechas, CP y régimen. Las diferencias que solo se explican por
+confusiones del OCR (0/O, 1/I, 5/S) quedan como "lectura dudosa" (AVISO);
+un código que no coincide con otro o con el texto, o un QR a una página que
+no es del SAT, es FALLA.
+
 Al generar, la página muestra el **resultado sin descargar nada**: cuántas
 son confiables, a revisar o no confiables; y por cada constancia, los
 candados técnicos que pasa, fallas y avisos, días desde su emisión,
@@ -74,9 +87,9 @@ mismo regresando `{"archivos": [...], "resumen": ...}` y definiendo
 
 No sustituye escanear el QR: un cambio por un texto del mismo ancho exacto
 no mueve la maquetación. Por eso el reporte siempre trae los links de ambos
-QR. Las fotos o capturas solo se usan para leer el QR (no se pueden validar).
+QR.
 
-En Colab: `!pip install pdfplumber pypdf pypdfium2 zxing-cpp reportlab`,
+En Colab: `!pip install pdfplumber pypdf pypdfium2 zxing-cpp reportlab rapidocr onnxruntime`,
 copia `herramientas/validar_csf.py` y corre `import validar_csf; validar_csf.main()`.
 
 Pruebas con CSF reales: ponlas en `tests/muestras_csf/` (está en

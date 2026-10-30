@@ -27,6 +27,12 @@ svglib==2.2.0
 # pypdfium2 ya viene con pdfplumber y se usa para "escanear" la página.
 pypdf==6.21.4
 zxing-cpp==3.1.1
+# Validar CSF, copias (escaneo o foto): lectura del texto impreso (OCR).
+# RapidOCR trae sus modelos dentro del paquete (no descarga nada) y usa
+# opencv-python-HEADLESS, que no necesita libGL: funciona en Streamlit Cloud
+# sin packages.txt.
+rapidocr==3.10.0
+onnxruntime==1.31.1
 # Zonas horarias: la fecha de los reportes es la de México, no la del
 # servidor (UTC). Ver herramientas/fechas.py.
 tzdata==2025.2

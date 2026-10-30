@@ -39,10 +39,11 @@ HERRAMIENTA = Herramienta(
         "33 candados de seguridad, resultado en pantalla y reporte en PDF."
     ),
     multiple_archivos=True,
-    tipos_permitidos=["pdf", "jpg", "jpeg", "png"],
+    tipos_permitidos=["pdf", "jpg", "jpeg", "png", "tif", "tiff", "webp"],
     ejecutar=ejecutar,
     mostrar_resumen=mostrar_resumen,
     ayuda_archivo=(
-        "Sube el PDF tal como se descargó del SAT. Las fotos solo sirven para leer el QR."
+        "Sube el PDF tal como se descargó del SAT. Escaneos y fotos también se revisan "
+        "(códigos y datos visibles), pero su autenticidad no se puede comprobar."
     ),
 )

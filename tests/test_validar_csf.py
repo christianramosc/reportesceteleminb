@@ -132,15 +132,34 @@ def test_constancia_fabricada_se_detecta(tmp_path):
     assert {"1.3", "1.11", "2.1", "2.5", "3.10"} <= fallas
 
 
-def test_foto_no_es_verificable(tmp_path):
-    qr = zxing_qr(f"https://{v.DOMINIO_QR}{v.RUTA_QR}?D1=10&D2=1&D3=1_ABC")
+def test_foto_sin_codigos_no_es_verificable(tmp_path):
+    ruta = str(tmp_path / "foto.jpg")
+    Image.new("RGB", (600, 400), "white").save(ruta, quality=90)
+    a = v.analizar_csf(ruta, hoy=HOY)
+    assert a.modo == "copia" and a.veredicto == "NO VERIFICABLE"
+
+
+def test_foto_con_qr_a_pagina_falsa_es_alterada(tmp_path):
+    """Aunque sea foto, la dirección del QR se lee exacta: si no es del SAT, es FALLA."""
+    qr = zxing_qr("https://siat-sat-validarqr.web.app/redirect.html?id=X")
     lienzo = Image.new("RGB", (600, 400), "white")
     lienzo.paste(qr, (40, 40))
-    ruta = str(tmp_path / "foto.jpg")
-    lienzo.save(ruta, quality=90)
+    ruta = str(tmp_path / "foto.png")
+    lienzo.save(ruta)
     a = v.analizar_csf(ruta, hoy=HOY)
-    assert a.veredicto == "NO VERIFICABLE"
-    assert any(c.clave.startswith("2.") and c.estado == v.OK for c in a.candados)
+    assert a.veredicto == "ALTERADA / NO CONFIABLE"
+    assert "2.3" in {c.clave for c in a.candados if c.estado == v.FALLA}
+
+
+@pytest.mark.parametrize("leido, exacto, esperado", [
+    ("RABD810828QG5", "RABD810828QG5", "igual"),
+    ("RA8D81O828QG5", "RABD810828QG5", "dudoso"),     # B/8 y O/0: confusión de OCR
+    ("RABD810829QG5", "RABD810828QG5", "distinto"),   # 8 -> 9 no es confusión
+    ("", "RABD810828QG5", None),
+])
+def test_comparacion_tolerante_a_ocr(leido, exacto, esperado):
+    from herramientas import csf_escaneo
+    assert csf_escaneo.comparar(leido, exacto) == esperado
 
 
 def test_adaptador_genera_un_pdf_por_archivo(tmp_path):
@@ -286,13 +305,84 @@ def _variantes(src, carpeta):
 @requiere_muestras
 @pytest.mark.parametrize("variante, candado", [
     ("fecha_renovada", "1.13"), ("reguardada", "1.2"), ("incremental", "1.4"),
-    ("parche", "1.9"), ("rasterizada", "1.1"), ("qr_falso", "2.2"),
+    ("parche", "1.9"), ("qr_falso", "2.2"),
 ])
 def test_alteraciones_se_detectan(tmp_path, variante, candado):
     rutas = _variantes(MUESTRAS[0], str(tmp_path))
     a = v.analizar_csf(rutas[variante], hoy=HOY)
     assert a.veredicto == "ALTERADA / NO CONFIABLE"
     assert candado in {c.clave for c in a.candados if c.estado == v.FALLA}
+
+
+# ---------------------------------------------------------------------------
+# Copias (escaneo / foto): solo códigos y datos visibles, con OCR
+# ---------------------------------------------------------------------------
+def _hay_ocr():
+    from herramientas import csf_escaneo
+    return csf_escaneo._motor_ocr() is not None
+
+
+requiere_ocr = pytest.mark.skipif(not MUESTRAS or not _hay_ocr(), reason="sin CSF reales o sin RapidOCR")
+
+
+def _escanear(pdf, ruta, escala=2.2):
+    """'Escanea' un PDF: cada página pasa a ser una imagen."""
+    import pypdfium2 as pdfium
+    d = pdfium.PdfDocument(pdf)
+    imgs = [d[i].render(scale=escala).to_pil().convert("RGB") for i in range(len(d))]
+    imgs[0].save(ruta, save_all=True, append_images=imgs[1:])
+    return ruta
+
+
+def _editada(src, cambios):
+    import pikepdf
+    p = pikepdf.open(src)
+    for pg in p.pages:
+        b = pg.Contents.read_bytes()
+        for a, c in cambios:
+            b = b.replace(a, c)
+        pg.Contents.write(b)
+    buf = io.BytesIO()
+    p.save(buf)
+    return buf.getvalue()
+
+
+@requiere_ocr
+def test_copia_legitima_coincide_pero_no_es_sin_indicios(tmp_path):
+    a = v.analizar_csf(_escanear(MUESTRAS[0], str(tmp_path / "copia.pdf")), hoy=HOY)
+    assert a.modo == "copia"
+    assert a.veredicto == "COPIA: DATOS COINCIDEN", [(c.clave, c.detalle) for c in a.candados if c.estado != v.OK]
+    c11 = next(c for c in a.candados if c.clave == "1.1")
+    assert c11.estado == v.AVISO and "NO se puede comprobar" in c11.detalle
+
+
+@requiere_ocr
+def test_copia_con_rfc_cambiado_en_el_texto(tmp_path):
+    """Se cambia el RFC de la tabla por otro VÁLIDO y se escanea: el texto ya
+    no dice lo mismo que los códigos."""
+    original = v._extraer_datos(v._extraer_pdf(MUESTRAS[0]))["rfc"]
+    base = original[:-4] + ("9" if original[-4] != "9" else "8") + original[-3:-1]
+    nuevo = base + v.digito_rfc(base + "0")
+    pdf = _editada(MUESTRAS[0], [(f"({original})Tj".encode(), f"({nuevo})Tj".encode())])
+    a = v.analizar_csf(_escanear(pdf, str(tmp_path / "copia.pdf")), hoy=HOY)
+    assert a.veredicto == "ALTERADA / NO CONFIABLE"
+    assert "3.2" in {c.clave for c in a.candados if c.estado == v.FALLA}
+
+
+@requiere_ocr
+def test_copia_con_qr_de_otra_persona(tmp_path):
+    import pikepdf
+    if len(MUESTRAS) < 2:
+        pytest.skip("se necesitan 2 CSF")
+    p, o = pikepdf.open(MUESTRAS[0]), pikepdf.open(MUESTRAS[1])
+    qr = lambda pdf: next(x for _, x in pdf.pages[0].Resources.XObject.items()  # noqa: E731
+                          if int(x.get("/Width", 0)) == 150)
+    qr(p).write(zlib.compress(qr(o).read_bytes()), filter=pikepdf.Name.FlateDecode)
+    buf = io.BytesIO()
+    p.save(buf)
+    a = v.analizar_csf(_escanear(buf.getvalue(), str(tmp_path / "copia.pdf")), hoy=HOY)
+    assert a.veredicto == "ALTERADA / NO CONFIABLE"
+    assert "2.5" in {c.clave for c in a.candados if c.estado == v.FALLA}
 
 
 @requiere_muestras

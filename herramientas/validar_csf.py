@@ -181,6 +181,10 @@ class Analisis:
     datos: Dict[str, object] = field(default_factory=dict)
     candados: List[Candado] = field(default_factory=list)
     urls_qr: List[str] = field(default_factory=list)
+    # "digital": el PDF del SAT (todos los candados). "copia": escaneo o foto
+    # (csf_escaneo.py: solo códigos y datos visibles; nunca "sin indicios").
+    modo: str = "digital"
+    verificable: bool = True
 
     # --- veredictos -------------------------------------------------------
     def _de_seccion(self, secciones):
@@ -190,8 +194,15 @@ class Analisis:
     def veredicto(self):
         """Autenticidad: secciones 1 a 3. La 4 (políticas) va aparte."""
         tecnicos = self._de_seccion((1, 2, 3))
-        if self.tipo_archivo != "pdf":
-            return "NO VERIFICABLE"
+        if self.modo == "copia":
+            # Una copia nunca es "sin indicios": su archivo no se puede revisar.
+            if not self.verificable:
+                return "NO VERIFICABLE"
+            if any(c.estado == FALLA for c in tecnicos):
+                return "ALTERADA / NO CONFIABLE"
+            if any(c.estado == AVISO and c.clave not in ("1.1", "1.2") for c in tecnicos):
+                return "COPIA: REVISAR A MANO"
+            return "COPIA: DATOS COINCIDEN"
         if any(c.estado == FALLA for c in tecnicos):
             return "ALTERADA / NO CONFIABLE"
         if any(c.estado == AVISO for c in tecnicos):
@@ -1642,11 +1653,29 @@ def analizar_csf(ruta, hoy=None, consultar_sat=False, nombre=None):
     def add(clave, titulo, estado, detalle, previene=""):
         analisis.candados.append(Candado(clave, titulo, estado, detalle, previene))
 
-    # Foto o captura: solo se pueden leer los QR (y mandar a validar al SAT).
+    # COPIAS (foto, escaneo o PDF que es solo imagen): no se puede revisar el
+    # archivo; se comparan los códigos y los datos visibles (csf_escaneo.py).
+    try:
+        from . import csf_escaneo as _copia
+    except ImportError:
+        try:
+            import csf_escaneo as _copia
+        except ImportError:
+            _copia = None
     if analisis.tipo_archivo == "imagen" or ruta.lower().endswith(EXT_IMAGEN):
         analisis.tipo_archivo = "imagen"
-        _analizar_imagen(ruta, analisis, add)
+        if _copia is None:
+            _analizar_imagen(ruta, analisis, add)
+            return analisis
+        _copia.analizar(ruta, analisis, add, hoy, consultar_sat, es_pdf=False)
+        _ordenar(analisis)
         return analisis
+    if _copia is not None:
+        es_copia, motivo = _copia.es_copia_pdf(ruta)
+        if es_copia:
+            _copia.analizar(ruta, analisis, add, hoy, consultar_sat, es_pdf=True, motivo=motivo)
+            _ordenar(analisis)
+            return analisis
 
     try:
         info = _extraer_pdf(ruta)
@@ -1665,11 +1694,17 @@ def analizar_csf(ruta, hoy=None, consultar_sat=False, nombre=None):
     _candados_codigos(info, d, add, analisis, consultar_sat)
     _candados_datos(d, add, hoy)
     _candados_politicas(d, add, hoy)
-    analisis.candados.sort(key=lambda c: tuple(int(x) for x in c.clave.split(".")))
+    _ordenar(analisis)
     return analisis
 
 
+def _ordenar(analisis):
+    analisis.candados.sort(key=lambda c: tuple(int(x) for x in c.clave.split(".")))
+
+
 def _analizar_imagen(ruta, analisis, add):
+    """Respaldo si falta csf_escaneo.py (script suelto): solo lee los QR."""
+    analisis.modo, analisis.verificable = "copia", False
     from PIL import Image
     try:
         img = Image.open(ruta)
@@ -1912,6 +1947,7 @@ def resumen_dict(analisis, reporte=None, hoy=None):
         "archivo": analisis.archivo,
         "reporte": reporte,
         "veredicto": analisis.veredicto,
+        "modo": analisis.modo,
         "cumple_politicas": analisis.cumple_politicas,
         "total": len(analisis.candados),
         "ok": n.get(OK, 0), "avisos": n.get(AVISO, 0), "fallas": n.get(FALLA, 0),

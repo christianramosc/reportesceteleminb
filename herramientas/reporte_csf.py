@@ -53,8 +53,12 @@ VEREDICTO = {  # veredicto -> (color, fondo, icono, frase)
                             "Hay avisos con explicación legítima posible. Confírmalos en el QR del SAT."),
     "ALTERADA / NO CONFIABLE": ("#B91C1C", "#FEF2F2", "shield-x",
                                 "Hay indicios de alteración. No la uses para el expediente."),
+    "COPIA: DATOS COINCIDEN": ("#1D4ED8", "#EFF6FF", "scan-line",
+                               "Copia (escaneo o foto): los códigos y los datos legibles coinciden, pero por ser copia NO se puede comprobar que no se alteró antes de escanearse. Valida el QR en el SAT o pide el PDF original."),
+    "COPIA: REVISAR A MANO": ("#B45309", "#FFFBEB", "scan-line",
+                              "Copia (escaneo o foto): algo no se alcanzó a leer o quedó dudoso. Revisa los avisos y valida el QR en el SAT, o pide el PDF original."),
     "NO VERIFICABLE": ("#B91C1C", "#FEF2F2", "shield-x",
-                       "Es una foto o captura: no se puede validar. Pide el PDF original del SAT."),
+                       "No verificable: no se pudo leer ningún código de la copia. Pide el PDF original del SAT."),
 }
 SECCIONES = {1: ("Archivo y estructura", "file-search"), 2: ("Códigos QR y de barras", "qr-code"),
              3: ("Coherencia de datos", "fingerprint"), 4: ("Políticas de la financiera", "calendar-check")}
@@ -269,9 +273,9 @@ def generar(analisis, ruta_salida, fecha_texto=""):
              Spacer(1, 3),
              Paragraph(f'<font color="{c_ver}">{_esc(ver)}</font>', est["ver"]),
              Spacer(1, 3), Paragraph(_esc(frase), est["base"])]
-    if ver == "SIN INDICIOS DE ALTERACIÓN" and not analisis.cumple_politicas:
+    if ver in ("SIN INDICIOS DE ALTERACIÓN", "COPIA: DATOS COINCIDEN") and not analisis.cumple_politicas:
         texto += [Spacer(1, 4), Paragraph(
-            '<font color="#B45309"><b>Auténtica, pero no cumple políticas</b> (vigencia o estatus): '
+            '<font color="#B45309"><b>Además, no cumple políticas</b> (vigencia o estatus): '
             'pide al cliente una constancia reciente.</font>', est["base"])]
     interior = Table([[escudo or "", texto, _anillo(aprobados, len(tecnicos), c_ver)]],
                      colWidths=[1.6 * cm, ANCHO - 1.6 * cm - 3.3 * cm - 0.36 * cm - 24, 3.3 * cm])
@@ -392,8 +396,8 @@ def generar(analisis, ruta_salida, fecha_texto=""):
                                ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
                                ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0),
                                ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
-        el += [CondPageBreak(5 * cm), _titulo("Datos de la constancia", "user", est), Spacer(1, 6),
-               _tarjeta(t, fondo=FONDO, padding=10), Spacer(1, 12)]
+        el += [KeepTogether([_titulo("Datos de la constancia", "user", est), Spacer(1, 6),
+                             _tarjeta(t, fondo=FONDO, padding=10)]), Spacer(1, 12)]
 
     # --- 6. Validación en el SAT --------------------------------------------
     sat = [CondPageBreak(7 * cm), _titulo("Valida en el portal del SAT", "qr-code", est), Spacer(1, 2),

@@ -21,8 +21,12 @@ VEREDICTOS = {
                             "Revisar: hay avisos con explicación legítima posible. Confirma en el QR del SAT."),
     "ALTERADA / NO CONFIABLE": ("red", ":material/gpp_bad:",
                                 "No confiable: hay indicios de alteración. No la uses para el expediente."),
+    "COPIA: DATOS COINCIDEN": ("blue", ":material/document_scanner:",
+                               "Copia (escaneo o foto): los códigos y los datos legibles coinciden, pero por ser copia NO se puede comprobar que no se alteró antes de escanearse. Valida el QR en el SAT o pide el PDF original."),
+    "COPIA: REVISAR A MANO": ("orange", ":material/document_scanner:",
+                              "Copia (escaneo o foto): algo no se alcanzó a leer o quedó dudoso. Revisa los avisos y valida el QR en el SAT, o pide el PDF original."),
     "NO VERIFICABLE": ("red", ":material/hide_image:",
-                       "No verificable: es una foto o captura. Pide el PDF original del SAT."),
+                       "No verificable: no se pudo leer ningún código de la copia. Pide el PDF original del SAT."),
 }
 ESTADOS = {"OK": ("green", ":material/check_circle:"), "AVISO": ("orange", ":material/warning:"),
            "FALLA": ("red", ":material/cancel:"), "INFO": ("gray", ":material/info:")}
@@ -54,7 +58,7 @@ def _md(texto):
 
 
 ORDEN = {"ALTERADA / NO CONFIABLE": 0, "NO VERIFICABLE": 1, "REVISAR MANUALMENTE": 2,
-         "SIN INDICIOS DE ALTERACIÓN": 3}
+         "COPIA: REVISAR A MANO": 3, "COPIA: DATOS COINCIDEN": 4, "SIN INDICIOS DE ALTERACIÓN": 5}
 
 
 def mostrar(resumenes):
@@ -73,7 +77,9 @@ def _panorama(resumenes):
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Constancias", len(resumenes), border=True)
     c2.metric("Confiables", cuenta["SIN INDICIOS DE ALTERACIÓN"], border=True)
-    c3.metric("A revisar", cuenta["REVISAR MANUALMENTE"], border=True)
+    c3.metric("A revisar", cuenta["REVISAR MANUALMENTE"] + cuenta["COPIA: REVISAR A MANO"]
+              + cuenta["COPIA: DATOS COINCIDEN"], border=True,
+              help="Incluye las copias (escaneos o fotos): su autenticidad no se puede comprobar.")
     c4.metric("No confiables", cuenta["ALTERADA / NO CONFIABLE"] + cuenta["NO VERIFICABLE"], border=True)
 
     tabla = pd.DataFrame([{
@@ -109,9 +115,16 @@ def _tarjeta(r):
                   delta_color=("normal" if dias is not None and dias <= 30 else "inverse"),
                   delta_arrow="off", help="Política del boletín BMGFS: emitida en el último mes.")
 
-        if r["veredicto"] == "SIN INDICIOS DE ALTERACIÓN" and not r["cumple_politicas"]:
-            st.warning("Es auténtica, pero **no cumple las políticas** (vigencia o estatus): "
+        if r["veredicto"] in ("SIN INDICIOS DE ALTERACIÓN", "COPIA: DATOS COINCIDEN") and not r["cumple_politicas"]:
+            st.warning("**No cumple las políticas** (vigencia o estatus): "
                        "pide al cliente una constancia reciente.", icon=":material/event_busy:")
+
+        # Copias: decir claramente qué se pudo revisar y qué NO.
+        if r.get("modo") == "copia":
+            st.info("**Es una copia (escaneo o foto).** Se compararon los QR, el código de barras y "
+                    "el texto impreso leído con OCR. **No se puede comprobar** que la constancia no se "
+                    "alteró antes de imprimirse o fotografiarse: para eso hay que validar el QR en el "
+                    "SAT o pedir el PDF original.", icon=":material/document_scanner:")
 
         # --- Observaciones: solo lo que falló o pide revisión ----------------
         fallas = [c for c in r["candados"] if c["estado"] == "FALLA"]
