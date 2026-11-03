@@ -17,6 +17,28 @@ _PDV_DEFECTO = _comparativo.SUBTITULO_EMPRESA
 _ANALISTA_DEFECTO = _comparativo.NOMBRE_ANALISTA
 
 
+def _validar_meses_distintos(archivos, rutas_archivos):
+    """Cada archivo debe traer un mes distinto.
+
+    Los datos se guardan por mes (datos_por_mes[mes]): si dos Excel traían la
+    misma hoja —por ejemplo, el avance y el cierre de septiembre—, el segundo
+    reemplazaba al primero y el reporte salía sin avisar que faltaba uno.
+    """
+    por_mes = {}
+    for (mes, _df), ruta in zip(archivos, rutas_archivos):
+        por_mes.setdefault(mes, []).append(_nombres.subido(ruta))
+    repetidos = {mes: nombres for mes, nombres in por_mes.items() if len(nombres) > 1}
+    if repetidos:
+        detalle = "; ".join(f"{mes.title()} ({', '.join(nombres)})"
+                            for mes, nombres in repetidos.items())
+        raise ValueError(
+            f"Hay archivos con el mismo mes: {detalle}. El comparativo usa un "
+            "archivo por mes. Si es el mismo mes dos veces (por ejemplo, el "
+            "avance y el cierre), sube solo uno. Si son meses distintos, "
+            "escribe una etiqueta por archivo en 'Etiquetas de mes'."
+        )
+
+
 def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
              nombre_pdv=None, nombre_analista=None, **_opciones):
     nombre_pdv = (nombre_pdv or "").strip() or _PDV_DEFECTO
@@ -28,6 +50,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
     os.makedirs(carpeta_salida, exist_ok=True)
 
     archivos = _comparativo.cargar_multiples_archivos(rutas_archivos, nombres_meses)
+    _validar_meses_distintos(archivos, rutas_archivos)
 
     datos_por_mes = {}
     for mes, df_crudo in archivos:

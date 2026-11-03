@@ -2,15 +2,10 @@
 """Adaptador de validar_csf.py (Validación de Constancia de Situación Fiscal) para el registro."""
 
 import os
-import re
 
+from . import nombres_archivo as _nombres
 from . import validar_csf as _csf
 from .registro import Herramienta
-
-
-def _nombre_original(ruta):
-    # La app guarda cada archivo como "0_Csf_XXXX.pdf"; se quita el prefijo.
-    return re.sub(r"^\d+_", "", os.path.basename(ruta))
 
 
 def ejecutar(rutas_archivos, carpeta_salida="salida", **_opciones):
@@ -19,7 +14,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", **_opciones):
         rutas=list(rutas_archivos),
         carpeta_salida=carpeta_salida,
         consultar_sat=True,
-        nombres=[_nombre_original(r) for r in rutas_archivos],
+        nombres=[_nombres.subido(r) for r in rutas_archivos],
         devolver_resumen=True,
     )
     # Los PDF se descargan; el resumen se dibuja en la página (vista_validar_csf).
