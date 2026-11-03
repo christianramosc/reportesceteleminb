@@ -14,7 +14,6 @@ si no, cae automáticamente a pdfplumber (Python puro). Ver extraer_texto_pdf().
 
 import os
 import re
-import glob
 import shutil
 import zipfile
 import subprocess
@@ -505,14 +504,50 @@ def parsear_amortizacion(texto: str) -> dict:
     return datos
 
 
+def _sin_acentos(texto: str) -> str:
+    return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+
+
+def clasificar_pdfs(carpeta_pdf: str) -> tuple:
+    """Separa los PDFs de una carpeta de estatus en (solicitudes,
+    amortizaciones, ignorados).
+
+    Antes se buscaba "*.pdf" y "amortizacion" tal cual, y se perdían sin
+    aviso los PDFs con extensión .PDF (mayúsculas) o con el nombre acentuado
+    ("Amortización_..."), sobre todo si venían de una Mac, que guarda la
+    "ó" como "o" + acento suelto. El cliente desaparecía de la bitácora.
+
+    Ahora la extensión no distingue mayúsculas, se quitan los acentos antes
+    de comparar y se busca "amortizaci" (así también entra un nombre cuyo
+    acento llegó dañado por la codificación del ZIP). Los archivos ocultos
+    ("._Solicitud.pdf" que deja macOS) se siguen saltando, como hacía glob.
+    """
+    solicitudes, amortizaciones, ignorados = [], [], []
+    for nombre in sorted(os.listdir(carpeta_pdf)):
+        ruta = os.path.join(carpeta_pdf, nombre)
+        if nombre.startswith(".") or not os.path.isfile(ruta) or not nombre.lower().endswith(".pdf"):
+            continue
+        clave = _sin_acentos(nombre).lower()
+        es_solicitud = "solicitud" in clave
+        es_amortizacion = "amortizaci" in clave
+        if es_solicitud:
+            solicitudes.append(ruta)
+        if es_amortizacion:
+            amortizaciones.append(ruta)
+        if not (es_solicitud or es_amortizacion):
+            ignorados.append(ruta)
+    return solicitudes, amortizaciones, ignorados
+
+
 def procesar_carpeta(carpeta_pdf: str, status: str) -> list:
-    archivos = glob.glob(os.path.join(carpeta_pdf, "*.pdf"))
-    solicitudes_raw    = [f for f in archivos if "solicitud"    in os.path.basename(f).lower()]
-    amortizaciones_raw = [f for f in archivos if "amortizacion" in os.path.basename(f).lower()]
+    solicitudes_raw, amortizaciones_raw, ignorados = clasificar_pdfs(carpeta_pdf)
 
     print(f"\n  ── STATUS: {status} ──")
     print(f"  Solicitudes encontradas   : {len(solicitudes_raw)}")
     print(f"  Amortizaciones encontradas: {len(amortizaciones_raw)}")
+    if ignorados:
+        print(f"  ⚠ PDFs ignorados (el nombre no dice Solicitud ni Amortización): "
+              f"{', '.join(os.path.basename(r) for r in ignorados)}")
 
     dict_solicitudes = {}
     for ruta in solicitudes_raw:

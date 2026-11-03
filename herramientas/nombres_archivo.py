@@ -13,6 +13,7 @@ siempre salía 0000). Ahora el nombre dice QUÉ es y DE QUÉ PERIODO:
 El periodo se toma del nombre de la hoja de la bitácora ("OCTUBRE 2026").
 """
 
+import os
 import re
 import unicodedata
 
@@ -34,6 +35,14 @@ def mes_anio(texto):
         mes = next((i + 1 for i, c in enumerate(CORTOS) if re.search(rf"\b{c.lower()}", t)), None)
     m = re.search(r"(20\d{2})", t)
     return mes, (int(m.group(1)) if m else None)
+
+
+def subido(ruta):
+    """Nombre con el que el usuario subió el archivo.
+
+    La app guarda cada archivo como "0_Bitacora.xlsx", "1_..." para que dos
+    archivos con el mismo nombre no se pisen; aquí se quita ese prefijo."""
+    return re.sub(r"^\d+_", "", os.path.basename(str(ruta)))
 
 
 def seguro(nombre):

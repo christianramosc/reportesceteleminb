@@ -435,15 +435,30 @@ def cargar_archivo(ruta_local=None):
         nombre_archivo = input("Ruta del archivo Excel: ").strip()
 
     xls = pd.ExcelFile(nombre_archivo)
-    hoja = xls.sheet_names[0]
-    if len(xls.sheet_names) > 1:
-        print(f"El archivo tiene varias hojas: {xls.sheet_names}")
-        elegida = input(f"¿Cuál analizar? (Enter = '{hoja}'): ").strip()
-        hoja = elegida if elegida else hoja
+    hoja = _elegir_hoja(xls.sheet_names, interactivo=not ruta_local)
 
     df = pd.read_excel(nombre_archivo, sheet_name=hoja)
     print(f"Archivo cargado: {nombre_archivo}  |  Hoja: {hoja}  |  {len(df)} solicitudes\n")
     return df
+
+
+def _elegir_hoja(hojas, interactivo):
+    """Con varias hojas, en Colab se pregunta cuál; con una ruta (la app de
+    Streamlit, las pruebas) se usa la primera, igual que el comparativo, la
+    vista previa y el nombre de los archivos de salida.
+
+    Antes también se preguntaba con ruta: en el servidor no hay teclado e
+    input() tronaba con EOFError en cuanto el Excel traía una segunda hoja.
+    """
+    hoja = hojas[0]
+    if len(hojas) > 1:
+        if not interactivo:
+            print(f"El archivo tiene varias hojas: {hojas}. Se usa la primera: '{hoja}'.")
+            return hoja
+        print(f"El archivo tiene varias hojas: {hojas}")
+        elegida = input(f"¿Cuál analizar? (Enter = '{hoja}'): ").strip()
+        hoja = elegida if elegida else hoja
+    return hoja
 
 
 # =======================================================================

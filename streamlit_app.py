@@ -11,9 +11,6 @@ No hay que tocar este archivo para agregar una herramienta nueva más
 adelante — ver las instrucciones en herramientas/__init__.py.
 """
 
-import contextlib
-import glob
-import io
 import os
 import shutil
 import tempfile
@@ -26,6 +23,7 @@ import ui_estilos as ui
 from herramientas import REGISTRO
 from herramientas import estatus as _est
 from herramientas import fechas as _fechas
+from herramientas.ejecucion import ejecutar_aislado
 from herramientas.avance_preliminar_original import (
     NOMBRE_ANALISTA as _ANALISTA_DEFECTO,
     SUBTITULO_EMPRESA as _PDV_DEFECTO,
@@ -90,9 +88,13 @@ def _procesar(herramienta, archivos_subidos, opciones):
 
     El directorio se borra en el `finally`, así que el Excel del cliente no
     sobrevive a la corrida ni siquiera cuando algo falla a medio camino.
+
+    La herramienta corre con un candado (herramientas/ejecucion.py): si otra
+    persona está generando, este reporte espera su turno en vez de mezclarse
+    con el suyo.
     """
     carpeta = tempfile.mkdtemp(prefix=f"mg_{herramienta.id}_")
-    registro = io.StringIO()
+    aviso_fila = st.empty()
     try:
         rutas = []
         for i, archivo in enumerate(archivos_subidos):
@@ -104,10 +106,14 @@ def _procesar(herramienta, archivos_subidos, opciones):
         carpeta_salida = os.path.join(carpeta, "salida")
         os.makedirs(carpeta_salida, exist_ok=True)
 
-        with contextlib.redirect_stdout(registro):
-            resultados = herramienta.ejecutar(
-                rutas, carpeta_salida=carpeta_salida, **opciones
-            )
+        resultados, log = ejecutar_aislado(
+            herramienta, rutas, carpeta_salida,
+            al_esperar=lambda: aviso_fila.info(
+                "Hay otro reporte generándose. El tuyo empieza en cuanto termine.",
+                icon=":material/hourglass_top:",
+            ),
+            **opciones,
+        )
 
         # Una herramienta puede regresar {"archivos": [...], "resumen": obj}
         # además de la lista simple de rutas (ver registro.py).
@@ -121,13 +127,12 @@ def _procesar(herramienta, archivos_subidos, opciones):
             if os.path.exists(ruta):
                 with open(ruta, "rb") as f:
                     archivos.append((os.path.basename(ruta), f.read()))
-        return archivos, registro.getvalue(), resumen
+        return archivos, log, resumen
     finally:
+        aviso_fila.empty()
         shutil.rmtree(carpeta, ignore_errors=True)
-        # Las gráficas intermedias se escriben junto al script y llevan
-        # nombres de vendedores; tampoco tienen por qué quedarse.
-        for temporal in glob.glob("graficas_temp_*"):
-            shutil.rmtree(temporal, ignore_errors=True)
+        # Las gráficas intermedias (graficas_temp_*) las borra
+        # ejecutar_aislado() antes de soltar el candado.
 
 
 def _vista_previa(archivos_subidos):
@@ -136,14 +141,18 @@ def _vista_previa(archivos_subidos):
     un estatus mal escrito sin esperar los dos minutos del reporte."""
     filas_totales = 0
     conteo = {}
+    varias_hojas = []
     for archivo in archivos_subidos:
         try:
             archivo.seek(0)
-            df = pd.read_excel(archivo)
+            xls = pd.ExcelFile(archivo)
+            df = xls.parse(xls.sheet_names[0])
         except Exception:
             continue
         finally:
             archivo.seek(0)
+        if len(xls.sheet_names) > 1:
+            varias_hojas.append(f"**{archivo.name}** → «{xls.sheet_names[0]}»")
         filas_totales += len(df)
         columna = next((c for c in df.columns
                         if str(c).strip().upper() in ("STATUS", "ESTATUS")), None)
@@ -152,6 +161,16 @@ def _vista_previa(archivos_subidos):
         for valor in df[columna]:
             clave = _est.clasificar_status(valor)
             conteo[clave] = conteo.get(clave, 0) + 1
+
+    # Los reportes leen solo la primera hoja: si los datos están en otra, el
+    # reporte saldría con datos equivocados o vacío.
+    if varias_hojas:
+        st.info(
+            "El archivo trae varias hojas; se usará solo la primera: "
+            + "; ".join(varias_hojas) + ". Si los datos están en otra hoja, "
+            "muévela al principio del libro.",
+            icon=":material/tab:",
+        )
 
     if not filas_totales:
         return
@@ -212,6 +231,22 @@ tiene_opciones = (usa_datos_reporte or usa_etiquetas_mes
                   or herramienta.id == "resumen_vendedor")
 opciones = {}
 
+# Los resultados se guardan en session_state, NO se dibujan solo dentro
+# del "if generar". st.button() solo devuelve True en el rerun inmediato al
+# clic, y st.download_button() provoca un rerun al descargar: si los botones
+# dependieran de "generar", al bajar el PDF desaparecería el botón del Word.
+# Como la clave es por herramienta, el resultado sigue ahí si cambias de
+# herramienta en el menú y regresas.
+clave_resultado = f"resultado_{herramienta.id}"
+
+
+def _olvidar_resultado(clave):
+    """Al subir, cambiar o quitar el archivo, las descargas anteriores ya no
+    corresponden a lo que está en pantalla. Antes seguían visibles hasta
+    volver a generar y era fácil bajar el reporte del archivo anterior."""
+    st.session_state.pop(clave, None)
+
+
 # --- 1. Archivo ---------------------------------------------------------
 with st.container(border=True, key="tarjeta_archivo"):
     ui.paso(1, "Sube el archivo" + ("s" if herramienta.multiple_archivos else ""),
@@ -222,6 +257,8 @@ with st.container(border=True, key="tarjeta_archivo"):
         accept_multiple_files=herramienta.multiple_archivos,
         label_visibility="collapsed",
         key=f"uploader_{herramienta.id}",
+        on_change=_olvidar_resultado,
+        args=(clave_resultado,),
     )
     if archivos_subidos and not herramienta.multiple_archivos:
         archivos_subidos = [archivos_subidos]
@@ -288,14 +325,6 @@ if tiene_opciones:
 generar = st.button("Generar reporte", key=f"generar_{herramienta.id}",
                     type="primary", icon=":material/bolt:", width="stretch",
                     disabled=not archivos_subidos)
-
-# Los resultados se guardan en session_state, NO se dibujan solo dentro
-# del "if generar". st.button() solo devuelve True en el rerun inmediato al
-# clic, y st.download_button() provoca un rerun al descargar: si los botones
-# dependieran de "generar", al bajar el PDF desaparecería el botón del Word.
-# Como la clave es por herramienta, el resultado sigue ahí si cambias de
-# herramienta en el menú y regresas.
-clave_resultado = f"resultado_{herramienta.id}"
 
 if generar and archivos_subidos:
     with st.spinner("Generando el reporte. Puede tardar uno o dos minutos."):

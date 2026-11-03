@@ -316,8 +316,13 @@ def cargar_archivo(ruta_local=None):
     hoja = xls.sheet_names[0]
     if len(xls.sheet_names) > 1:
         print(f"El archivo tiene varias hojas: {xls.sheet_names}")
-        elegida = input(f"¿Cuál analizar? (Enter = '{hoja}'): ").strip()
-        hoja = elegida if elegida else hoja
+        if ruta_local:
+            # Con ruta (la app de Streamlit) no hay teclado: input() tronaba
+            # con EOFError. Se usa la primera hoja, igual que los demás reportes.
+            print(f"Se usa la primera: '{hoja}'.")
+        else:
+            elegida = input(f"¿Cuál analizar? (Enter = '{hoja}'): ").strip()
+            hoja = elegida if elegida else hoja
 
     df = pd.read_excel(nombre_archivo, sheet_name=hoja)
     print(f"Archivo cargado: {nombre_archivo}  |  Hoja: {hoja}  |  {len(df)} solicitudes\n")
