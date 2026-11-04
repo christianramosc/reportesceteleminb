@@ -209,6 +209,29 @@ etiquetas = ["." + t.upper() for t in herramienta.tipos_permitidos]
 etiquetas.append("Varios archivos" if herramienta.multiple_archivos else "1 archivo")
 ui.encabezado(ui.nombre_limpio(herramienta.nombre), herramienta.descripcion, etiquetas)
 
+
+@st.cache_data(show_spinner=False)
+def _leer_guia(ruta):
+    """Bytes de la guía (PDF o imagen). Se leen una vez por proceso, no en
+    cada clic de la página."""
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), ruta), "rb") as f:
+        return f.read()
+
+
+# --- Guía de uso (si la herramienta trae una) ------------------------------
+if herramienta.guia:
+    with st.expander(herramienta.guia_titulo, icon=":material/map:"):
+        if herramienta.guia_vista:
+            st.image(_leer_guia(herramienta.guia_vista), width="stretch")
+        st.download_button(
+            "Descargar guía completa (PDF)",
+            data=_leer_guia(herramienta.guia),
+            file_name=os.path.basename(herramienta.guia),
+            mime="application/pdf",
+            icon=":material/download:",
+            key=f"guia_{herramienta.id}",
+        )
+
 # Qué campos mostrar lo declara cada herramienta (registro.py), no una
 # lista de ids aquí: una herramienta nueva no obliga a tocar este archivo.
 tiene_opciones = herramienta.tiene_opciones

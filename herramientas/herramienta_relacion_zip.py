@@ -24,4 +24,8 @@ HERRAMIENTA = Herramienta(
     ejecutar=ejecutar,
     icono=":material/folder_zip:",
     nombre_corto="Relación de clientes",
+    # Se regenera con: python -m scripts.guia_zip
+    guia="guias/Guia_ZIP_Relacion_de_clientes.pdf",
+    guia_vista="guias/guia_zip_mapa.png",
+    guia_titulo="¿Cómo armo el ZIP?",
 )
