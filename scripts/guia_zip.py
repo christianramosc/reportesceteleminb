@@ -1,13 +1,14 @@
-# -*- coding: utf-8 -*-
 """
 Genera la GUÍA VISUAL para armar el ZIP mensual (una página, para imprimir
 o mandar por chat a los compañeros).
 
 La guía se dibuja A PARTIR DEL CATÁLOGO REAL (herramientas/estatus.py) y de
 las reglas reales de herramientas/bitacora_zip.py, así que cuando se agregue
-un estatus nuevo basta con volver a correr esto:
+un estatus nuevo basta con volver a correr esto, desde la raíz del repo:
 
-    python -m herramientas.guia_zip
+    python -m scripts.guia_zip
+
+No es parte de la app: se corre a mano cuando cambia el catálogo.
 
 y la guía sale actualizada, con el mismo color que ese estatus tiene en las
 gráficas de los reportes.
@@ -21,10 +22,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
 from reportlab.pdfgen import canvas as rl_canvas
 
-try:
-    from . import estatus as est
-except ImportError:  # ejecución suelta
-    import estatus as est
+from herramientas import estatus as est
 
 
 INBURSA_AZUL = "#191970"

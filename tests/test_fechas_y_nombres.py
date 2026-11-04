@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Fecha local (México) y nombres cortos de archivos."""
 
 from datetime import datetime, timezone

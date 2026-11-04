@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Genera la versión .docx (editable en Word) de los reportes.
 
@@ -18,21 +17,13 @@ mismas tablas y las gráficas intercaladas donde van, igual que el PDF.
 """
 
 import os
-from datetime import date
-try:
-    from . import fechas as _fechas   # hora de México, no la del servidor
-except ImportError:  # ejecución suelta (Colab)
-    import fechas as _fechas
+from . import fechas as _fechas   # hora de México, no la del servidor
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
-try:
-    from . import flowables_a_docx as _fd
-except ImportError:  # ejecución suelta
-    import flowables_a_docx as _fd
+from . import flowables_a_docx as _fd
 
 
 # =======================================================================

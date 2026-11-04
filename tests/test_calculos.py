@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Pruebas de los cálculos: limpieza, resumen y tabla por vendedor.
 
@@ -9,8 +8,6 @@ para que la prueba falle si un cambio altera un número, no solo si truena.
 import io
 import contextlib
 
-import pandas as pd
-import pytest
 
 from herramientas import avance_preliminar_original as avance
 from herramientas import estatus as est

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Cifras clave de la columna lateral de la portada.
 
 Cada reporte tiene un propósito distinto, así que muestra cifras distintas.
@@ -15,10 +14,7 @@ Una cifra es un dict: {"etiqueta", "valor", "nota", "alerta"}.
 
 import pandas as pd
 
-try:
-    from . import conclusiones as _c
-except ImportError:  # ejecución suelta (Colab)
-    import conclusiones as _c
+from . import conclusiones as _c
 
 COL_CAT, COL_GAP, COL_MONTO = "Categoria", "¿Tiene GAP?", "Monto Total a Financiar"
 
@@ -152,7 +148,7 @@ def cifras_comparativo(df_unico, tabla_comp, n_meses):
 
 def cifras_vendedor(df_equipo, vendedor):
     mio = df_equipo[df_equipo["Nombre del Vendedor"] == vendedor]
-    fin, n, pct = _conversion(mio)
+    _, n, pct = _conversion(mio)
     _, total_eq, pct_eq = _conversion(df_equipo)
     cifras = [
         _cifra("TUS SOLICITUDES", f"{n}", f"de {total_eq} del equipo"),

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Pruebas de herramientas/metricas.py (gráfica de GAP en financiados)."""
 import pandas as pd
 

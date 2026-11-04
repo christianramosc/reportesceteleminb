@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Nombres cortos para los archivos que se descargan.
 
 Antes: "Avance_Preliminar_Datos_20261013_0000.xlsx" (largo, y la hora

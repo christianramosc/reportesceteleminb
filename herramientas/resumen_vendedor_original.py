@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """RESUMEN DESEMPEÑO POR VENDEDOR — MES
 
 Genera un PDF individual de "Resumen Mensual de Desempeño" para cada
@@ -16,7 +15,7 @@ explicadas), pero:
     (sin exponer el detalle fila-por-fila de sus compañeros, solo su
     posición y los promedios agregados).
 
-Pensado para Google Colab, con compatibilidad local.
+Lo usa la app de Streamlit (herramienta_resumen_vendedor.py).
 
 Cambios de esta versión
 -----------------------
@@ -42,18 +41,10 @@ Cambios de esta versión
    parten entre páginas y borrado de las gráficas temporales al final.
 """
 
-import warnings
-warnings.filterwarnings("ignore")
-
 import os
 import re
-import shutil
-import zipfile
 import datetime
-try:
-    from . import fechas as _fechas   # hora de México, no la del servidor
-except ImportError:  # ejecución suelta (Colab)
-    import fechas as _fechas
+from . import fechas as _fechas   # hora de México, no la del servidor
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -62,36 +53,14 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.colors import LinearSegmentedColormap, to_rgb
 
-try:
-    from . import conclusiones as _conclusiones
-    from . import pdf_util as _pdf_util
-    from . import lateral as _lateral
-    from . import hallazgos as _h
-    from . import estatus as _est
-except ImportError:  # ejecución suelta (Colab)
-    import conclusiones as _conclusiones
-    import pdf_util as _pdf_util
-    import lateral as _lateral
-    import hallazgos as _h
-    import estatus as _est
-
-try:
-    from google.colab import files  # noqa
-    EN_COLAB = True
-except ImportError:
-    EN_COLAB = False
-
-try:
-    from IPython.display import display
-except ImportError:
-    display = print
+from . import conclusiones as _conclusiones
+from . import pdf_util as _pdf_util
+from . import lateral as _lateral
+from . import hallazgos as _h
+from . import estatus as _est
 
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 140)
-
-# reportlab va fijado en requirements.txt; ya no se instala en tiempo de
-# ejecución (eso era herencia de Colab y en un servidor puede colgarse).
-import reportlab  # noqa: F401
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
@@ -102,7 +71,7 @@ from reportlab.platypus import (
     PageBreak, HRFlowable, KeepTogether, Flowable
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY, TA_RIGHT
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
 
@@ -298,35 +267,18 @@ def _color_texto_legible(color_fondo):
 # =======================================================================
 # 3) CARGA DEL ARCHIVO
 # =======================================================================
-def cargar_archivo(ruta_local=None):
-    """
-    Sube (en Colab) o abre (fuera de Colab) el archivo Excel de la
-    bitácora y devuelve (DataFrame, nombre_archivo, nombre_hoja).
-    """
-    if ruta_local:
-        nombre_archivo = ruta_local
-    elif EN_COLAB:
-        print("Sube el archivo Excel de la bitácora de solicitudes...")
-        subido = files.upload()
-        nombre_archivo = list(subido.keys())[0]
-    else:
-        nombre_archivo = input("Ruta del archivo Excel: ").strip()
+def cargar_archivo(ruta_local):
+    """Abre el Excel de la bitácora y devuelve (DataFrame, ruta, nombre_hoja).
 
-    xls = pd.ExcelFile(nombre_archivo)
-    hoja = xls.sheet_names[0]
-    if len(xls.sheet_names) > 1:
-        print(f"El archivo tiene varias hojas: {xls.sheet_names}")
-        if ruta_local:
-            # Con ruta (la app de Streamlit) no hay teclado: input() tronaba
-            # con EOFError. Se usa la primera hoja, igual que los demás reportes.
-            print(f"Se usa la primera: '{hoja}'.")
-        else:
-            elegida = input(f"¿Cuál analizar? (Enter = '{hoja}'): ").strip()
-            hoja = elegida if elegida else hoja
-
-    df = pd.read_excel(nombre_archivo, sheet_name=hoja)
-    print(f"Archivo cargado: {nombre_archivo}  |  Hoja: {hoja}  |  {len(df)} solicitudes\n")
-    return df, nombre_archivo, hoja
+    Con varias hojas se usa la primera, igual que los demás reportes.
+    """
+    with pd.ExcelFile(ruta_local) as xls:
+        hoja = xls.sheet_names[0]
+        if len(xls.sheet_names) > 1:
+            print(f"El archivo tiene varias hojas: {xls.sheet_names}. Se usa la primera: '{hoja}'.")
+        df = xls.parse(hoja)
+    print(f"Archivo cargado: {ruta_local}  |  Hoja: {hoja}  |  {len(df)} solicitudes\n")
+    return df, ruta_local, hoja
 
 
 # =======================================================================
@@ -1235,7 +1187,7 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
         filas_d = []
         for _, fila in df_det.iterrows():
             f = []
-            for col, _, alineacion in cols_detalle:
+            for col, _, _alineacion in cols_detalle:
                 valor = fila[col]
                 if col == "Monto Total a Financiar":
                     f.append(f"${valor:,.0f}" if pd.notna(valor) else "—")
@@ -1362,81 +1314,3 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     elementos[:] = _pdf_util.pulir(_pdf_util.quitar_espacios_antes_de_salto(elementos))
     _pdf_util.construir_con_lateral(doc, elementos, encabezado_pie_pagina)
     return nombre_archivo
-
-
-# =======================================================================
-# 9) FLUJO PRINCIPAL
-# =======================================================================
-def main(ruta_local=None, mes_anio=None, vendedores_incluir=None):
-    """
-    ruta_local: ruta del Excel a usar fuera de Colab (si es None y estás
-    en Colab, te pedirá subirlo).
-    mes_anio: opcional, para forzar el mes/año del reporte, ej. "agosto 2026".
-    vendedores_incluir: opcional, lista de nombres para generar el PDF
-    solo de esos vendedores (por defecto, genera el de TODOS).
-    """
-    df_crudo, nombre_archivo_origen, hoja = cargar_archivo(ruta_local=ruta_local)
-    df = limpiar_datos(df_crudo)
-    ctx_mes = contexto_mensual(mes_anio=mes_anio, hoja_nombre=hoja)
-
-    if "Nombre del Vendedor" not in df.columns:
-        raise ValueError("No se encontró la columna 'Nombre del Vendedor' en el archivo.")
-
-    tabla_vendedor = analisis_por_vendedor(df)
-    resumen_eq = resumen_equipo(df, tabla_vendedor)
-
-    print("=" * 72)
-    print(f" RESUMEN MENSUAL POR VENDEDOR — {ctx_mes['nombre_mes'].capitalize()} {ctx_mes['anio']}")
-    print("=" * 72)
-    display(tabla_vendedor)
-
-    vendedores = sorted(df["Nombre del Vendedor"].dropna().unique().tolist())
-    if vendedores_incluir:
-        solicitados = {str(v).strip().title() for v in vendedores_incluir}
-        no_encontrados = solicitados - set(vendedores)
-        if no_encontrados:
-            print(f"Aviso: estos vendedores no están en el archivo y se omiten: {sorted(no_encontrados)}")
-        vendedores = [v for v in vendedores if v in solicitados]
-
-    if not vendedores:
-        print("No hay vendedores que procesar con los filtros indicados.")
-        return df, []
-
-    rutas_generadas = []
-    for vendedor in vendedores:
-        resumen_v = analisis_individual(df, vendedor, tabla_vendedor, resumen_eq)
-        rutas_graficas = generar_graficas_vendedor(df, resumen_v["df"], vendedor)
-        ruta_pdf = generar_reporte_pdf_vendedor(
-            vendedor, resumen_v, tabla_vendedor, resumen_eq, ctx_mes, rutas_graficas
-        )
-        rutas_generadas.append(ruta_pdf)
-        print(f"  ✓ PDF generado: {ruta_pdf}")
-
-    # -------------------------------------------------------------
-    # Empaquetar todos los PDFs en un solo ZIP para descargar de un jalón
-    # -------------------------------------------------------------
-    nombre_zip = f"Resumenes_Mensuales_{ctx_mes['nombre_mes']}_{ctx_mes['anio']}.zip"
-    with zipfile.ZipFile(nombre_zip, "w") as zf:
-        for ruta in rutas_generadas:
-            zf.write(ruta, arcname=os.path.basename(ruta))
-
-    print("=" * 72)
-    print(f" Se generaron {len(rutas_generadas)} reportes individuales.")
-    print(f" Empaquetados en: {nombre_zip}")
-    print("=" * 72)
-
-    # Las gráficas ya quedaron incrustadas en los PDFs: se borra la carpeta
-    # temporal para no dejar basura acumulándose entre corridas de Colab.
-    shutil.rmtree(CARPETA_GRAFICAS, ignore_errors=True)
-    os.makedirs(CARPETA_GRAFICAS, exist_ok=True)
-
-    if EN_COLAB:
-        files.download(nombre_zip)
-    else:
-        print(f"Archivos guardados en la carpeta: {CARPETA_PDFS}/  y en: {nombre_zip}")
-
-    return df, rutas_generadas
-
-
-if __name__ == "__main__":
-    main()

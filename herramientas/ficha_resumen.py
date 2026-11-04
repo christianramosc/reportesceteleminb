@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """FICHA DE UNA PÁGINA (imagen PNG) — para WhatsApp y para correo
 
 El PDF tiene 6 a 10 páginas: está bien para quien quiere el detalle, pero
@@ -38,31 +37,19 @@ import math
 import re
 import textwrap
 import unicodedata
-from datetime import date
-try:
-    from . import fechas as _fechas   # hora de México, no la del servidor
-except ImportError:  # ejecución suelta (Colab)
-    import fechas as _fechas
+from . import fechas as _fechas   # hora de México, no la del servidor
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, FancyBboxPatch, Polygon, Rectangle, Wedge
 
-try:
-    from . import conclusiones as _c
-    from . import estatus as _est
-    from . import hallazgos as _h
-    from . import iconos as _iconos_pdf      # reglas para elegir icono por etiqueta
-    from . import lateral as _lateral
-    from .iconos_mpl import dibujar_icono
-except ImportError:  # ejecución suelta (Colab)
-    import conclusiones as _c
-    import estatus as _est
-    import hallazgos as _h
-    import iconos as _iconos_pdf
-    import lateral as _lateral
-    from iconos_mpl import dibujar_icono
+from . import conclusiones as _c
+from . import estatus as _est
+from . import hallazgos as _h
+from . import iconos as _iconos_pdf      # reglas para elegir icono por etiqueta
+from . import lateral as _lateral
+from .iconos_mpl import dibujar_icono
 
 
 # =======================================================================

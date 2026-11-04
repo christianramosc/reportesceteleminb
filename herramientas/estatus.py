@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 CATÁLOGO CENTRAL DE ESTATUS  —  fuente única de verdad para los 3 reportes.
 
@@ -511,11 +510,6 @@ def descripcion(clave):
 def claves_por_grupo(*grupos):
     """Claves del catálogo (más las detectadas) que pertenecen a esos grupos."""
     return [c for c in ORDEN_CATEGORIAS if GRUPO_CATEGORIA.get(c, ABIERTA) in grupos]
-
-
-def lista_etiquetas(claves, separador=" / "):
-    """'Financiado / Aprobado / En proceso' — para títulos de gráficas."""
-    return separador.join(etiqueta(c) for c in claves)
 
 
 def frase_enumerada(claves, y="y", mayusculas=False):

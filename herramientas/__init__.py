@@ -1,18 +1,17 @@
-# -*- coding: utf-8 -*-
 """
 Registro central de herramientas de la app.
 
 Cómo agregar un nuevo script más adelante (sin tocar streamlit_app.py):
 
-  1. Copia tu script .py (el que ya usas en Colab) a esta carpeta,
-     tal cual, con un guard `if __name__ == "__main__": main()` al final
-     y una función `main(ruta_local=..., **lo_que_necesites)` como punto
-     de entrada (igual que avance_preliminar_original.py y
-     comparativo_mensual_original.py).
+  1. Copia tu script .py a esta carpeta. Sus funciones deben recibir la
+     ruta del archivo como parámetro (sin files.upload() ni input(): en el
+     servidor no hay a quién preguntarle) y usar imports relativos
+     (`from . import estatus`), igual que avance_preliminar_original.py.
 
   2. Crea un archivo herramienta_tu_script.py en esta misma carpeta con:
        - una función ejecutar(rutas_archivos, carpeta_salida="salida", **opciones) -> list[str]
-         que llame a tu main() y regrese la ruta del/los archivo(s) generado(s)
+         que llame a las funciones de tu script y regrese la ruta del/los
+         archivo(s) generado(s)
        - un objeto HERRAMIENTA = Herramienta(id=..., nombre=..., descripcion=...,
          multiple_archivos=..., tipos_permitidos=[...], ejecutar=ejecutar)
      (usa herramienta_avance_preliminar.py como plantilla — es el más simple)

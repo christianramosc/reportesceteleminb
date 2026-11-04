@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Pruebas de la ficha de una página (PNG para WhatsApp)."""
 
 import contextlib

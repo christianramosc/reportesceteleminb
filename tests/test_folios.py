@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Pruebas de herramientas/folios.py: folios que aparecen en varios meses."""
 import pandas as pd
 

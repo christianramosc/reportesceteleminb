@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Iconos de la columna lateral y de las barras de sección.
 
 Los SVG son de Lucide (https://lucide.dev), licencia ISC: uso libre con el

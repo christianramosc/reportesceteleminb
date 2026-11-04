@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Pruebas del validador de CSF.
 
@@ -292,7 +291,7 @@ def _variantes(src, carpeta):
     salida["rasterizada"] = os.path.join(carpeta, "rasterizada.pdf")
 
     p = pikepdf.open(src)
-    for nombre, xo in p.pages[0].Resources.XObject.items():
+    for xo in p.pages[0].Resources.XObject.values():
         if int(xo.get("/Width", 0)) == 150:
             qr = zxing_qr("https://siat-sat-gob.mx" + v.RUTA_QR + "?D1=10&D2=1&D3=1_X")
             xo.write(zlib.compress(qr.tobytes()), filter=pikepdf.Name.FlateDecode)

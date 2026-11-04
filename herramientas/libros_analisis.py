@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Libros de Excel con las tablas de cada reporte, en fórmulas vivas.
 
 Hay dos constructores porque hay dos formas de reporte:
@@ -21,7 +20,6 @@ from .exportador_excel import (FMT_ENTERO, FMT_MONEDA, FMT_PORCENTAJE,
 COL_VENDEDOR = "Nombre del Vendedor"
 COL_CATEGORIA = "Categoria"
 COL_MONTO = "Monto Total a Financiar"
-COL_PRECIO = "Precio Venta (c/IVA)"
 COL_VEHICULO = "Vehículo"
 COL_MES = "Mes"
 COL_GAP = "¿Tiene GAP?"
@@ -342,7 +340,7 @@ def libro_comparativo(df_combinado, orden_meses, ruta, titulo, fuente_datos):
         for i, vendedor in enumerate(vendedores):
             f = 4 + i
             fila = [vendedor]
-            for k, mes in enumerate(orden_meses):
+            for mes in orden_meses:
                 fila.append(f'=COUNTIFS({r_vend},$A{f},{r_mes_vend},"{mes}"{fp})')
             primera = "B"
             ultima_mes = chr(ord("B") + len(meses) - 1)

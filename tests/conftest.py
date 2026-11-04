@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Piezas compartidas por las pruebas.
 
@@ -8,7 +7,6 @@ máquina, no dependen de datos de clientes y los totales son conocidos de
 antemano (que es lo que permite verificar los cálculos).
 """
 
-import os
 import random
 
 import matplotlib

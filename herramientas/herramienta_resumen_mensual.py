@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Adaptador de resumen_mensual_original.py (Resumen Mensual / cierre de mes) para el registro."""
 
 import os
@@ -37,7 +36,8 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
     tabla_categoria = _resumen.analisis_financiero_por_categoria(df)
 
     # Nombre corto: Resumen_Jul26 (+ .pdf, .docx, _datos.xlsx, fichas)
-    hoja = pd.ExcelFile(rutas_archivos[0]).sheet_names[0]
+    with pd.ExcelFile(rutas_archivos[0]) as xls:
+        hoja = xls.sheet_names[0]
     base = f"Resumen_{_nombres.periodo_corto(hoja)}"
     ruta_pdf = os.path.join(carpeta_salida, f"{base}.pdf")
 

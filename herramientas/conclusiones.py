@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Conclusiones y focos de atención de los cuatro reportes.
 
 Por qué existe este módulo
@@ -34,10 +33,7 @@ import re
 
 import pandas as pd
 
-try:
-    from . import estatus as _est
-except ImportError:  # ejecución suelta (Colab)
-    import estatus as _est
+from . import estatus as _est
 
 # ---------------------------------------------------------------- umbrales
 # Si (máximo - mínimo) / promedio del volumen mensual queda por debajo de

@@ -1,0 +1,35 @@
+# Configuración de ruff (revisa el código sin ejecutarlo). Lo corre GitHub
+# Actions en cada push (.github/workflows/pruebas.yml) y lo puedes correr
+# tú antes de subir cambios:
+#
+#     ruff check .
+#
+# Las reglas son las que el código cumple HOY: si alguna marca error, es
+# algo nuevo que se coló, no deuda vieja.
+
+[tool.ruff]
+target-version = "py311"
+# El Modelo de datos está oculto en la app y se queda como está por ahora.
+extend-exclude = [
+    "herramientas/modelo_datos.py",
+    "herramientas/modelo_datos_excel.py",
+    "herramientas/herramienta_modelo_datos.py",
+]
+
+[tool.ruff.lint]
+# E4/E7/E9 + F: los errores reales (imports y variables sin usar, nombres
+# indefinidos, sintaxis). B: errores típicos (variables de ciclo sin usar,
+# lambdas dentro de ciclos). W: espacios y saltos de línea.
+select = ["E4", "E7", "E9", "F", "B", "W"]
+ignore = [
+    "E402",   # imports después de código: matplotlib.use("Agg") va antes de pyplot
+    "E731",   # lambdas cortas asignadas a una variable, usadas como atajo de formato
+    "E741",   # nombres como l o I en comprensiones cortas
+    "B905",   # zip(..., strict=): agregarlo cambiaría qué pasa con listas disparejas
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Avance y Resumen importan con * todo lo que comparten en reporte_base.py
+# (ver su __all__): por diseño, ruff no puede saber de dónde viene cada nombre.
+"herramientas/avance_preliminar_original.py" = ["F403", "F405"]
+"herramientas/resumen_mensual_original.py" = ["F403", "F405"]

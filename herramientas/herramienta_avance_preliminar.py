@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Adaptador de avance_preliminar_original.py (Avance Preliminar Mensual) para el registro."""
 
 import os
@@ -37,14 +36,14 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
     tabla_vendedor = _avance.analisis_por_vendedor(df)
     tabla_categoria = _avance.analisis_financiero_por_categoria(df)
     ctx = _avance.contexto_de_corte(fecha_corte)
-    rutas_graficas = _avance.generar_graficas_para_pdf(df)
 
     # El nombre de la hoja ("JULIO 2026") es la única pista del mes al que
     # pertenecen los datos. Se usa para advertir si la fecha de corte cae en
     # otro mes (sin esto, correr el avance sobre un mes ya cerrado afirmaba
     # "quedan 10 días para el cierre") y para nombrar los archivos.
     try:
-        hoja = pd.ExcelFile(rutas_archivos[0]).sheet_names[0]
+        with pd.ExcelFile(rutas_archivos[0]) as xls:
+            hoja = xls.sheet_names[0]
     except Exception:
         hoja = None
 

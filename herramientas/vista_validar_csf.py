@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Resultado de "Validar CSF" dibujado en la página (sin descargar el PDF).
 
 Recibe la lista de resumen_dict() de validar_csf.py, uno por constancia:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Estilos visuales de la app.
 
 Está aparte de streamlit_app.py a propósito: el CSS es largo y no tiene

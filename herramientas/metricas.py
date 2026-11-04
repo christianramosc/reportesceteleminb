@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Cálculos que comparten varias gráficas de distintos reportes.
 
 Existe para que dos reportes que dibujan "lo mismo" no calculen cada uno a

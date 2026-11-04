@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 TRADUCTOR PDF -> WORD
 
@@ -132,21 +131,6 @@ def _sombrear(celda, hex_color):
         qn("w:shd"), {qn("w:val"): "clear", qn("w:fill"): hex_color}
     )
     tc_pr.append(sombra)
-
-
-def _sin_bordes(tabla):
-    """Quita los bordes de una tabla que solo sirve de maquetación (las
-    tarjetas KPI y el recuadro de introducción)."""
-    tbl_pr = tabla._tbl.tblPr
-    bordes = tbl_pr.makeelement(qn("w:tblBorders"), {})
-    for lado in ("top", "left", "bottom", "right", "insideH", "insideV"):
-        elemento = bordes.makeelement(qn(f"w:{lado}"), {qn("w:val"): "none"})
-        bordes.append(elemento)
-    tbl_pr.append(bordes)
-
-
-def _es_flowable(objeto, nombre_clase):
-    return type(objeto).__name__ == nombre_clase
 
 
 def _nombre_estilo(flowable):

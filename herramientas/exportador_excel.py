@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Construcción de los libros de Excel que acompañan a cada reporte.
 
 Idea de fondo
