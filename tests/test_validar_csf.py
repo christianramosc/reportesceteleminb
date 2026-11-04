@@ -161,6 +161,39 @@ def test_comparacion_tolerante_a_ocr(leido, exacto, esperado):
     assert csf_escaneo.comparar(leido, exacto) == esperado
 
 
+def _clave_de(funcion):
+    """_candado_3_10_sello_digital -> "3.10"."""
+    seccion, numero = funcion.__name__.split("_")[2:4]
+    return f"{seccion}.{numero}"
+
+
+def test_cada_candado_vive_en_su_propia_funcion(tmp_path):
+    """Cada función agrega a lo más SU candado (el de su nombre), y no hay
+    dos funciones para el mismo. Así, cambiar uno no mueve los demás."""
+    funciones = (v.CANDADOS_ESTRUCTURA + v.CANDADOS_CODIGOS
+                 + v.CANDADOS_DATOS + v.CANDADOS_POLITICAS)
+    claves = [_clave_de(f) for f in funciones]
+    assert len(claves) == len(set(claves))
+    assert {int(c.split(".")[0]) for c in claves} == {1, 2, 3, 4}
+
+    info = v._extraer_pdf(_fabricada(str(tmp_path / "f.pdf")))
+    d = v._extraer_datos(info)
+    qr1 = v.parse_qr_sat(f"https://{v.DOMINIO_QR}{v.RUTA_QR}?D1=10&D2=1&D3=1_{d['rfc']}")
+    codigos = v._Codigos(d["rfc"], [qr1["url"]], [d["rfc"]], [qr1], qr1, None, [])
+    info["render_codigos"] = []
+    for funcion in funciones:
+        agregados = []
+        add = lambda clave, *resto, _a=agregados: _a.append(clave)   # noqa: E731
+        if funcion in v.CANDADOS_ESTRUCTURA:
+            funcion(info, add)
+        elif funcion in v.CANDADOS_CODIGOS:
+            funcion(codigos, info, d, add, False)
+        else:
+            funcion(d, add, HOY)
+        assert set(agregados) <= {_clave_de(funcion)}, funcion.__name__
+        assert len(agregados) <= 1, funcion.__name__
+
+
 def test_adaptador_genera_un_pdf_por_archivo(tmp_path):
     entrada = _fabricada(str(tmp_path / "0_cliente.pdf"))
     res = ejecutar([entrada], carpeta_salida=str(tmp_path / "salida"))
