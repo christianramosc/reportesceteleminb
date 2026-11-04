@@ -5,29 +5,33 @@ maxUploadSize = 200
 # Oculta "Deploy" y el menú de desarrollador: quien usa la app no los necesita.
 toolbarMode = "minimal"
 
-# Tema claro con la paleta "zinc" de shadcn/ui y su variante roja para la
-# acción principal. El CSS de ui_estilos.py usa los mismos valores.
+# Tema oscuro con tres colores: Midnight Black (fondo), Electric Blue
+# (selección, pasos y detalles) y Cantaloupe Orange (la acción principal).
+# El CSS de ui_estilos.py usa los mismos valores.
 [theme]
-base = "light"
-primaryColor = "#DC2626"
-backgroundColor = "#FAFAFA"
-secondaryBackgroundColor = "#F4F4F5"
-textColor = "#09090B"
-borderColor = "#E4E4E7"
+base = "dark"
+primaryColor = "#FC734D"
+backgroundColor = "#02070A"
+secondaryBackgroundColor = "#07131B"
+textColor = "#F2F5F7"
+borderColor = "#1C2A33"
 showWidgetBorder = true
-baseRadius = "0.5rem"
-buttonRadius = "0.5rem"
-linkColor = "#09090B"
-font = "Geist:https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap, sans-serif"
-headingFont = "Geist, sans-serif"
-codeFont = "Geist Mono:https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap, monospace"
-codeBackgroundColor = "#F4F4F5"
-redColor = "#DC2626"
-greenColor = "#16A34A"
-yellowColor = "#D97706"
-blueColor = "#2563EB"
+baseRadius = "0.625rem"
+buttonRadius = "full"
+linkColor = "#6CC6F2"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFont = "Instrument Serif:https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap, serif"
+codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap, monospace"
+codeBackgroundColor = "#050E14"
+# FALLA en rojo y AVISO en el naranja de la marca (Validar CSF): se
+# distinguen también por claridad, no solo por tono.
+redColor = "#FF4D5E"
+orangeColor = "#FC734D"
+greenColor = "#34C38F"
+yellowColor = "#F5B54A"
+blueColor = "#0297DE"
 
 [theme.sidebar]
-backgroundColor = "#F4F4F5"
-secondaryBackgroundColor = "#FFFFFF"
-borderColor = "#E4E4E7"
+backgroundColor = "#050E14"
+secondaryBackgroundColor = "#07131B"
+borderColor = "#14212A"
