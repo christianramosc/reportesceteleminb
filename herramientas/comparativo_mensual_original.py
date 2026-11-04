@@ -148,8 +148,6 @@ plt.rcParams.update({
     "legend.frameon":    False,
 })
 
-CARPETA_GRAFICAS = "graficas_temp_comparativo"
-os.makedirs(CARPETA_GRAFICAS, exist_ok=True)
 
 
 # =======================================================================
@@ -991,7 +989,7 @@ def grafica_comp_gap_vs_gap_financiado(tabla_comp, guardar_como=None):
     return guardar_como
 
 
-def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado):
+def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado, carpeta):
     # Vendedores y modelos cuentan cada folio una vez (ver folios.py). Las
     # gráficas por mes no usan df_combinado, así que siguen siendo la foto
     # de cada bitácora.
@@ -1023,7 +1021,7 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
     ]
     rutas = {}
     for clave, funcion, nombre_png in especificaciones:
-        ruta = os.path.join(CARPETA_GRAFICAS, nombre_png)
+        ruta = os.path.join(carpeta, nombre_png)
         try:
             resultado = funcion(ruta)
         except Exception as e:
@@ -1044,7 +1042,7 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
         raise RuntimeError(
             "No se pudo generar ninguna gráfica. Revisa que el archivo traiga "
             "las columnas esperadas (STATUS, Nombre del Vendedor, etc.) y que "
-            f"la carpeta '{CARPETA_GRAFICAS}' se pueda escribir."
+            f"la carpeta '{carpeta}' se pueda escribir."
         )
 
     return rutas
@@ -1065,7 +1063,8 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
 # =======================================================================
 def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
                                      df_combinado, nombre_archivo=None,
-                                     recolectar_elementos=None, datos=None):
+                                     recolectar_elementos=None, datos=None,
+                                     carpeta_graficas=None):
     """datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config."""
     datos = datos or DatosReporte()
     if nombre_archivo is None:
@@ -1078,7 +1077,13 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     print(" GENERANDO REPORTE PDF COMPARATIVO")
     print("=" * 72)
 
-    rutas_graficas = generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado)
+    # Las gráficas van en una carpeta junto al PDF (en la app, dentro del
+    # temporal de la corrida, que se borra al terminar). Antes era una
+    # carpeta fija en la raíz, compartida por todas las corridas.
+    carpeta_graficas = carpeta_graficas or os.path.join(
+        os.path.dirname(os.path.abspath(nombre_archivo)), "graficas")
+    rutas_graficas = generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp,
+                                                   df_combinado, carpeta_graficas)
     lectura, conclusiones_fin = _conclusiones.lectura_y_conclusiones_comparativo(
         tabla_comp, orden_meses, df_combinado)
 

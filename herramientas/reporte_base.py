@@ -152,7 +152,6 @@ __all__ = [
     "secciones_detalladas",
     "crear_estilos",
     "crear_maquetadores",
-    "CARPETA_GRAFICAS",
     "COLUMNAS_ESPERADAS",
     "COLUMNAS_MONEDA",
     "COLUMNAS_PORCENTAJE",
@@ -308,8 +307,6 @@ plt.rcParams.update({
 })
 
 # Carpeta temporal para las imágenes de las gráficas que se insertarán en el PDF
-CARPETA_GRAFICAS = "graficas_temp_bitacora"
-os.makedirs(CARPETA_GRAFICAS, exist_ok=True)
 
 
 # =======================================================================
@@ -1216,8 +1213,8 @@ def grafica_gap_financiado_por_vendedor(df, guardar_como=None):
     plt.close(fig)
     return guardar_como
 
-def generar_graficas_para_pdf(df):
-    """Genera todas las gráficas guardándolas como PNG en CARPETA_GRAFICAS,
+def generar_graficas_para_pdf(df, carpeta):
+    """Genera todas las gráficas guardándolas como PNG en `carpeta`,
     listas para incrustarse en el reporte narrativo. Devuelve un diccionario
     {clave: ruta_png} solo con las gráficas que sí se pudieron generar
     (si falta una columna o no hay datos, esa clave simplemente no aparece)."""
@@ -1242,7 +1239,7 @@ def generar_graficas_para_pdf(df):
     ]
     rutas = {}
     for clave, funcion, nombre_archivo in especificaciones:
-        ruta = os.path.join(CARPETA_GRAFICAS, nombre_archivo)
+        ruta = os.path.join(carpeta, nombre_archivo)
         resultado = funcion(df, guardar_como=ruta)
         plt.close("all")
         if resultado:
@@ -1257,7 +1254,7 @@ def generar_graficas_para_pdf(df):
         raise RuntimeError(
             "No se pudo generar ninguna gráfica. Revisa que el archivo traiga "
             "las columnas esperadas (STATUS, Nombre del Vendedor, etc.) y que "
-            f"la carpeta '{CARPETA_GRAFICAS}' se pueda escribir."
+            f"la carpeta '{carpeta}' se pueda escribir."
         )
 
     return rutas

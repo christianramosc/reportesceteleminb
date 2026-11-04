@@ -127,9 +127,9 @@ def _procesar(herramienta, archivos_subidos, opciones):
         return archivos, log, resumen
     finally:
         aviso_fila.empty()
+        # Se lleva también las gráficas: cada reporte las dibuja dentro de
+        # esta carpeta, junto a su PDF.
         shutil.rmtree(carpeta, ignore_errors=True)
-        # Las gráficas intermedias (graficas_temp_*) las borra
-        # ejecutar_aislado() antes de soltar el candado.
 
 
 def _vista_previa(archivos_subidos):

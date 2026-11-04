@@ -6,10 +6,8 @@ verifican lo que el usuario final recibe.
 """
 
 import contextlib
-import glob
 import io
 import os
-import shutil
 
 import pytest
 
@@ -19,13 +17,6 @@ from herramientas import avance_preliminar_original as avance
 
 def _herramienta(identificador):
     return next(h for h in REGISTRO if h.id == identificador)
-
-
-def _limpiar_temporales_como_la_app():
-    """Reproduce la limpieza que hace streamlit_app.py después de cada
-    corrida. Es indispensable para que la prueba refleje la realidad."""
-    for carpeta in glob.glob("graficas_temp_*"):
-        shutil.rmtree(carpeta, ignore_errors=True)
 
 
 def _contar_imagenes(ruta_pdf):
@@ -48,10 +39,7 @@ def _ejecutar(identificador, bitacora, destino):
 @pytest.mark.parametrize("identificador", IDS_REPORTES)
 def test_genera_pdf_y_word(identificador, bitacora_excel, tmp_path):
     destino = str(tmp_path / identificador)
-    try:
-        rutas = _ejecutar(identificador, bitacora_excel, destino)
-    finally:
-        _limpiar_temporales_como_la_app()
+    rutas = _ejecutar(identificador, bitacora_excel, destino)
 
     extensiones = sorted(os.path.splitext(r)[1] for r in rutas)
     assert extensiones == [".docx", ".pdf", ".png", ".png", ".xlsx"], f"{identificador} -> {rutas}"
@@ -71,10 +59,7 @@ def test_el_libro_lleva_datos_y_formulas(identificador, bitacora_excel, tmp_path
     from openpyxl import load_workbook
 
     destino = str(tmp_path / identificador)
-    try:
-        rutas = _ejecutar(identificador, bitacora_excel, destino)
-    finally:
-        _limpiar_temporales_como_la_app()
+    rutas = _ejecutar(identificador, bitacora_excel, destino)
 
     xlsx = next(r for r in rutas if r.endswith(".xlsx"))
     wb = load_workbook(xlsx)
@@ -99,10 +84,7 @@ def test_el_pdf_lleva_graficas(identificador, bitacora_excel, tmp_path):
     """Un PDF sin gráficas se ve normal pero está mutilado: hay que exigir
     que las traiga, no solo que el archivo exista."""
     destino = str(tmp_path / identificador)
-    try:
-        rutas = _ejecutar(identificador, bitacora_excel, destino)
-    finally:
-        _limpiar_temporales_como_la_app()
+    rutas = _ejecutar(identificador, bitacora_excel, destino)
 
     pdf = next(r for r in rutas if r.endswith(".pdf"))
     assert _contar_imagenes(pdf) >= 5
@@ -121,10 +103,7 @@ def test_dos_corridas_seguidas_en_el_mismo_proceso(identificador, bitacora_excel
     imagenes = []
     for vuelta in (1, 2):
         destino = str(tmp_path / f"{identificador}_{vuelta}")
-        try:
-            rutas = _ejecutar(identificador, bitacora_excel, destino)
-        finally:
-            _limpiar_temporales_como_la_app()
+        rutas = _ejecutar(identificador, bitacora_excel, destino)
         pdf = next(r for r in rutas if r.endswith(".pdf"))
         imagenes.append(_contar_imagenes(pdf))
 
@@ -135,19 +114,26 @@ def test_dos_corridas_seguidas_en_el_mismo_proceso(identificador, bitacora_excel
 def test_sigue_funcionando_con_los_estatus_originales(bitacora_clasica_excel, tmp_path):
     """Al ampliar el catálogo a 14 estatus, una bitácora vieja de 4 debe
     seguir generando su reporte igual."""
-    try:
-        rutas = _ejecutar("avance_preliminar", bitacora_clasica_excel, str(tmp_path))
-    finally:
-        _limpiar_temporales_como_la_app()
+    rutas = _ejecutar("avance_preliminar", bitacora_clasica_excel, str(tmp_path))
     assert len(rutas) == 5   # PDF, Word, libro de análisis y las dos fichas PNG
 
 
-def test_avisa_si_no_puede_generar_ninguna_grafica():
+def test_avisa_si_no_puede_generar_ninguna_grafica(tmp_path):
     """Antes se armaba un PDF completo sin una sola gráfica y sin error."""
     import pandas as pd
     df = pd.DataFrame({"Folio CCK": ["A", "B"], "Otro": [1, 2]})
     with contextlib.redirect_stdout(io.StringIO()):
         limpio = avance.limpiar_datos(df)
         with pytest.raises(RuntimeError, match="ninguna gráfica"):
-            avance.generar_graficas_para_pdf(limpio)
-    _limpiar_temporales_como_la_app()
+            avance.generar_graficas_para_pdf(limpio, str(tmp_path))
+
+
+@pytest.mark.parametrize("identificador", IDS_REPORTES)
+def test_no_deja_nada_en_la_carpeta_de_la_app(identificador, bitacora_excel, tmp_path):
+    """Las gráficas llevan nombres de vendedores. Antes se escribían en
+    carpetas fijas junto a la app (graficas_temp_*) que compartían todas las
+    corridas; ahora van dentro de la carpeta de cada corrida."""
+    antes = set(os.listdir("."))
+    _ejecutar(identificador, bitacora_excel, str(tmp_path / "salida"))
+    assert set(os.listdir(".")) - antes == set()
+    assert os.path.isdir(tmp_path / "salida" / "graficas")

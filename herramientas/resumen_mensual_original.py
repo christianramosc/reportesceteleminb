@@ -18,6 +18,7 @@ from . import lateral as _lateral
 from .config import DatosReporte
 
 from . import fechas as _fechas   # hora de México, no la del servidor
+import os
 
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.pagesizes import letter
@@ -29,7 +30,8 @@ from reportlab.platypus import (
 
 
 def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
-                                nombre_archivo=None, recolectar_elementos=None, datos=None):
+                                nombre_archivo=None, recolectar_elementos=None, datos=None,
+                                carpeta_graficas=None):
     """
     Arma el reporte narrativo completo: portada con KPIs, resumen ejecutivo
     redactado, reporte detallado por sección (con tablas y gráficas) y
@@ -48,7 +50,12 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     print(" GENERANDO REPORTE PDF NARRATIVO")
     print("=" * 72)
 
-    rutas_graficas = generar_graficas_para_pdf(df)
+    # Las gráficas van en una carpeta junto al PDF (en la app, dentro del
+    # temporal de la corrida, que se borra al terminar). Antes era una
+    # carpeta fija en la raíz, compartida por todas las corridas.
+    carpeta_graficas = carpeta_graficas or os.path.join(
+        os.path.dirname(os.path.abspath(nombre_archivo)), "graficas")
+    rutas_graficas = generar_graficas_para_pdf(df, carpeta_graficas)
 
     # -------------------------------------------------------------
     # Estilos

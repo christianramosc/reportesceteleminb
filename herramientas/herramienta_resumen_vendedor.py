@@ -22,13 +22,11 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
 
     os.makedirs(carpeta_salida, exist_ok=True)
 
-    # Toda la salida se reapunta al temporal de esta corrida: los PDFs
-    # llevan nombre de vendedor y detalle de clientes, y no tienen por qué
-    # sobrevivir a la descarga.
+    # Toda la salida va al temporal de esta corrida: los PDFs llevan nombre
+    # de vendedor y detalle de clientes, y no tienen por qué sobrevivir a la
+    # descarga.
     carpeta_pdfs = os.path.join(carpeta_salida, "reportes_por_vendedor")
-    carpeta_graficas = os.path.join(carpeta_salida, "graficas_temp_resumen_vendedor")
-    _rv.CARPETA_PDFS = carpeta_pdfs
-    _rv.CARPETA_GRAFICAS = carpeta_graficas
+    carpeta_graficas = os.path.join(carpeta_salida, "graficas")
     os.makedirs(carpeta_pdfs, exist_ok=True)
     os.makedirs(carpeta_graficas, exist_ok=True)
 
@@ -65,7 +63,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
     rutas_pdf = []
     for vendedor in vendedores:
         resumen_v = _rv.analisis_individual(df, vendedor, tabla_vendedor, resumen_eq)
-        graficas = _rv.generar_graficas_vendedor(df, resumen_v["df"], vendedor)
+        graficas = _rv.generar_graficas_vendedor(df, resumen_v["df"], vendedor, carpeta_graficas)
         # Dentro del ZIP: "Jessica Elizabeth Machuca Roque - Septiembre 2026.pdf"
         nombre_pdf = _nombres.seguro(f"{vendedor} - {mes_largo}") + ".pdf"
         ruta = _rv.generar_reporte_pdf_vendedor(

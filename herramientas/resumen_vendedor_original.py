@@ -159,15 +159,6 @@ MARGEN_IZQ = 2.4 * cm   # igual que pdf_util.MARGEN
 MARGEN_DER = 2.4 * cm
 ANCHO_UTIL = letter[0] - MARGEN_IZQ - MARGEN_DER   # ≈ 18.6 cm
 
-# Estas dos rutas las REAPUNTA herramienta_resumen_vendedor.py al
-# directorio temporal de cada corrida. No se crean al importar: en un
-# servidor compartido eso dejaría PDFs con nombres de clientes en el
-# directorio de trabajo, sobreviviendo entre sesiones.
-# Se leen en tiempo de ejecución (dentro de las funciones), así que
-# reasignarlas desde fuera basta para redirigir toda la salida.
-CARPETA_GRAFICAS = "graficas_temp_resumen_vendedor"
-CARPETA_PDFS = "reportes_por_vendedor"
-
 plt.rcParams.update({
     "figure.facecolor":  "white",
     "axes.facecolor":    "white",
@@ -712,15 +703,16 @@ def grafica_modelos_vendedor(df_v, vendedor, guardar_como=None):
     return guardar_como
 
 
-def generar_graficas_vendedor(df_total, df_v, vendedor):
+def generar_graficas_vendedor(df_total, df_v, vendedor, carpeta):
+    """Gráficas del vendedor, como PNG en `carpeta` (la de la corrida)."""
     # Se vuelve a repartir con el equipo completo por si otra herramienta
     # cambió los colores entre la limpieza y las gráficas (Streamlit).
     if "Categoria" in df_total.columns:
         _est.asignar_colores(df_total["Categoria"])
     especificaciones = [
-        ("dona_status", lambda: grafica_dona_status_vendedor(df_v, vendedor, os.path.join(CARPETA_GRAFICAS, f"dona_{_slug(vendedor)}.png"))),
-        ("equipo_destacado", lambda: grafica_equipo_destacado(df_total, vendedor, os.path.join(CARPETA_GRAFICAS, f"equipo_{_slug(vendedor)}.png"))),
-        ("modelos", lambda: grafica_modelos_vendedor(df_v, vendedor, os.path.join(CARPETA_GRAFICAS, f"modelos_{_slug(vendedor)}.png"))),
+        ("dona_status", lambda: grafica_dona_status_vendedor(df_v, vendedor, os.path.join(carpeta, f"dona_{_slug(vendedor)}.png"))),
+        ("equipo_destacado", lambda: grafica_equipo_destacado(df_total, vendedor, os.path.join(carpeta, f"equipo_{_slug(vendedor)}.png"))),
+        ("modelos", lambda: grafica_modelos_vendedor(df_v, vendedor, os.path.join(carpeta, f"modelos_{_slug(vendedor)}.png"))),
     ]
     rutas = {}
     for clave, funcion in especificaciones:
@@ -855,9 +847,7 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     total_v = resumen_v["total"]
 
     if nombre_archivo is None:
-        nombre_archivo = os.path.join(
-            CARPETA_PDFS, f"Resumen_Mensual_{_slug(vendedor)}_{ctx_mes['nombre_mes']}_{ctx_mes['anio']}.pdf"
-        )
+        nombre_archivo = f"Resumen_Mensual_{_slug(vendedor)}_{ctx_mes['nombre_mes']}_{ctx_mes['anio']}.pdf"
 
     MES_TITULO = f"{ctx_mes['nombre_mes'].capitalize()} {ctx_mes['anio']}"
 
