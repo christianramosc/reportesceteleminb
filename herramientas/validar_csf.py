@@ -37,6 +37,16 @@ Uso
 - En la app de Streamlit: pestaña "Validar CSF".
 - En la terminal: python -m herramientas.validar_csf csf1.pdf csf2.pdf
 - Por código: analisis = analizar_csf("csf.pdf");  generar_pdf(analisis, "salida.pdf")
+
+Cómo está organizado
+--------------------
+Cada candado es UNA función, _candado_<sección>_<número>_<nombre>, que
+agrega solo su propio resultado. Las listas CANDADOS_ESTRUCTURA,
+CANDADOS_CODIGOS, CANDADOS_DATOS y CANDADOS_POLITICAS dicen cuáles corren y
+en qué orden. Para cambiar un candado se toca solo su función; para agregar
+uno, se escribe la función y se pone en la lista de su sección. Los de la
+sección 2 comparten lo que se leyó de los códigos (_Codigos) para no leer
+cada imagen varias veces.
 """
 
 import base64
@@ -53,7 +63,7 @@ import urllib.request
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from . import fechas as _fechas
 
@@ -719,18 +729,12 @@ def _extraer_datos(info):
 # ===========================================================================
 #  LOS CANDADOS
 # ===========================================================================
-def _candados_estructura(info, add):
-    """SECCIÓN 1 — El archivo mismo. Detecta que el PDF NO salió tal cual del
-    SAT: que se editó, se volvió a guardar, se imprimió a PDF, se armó en
-    otro programa o es una imagen (foto, escaneo, generada con IA)."""
-    crudo = info["crudo"]
-    meta = info["metadatos"]
-    chars = info["caracteres"]
-
+def _candado_1_1_capa_de_texto(info, add):
     # 1.1 — CAPA DE TEXTO. La CSF del SAT es un PDF con texto seleccionable.
     # Una foto, un escaneo, una captura de pantalla o una imagen generada por
     # IA "pegada" en un PDF no trae texto: no hay forma de verificarla
     # técnicamente y es el formato favorito para falsificar.
+    chars = info["caracteres"]
     n_chars = len(chars)
     if n_chars < 200:
         add("1.1", "PDF con capa de texto (no foto ni escaneo)", FALLA,
@@ -742,9 +746,12 @@ def _candados_estructura(info, add):
             f"{n_chars:,} caracteres de texto seleccionable.",
             "Constancias fotografiadas, escaneadas o generadas con IA como imagen.")
 
+
+def _candado_1_2_productor_sat(info, add):
     # 1.2 — PROGRAMA QUE GENERÓ EL PDF. Cada programa deja su firma en el
     # campo /Producer. El SAT usa Oracle XML Publisher. Abrir la CSF en
     # Acrobat/iLovePDF/Word y guardarla, o "Imprimir a PDF", lo reemplaza.
+    meta = info["metadatos"]
     productor = meta.get("/Producer", "")
     if productor.startswith(PRODUCTOR_SAT):
         add("1.2", "Generado por el motor del SAT", OK, f"Productor: {productor}.",
@@ -755,9 +762,13 @@ def _candados_estructura(info, add):
             "este archivo fue creado o re-guardado con otro programa.",
             "Constancias editadas y vueltas a guardar en otro programa.")
 
+
+def _candado_1_3_sin_metadatos_de_edicion(info, add):
     # 1.3 — METADATOS DE EDICIÓN. La CSF original solo trae /Producer: sin
     # autor, título, creador, fechas ni metadatos XMP. Los editores agregan
     # /Creator, /ModDate, /Author, o un bloque XMP con su historial.
+    crudo = info["crudo"]
+    meta = info["metadatos"]
     extras = sorted(k for k in meta if k not in ("/Producer", "/Type"))
     tiene_xmp = b"<x:xmpmeta" in crudo or b"/Metadata" in crudo
     if extras or tiene_xmp:
@@ -770,10 +781,13 @@ def _candados_estructura(info, add):
         add("1.3", "Sin metadatos de edición", OK, "Solo trae el campo Producer, como el original.",
             "Edición con Acrobat, Word, Canva, iLovePDF, navegadores, etc.")
 
+
+def _candado_1_4_una_sola_revision(info, add):
     # 1.4 — UNA SOLA REVISIÓN. Muchos editores no reescriben el PDF: le
     # AGREGAN al final los cambios ("guardado incremental"). El texto viejo
     # sigue adentro y el nuevo se pinta encima. Cada guardado agrega otro
     # "%%EOF" y otro "startxref".
+    crudo = info["crudo"]
     n_eof = crudo.count(b"%%EOF")
     n_xref = crudo.count(b"startxref")
     if n_eof == 1 and n_xref == 1:
@@ -786,6 +800,8 @@ def _candados_estructura(info, add):
             "cambios después de generarse.",
             "Cambios guardados encima del original (guardado incremental).")
 
+
+def _candado_1_5_identificador_pdf(info, add):
     # 1.5 — IDENTIFICADOR DEL DOCUMENTO. El PDF trae un /ID de dos partes:
     # la 1a se fija al crear el archivo y la 2a cambia cada vez que se
     # modifica. En la CSF original ambas son idénticas.
@@ -803,9 +819,12 @@ def _candados_estructura(info, add):
             "Las dos partes del /ID son distintas: el archivo se modificó después de creado.",
             "Archivo modificado después de su creación.")
 
+
+def _candado_1_6_sin_elementos_agregados(info, add):
     # 1.6 — SIN ELEMENTOS AGREGADOS. La CSF solo tiene páginas. Formularios
     # (campos que se rellenan encima), anotaciones (cuadros de texto,
     # sellos, "tachones"), JavaScript o archivos incrustados son añadidos.
+    crudo = info["crudo"]
     raros = [k for k in info["claves_raiz"] if k not in ("/Type", "/Pages")]
     n_anot = sum(p["anotaciones"] for p in info["paginas"])
     peligrosos = [s for s in (b"/JavaScript", b"/JS", b"/OpenAction", b"/EmbeddedFile",
@@ -825,9 +844,12 @@ def _candados_estructura(info, add):
             "Sin anotaciones, formularios, JavaScript ni archivos incrustados.",
             "Texto sobrepuesto con anotaciones o formularios; PDFs con código.")
 
+
+def _candado_1_7_fuentes_de_plantilla(info, add):
     # 1.7 — FUENTES. Para cambiar un dato, el editor necesita una fuente con
     # la que escribir el texto nuevo; casi siempre incrusta una distinta
     # (ArialMT, Calibri, una "Helvetica" incrustada, etc.).
+    chars = info["caracteres"]
     ajenas = set()
     for p in info["paginas"]:
         for base, incrustada in p["fuentes"]:
@@ -847,9 +869,12 @@ def _candados_estructura(info, add):
             "Solo " + ", ".join(sorted(usadas)) + ".",
             "Datos reescritos con un editor de PDF (cambia la fuente).")
 
+
+def _candado_1_8_formato_interno(info, add):
     # 1.8 — FORMATO INTERNO. El SAT genera PDF 1.4 con UN flujo de contenido
     # por página. Las herramientas que "estampan" texto o imágenes encima
     # agregan un segundo flujo a la página.
+    crudo = info["crudo"]
     version = crudo[:8].decode("latin-1", "ignore")
     multiflujo = [i + 1 for i, p in enumerate(info["paginas"]) if p["n_contenidos"] != 1]
     formas = [n for n, (sub, *_r) in info["xobjetos"].items() if sub != "/Image"]
@@ -868,10 +893,13 @@ def _candados_estructura(info, add):
             "PDF-1.4, un flujo de contenido por página, sin objetos estampados.",
             "Texto o imágenes estampados encima del original.")
 
+
+def _candado_1_9_texto_encimado_u_oculto(info, add):
     # 1.9 — TEXTO ENCIMADO U OCULTO. La forma más burda de alterar: tapar el
     # dato con un recuadro blanco y escribir otro encima, o escribir texto
     # sobre texto. Se buscan letras que ocupan el mismo lugar que otras, y
     # texto blanco (invisible) que quedó debajo.
+    chars = info["caracteres"]
     encimados = _caracteres_encimados(chars)
     blancos = [c for c in chars if _es_blanco(c["color"]) and c["texto"].strip()]
     if encimados or blancos:
@@ -889,11 +917,14 @@ def _candados_estructura(info, add):
             "Ninguna letra se dibuja encima de otra ni hay texto invisible.",
             "Datos tapados con un recuadro y reescritos encima.")
 
+
+def _candado_1_10_tipografia_uniforme(info, add):
     # 1.10 — UNIFORMIDAD TIPOGRÁFICA. Aunque el editor use "Helvetica", rara
     # vez atina al tamaño exacto ni a la misma línea base: un "8" cambiado
     # por un "9" queda 0.3 pt más arriba o en tamaño 7.9. Se revisa que
     # cada palabra tenga una sola fuente, un solo tamaño (de los que usa la
     # plantilla) y una línea base recta.
+    chars = info["caracteres"]
     raras = _palabras_irregulares(chars)
     if raras:
         add("1.10", "Tipografía uniforme en cada palabra", FALLA,
@@ -905,6 +936,8 @@ def _candados_estructura(info, add):
             "Cada palabra con una sola fuente, tamaño de plantilla y línea base recta.",
             "Letras o números cambiados uno por uno.")
 
+
+def _candado_1_11_imagenes_y_codigos(info, add):
     # 1.11 — IMÁGENES. La plantilla trae: encabezado, pie, logos, 2 QR de
     # 150×150 px y 1 código de barras de 35 px de alto. Los QR y el código
     # de barras son imágenes generadas (solo blanco y negro puros, sin
@@ -940,6 +973,8 @@ def _candados_estructura(info, add):
             "7 imágenes de plantilla; 2 QR y 1 código de barras nítidos (solo blanco y negro).",
             "QR o código de barras sustituidos; parches de imagen sobre datos.")
 
+
+def _candado_1_13_maquetacion(info, add):
     # 1.13 — MAQUETACIÓN ORIGINAL. Es el candado contra la edición "fina":
     # la que cambia letras dentro del archivo sin dejar rastro en metadatos,
     # fuentes ni /ID. Oracle acomoda el texto UNA vez, con la longitud del
@@ -964,12 +999,41 @@ def _candados_estructura(info, add):
             "Textos centrados exactos y espaciado entre palabras idéntico al del motor del SAT.",
             "Edición fina de texto dentro del PDF (sin rastro en metadatos ni fuentes).")
 
+
+def _candado_1_12_plantilla(info, add):
     # 1.12 — PLANTILLA (informativo). El SAT tiene dos diseños vigentes: el
     # anterior (franja gris) y el de 2026 (franja guinda gob.mx, con Noto
     # Sans en el pie). Ambos son válidos.
+    chars = info["caracteres"]
     nueva = any("Noto Sans" in c["fuente"] for c in chars)
     add("1.12", "Plantilla reconocida", INFO,
         "Diseño gob.mx 2026 (franja guinda)." if nueva else "Diseño anterior (franja gris).", "")
+
+
+# Orden en que se agregan (el reporte los reordena por clave).
+CANDADOS_ESTRUCTURA = (
+    _candado_1_1_capa_de_texto,
+    _candado_1_2_productor_sat,
+    _candado_1_3_sin_metadatos_de_edicion,
+    _candado_1_4_una_sola_revision,
+    _candado_1_5_identificador_pdf,
+    _candado_1_6_sin_elementos_agregados,
+    _candado_1_7_fuentes_de_plantilla,
+    _candado_1_8_formato_interno,
+    _candado_1_9_texto_encimado_u_oculto,
+    _candado_1_10_tipografia_uniforme,
+    _candado_1_11_imagenes_y_codigos,
+    _candado_1_13_maquetacion,
+    _candado_1_12_plantilla,
+)
+
+
+def _candados_estructura(info, add):
+    """SECCIÓN 1 — El archivo mismo. Detecta que el PDF NO salió tal cual del
+    SAT: que se editó, se volvió a guardar, se imprimió a PDF, se armó en
+    otro programa o es una imagen (foto, escaneo, generada con IA)."""
+    for candado in CANDADOS_ESTRUCTURA:
+        candado(info, add)
 
 
 def _es_blanco(color):
@@ -1072,6 +1136,156 @@ def _colores(pil):
         return 0
 
 
+@dataclass
+class _Codigos:
+    """Lo que se leyó de los QR y el código de barras; lo comparten los
+    candados de la sección 2."""
+    rfc: str
+    unicos: list
+    barras: list
+    parsed: list
+    qr1: Optional[dict]
+    qr2: Optional[dict]
+    malos: list
+
+
+def _qr_no_oficiales(parsed):
+    """Direcciones de QR que no son EXACTAMENTE el validador del SAT (2.2;
+    la 2.7 no consulta si hay alguna)."""
+    malos = []
+    for p in parsed:
+        if not p:
+            continue
+        if p["esquema"] != "https" or p["dominio"] != DOMINIO_QR or p["ruta"] != RUTA_QR:
+            pista = next((f" [{q}: cualquiera puede publicar ahí gratis]"
+                          for suf, q in HOSTING_GRATUITO.items() if p["dominio"].endswith(suf)), "")
+            malos.append(f"{p['esquema']}://{p['dominio']}{p['ruta']}{pista}")
+        elif p["extra"]:
+            malos.append(f"parámetros extra {p['extra']}")
+    return malos
+
+
+def _candado_2_1_qr_legibles(c, info, d, add, consultar_sat):
+    # 2.1 — Los dos QR existen y se pueden leer.
+    unicos, qr1, qr2 = c.unicos, c.qr1, c.qr2
+    if len(unicos) == 2 and qr1 and qr2:
+        add("2.1", "Dos QR legibles", OK, "Se leyeron el QR de la cédula y el QR del sello.",
+            "QR borrados, dañados o sustituidos por imágenes que no son QR.")
+    else:
+        add("2.1", "Dos QR legibles", FALLA,
+            f"Se leyeron {len(unicos)} QR, pero " + (
+                "el de la cédula" if not qr1 else "el del sello") +
+            " no tiene el formato del validador del SAT (D1=10 cédula, D1=26 sello).",
+            "QR borrados, dañados o sustituidos por imágenes que no son QR.")
+
+
+def _candado_2_2_dominio_oficial(c, info, d, add, consultar_sat):
+    # 2.2 — DOMINIO OFICIAL. Ambos QR deben llevar EXACTAMENTE a
+    # https://siat.sat.gob.mx/... No basta con "contiene sat": dominios como
+    # siat.sat.gob.mx.validar.com o sat-gob-mx.site son páginas clonadas que
+    # muestran datos falsos para que la constancia "valide".
+    parsed, malos = c.parsed, c.malos
+    if malos:
+        add("2.2", "QR apuntan al portal oficial del SAT", FALLA,
+            "Dirección no oficial: " + "; ".join(malos) + f". Debe ser https://{DOMINIO_QR}{RUTA_QR}.",
+            "QR que llevan a una página clonada del SAT.")
+    elif parsed:
+        add("2.2", "QR apuntan al portal oficial del SAT", OK,
+            f"Ambos llevan a https://{DOMINIO_QR} (validador oficial).",
+            "QR que llevan a una página clonada del SAT.")
+
+
+def _candado_2_3_qr_cedula(c, info, d, add, consultar_sat):
+    # 2.3 — QR 1 (cédula) = idCIF y RFC impresos. El QR de la cédula lleva
+    # D3 = idCIF_RFC. Si cambiaron el RFC o el idCIF impresos pero no el QR
+    # (o al revés), aquí no cuadra.
+    rfc, qr1 = c.rfc, c.qr1
+    if qr1:
+        errores = []
+        if qr1["rfc"] != rfc:
+            errores.append(f"RFC del QR {qr1['rfc']} ≠ impreso {rfc}")
+        if d["idcif"] and qr1["folio"] != d["idcif"]:
+            errores.append(f"idCIF del QR {qr1['folio']} ≠ impreso {d['idcif']}")
+        if qr1["D2"] != "1":
+            errores.append(f"D2={qr1['D2']} (esperado 1)")
+        add("2.3", "QR de la cédula = RFC e idCIF impresos", FALLA if errores else OK,
+            "; ".join(errores) + "." if errores else
+            f"QR: idCIF {qr1['folio']} y RFC {qr1['rfc']}, iguales a los impresos.",
+            "Cambio de RFC/idCIF en el texto conservando el QR de otra persona.")
+
+
+def _candado_2_4_qr_sello(c, info, d, add, consultar_sat):
+    # 2.4 — QR 2 (sello) = RFC impreso. Corresponde al paso 3 del boletín:
+    # el 2do QR y la cadena original deben hablar del mismo RFC.
+    rfc, qr2 = c.rfc, c.qr2
+    if qr2:
+        ok = qr2["rfc"] == rfc and qr2["folio"].isdigit() and qr2["D2"] == "1"
+        add("2.4", "QR del sello = RFC impreso", OK if ok else FALLA,
+            f"QR del sello: folio {qr2['folio']}, RFC {qr2['rfc']}." if ok else
+            f"QR del sello trae RFC {qr2['rfc'] or '—'} / folio {qr2['folio'] or '—'}; el impreso es {rfc}.",
+            "Constancia armada con el sello de otra persona.")
+
+
+def _candado_2_5_codigo_de_barras(c, info, d, add, consultar_sat):
+    # 2.5 — CÓDIGO DE BARRAS. Bajo "Lugar y Fecha de Emisión" va un Code 128
+    # con el RFC. Pocos falsificadores lo regeneran.
+    rfc, barras = c.rfc, c.barras
+    if barras:
+        ok = barras[0] == rfc
+        add("2.5", "Código de barras = RFC", OK if ok else FALLA,
+            f"Código de barras: {barras[0]}" + ("." if ok else f" ≠ RFC impreso {rfc}."),
+            "Cambio de RFC sin regenerar el código de barras.")
+    else:
+        add("2.5", "Código de barras = RFC", FALLA,
+            "No se pudo leer el código de barras del RFC.",
+            "Cambio de RFC sin regenerar el código de barras.")
+
+
+def _candado_2_6_qr_visibles(c, info, d, add, consultar_sat):
+    # 2.6 — LO QUE SE VE = LO QUE TRAE ADENTRO. Se "imprime" la página como
+    # imagen y se escanea, igual que haría un celular. Si alguien pegó un QR
+    # encima del original (otra imagen, otra capa), el que se ve no es el
+    # incrustado.
+    unicos, barras = c.unicos, c.barras
+    if info.get("render_error"):
+        add("2.6", "QR visibles = QR incrustados", INFO,
+            "No se pudo renderizar la página para escanearla.", "")
+    else:
+        vistos = {x["texto"] for x in info["render_codigos"] if x["formato"].upper().startswith("QR")}
+        vistos_b = {x["texto"] for x in info["render_codigos"] if "128" in x["formato"]}
+        # El código de barras renderizado no siempre se alcanza a leer; solo
+        # cuenta si se LEE y dice otra cosa.
+        if vistos == set(unicos) and (not vistos_b or not barras or vistos_b == set(barras)):
+            add("2.6", "QR visibles = QR incrustados", OK,
+                "Al escanear la página se leen exactamente los mismos códigos.",
+                "QR falso pegado encima del original.")
+        else:
+            add("2.6", "QR visibles = QR incrustados", FALLA,
+                f"Al escanear la página se ven {len(vistos)} QR distintos a los incrustados.",
+                "QR falso pegado encima del original.")
+
+
+def _candado_2_7_consulta_sat(c, info, d, add, consultar_sat):
+    # 2.7 — CONSULTA EN LÍNEA: el script abre el 1er QR en el SAT y compara
+    # CURP, nombre, situación, inicio de operaciones, CP, entidad y régimen.
+    # Si el servidor no alcanza al SAT (servidores fuera de México, conexión
+    # segura rechazada) queda como INFO con el motivo, y toca hacerlo a mano.
+    qr1, malos = c.qr1, c.malos
+    if consultar_sat and qr1 and not malos:
+        add("2.7", "Consulta al portal del SAT", *_consultar_sat(qr1, d))
+
+
+CANDADOS_CODIGOS = (
+    _candado_2_1_qr_legibles,
+    _candado_2_2_dominio_oficial,
+    _candado_2_3_qr_cedula,
+    _candado_2_4_qr_sello,
+    _candado_2_5_codigo_de_barras,
+    _candado_2_6_qr_visibles,
+    _candado_2_7_consulta_sat,
+)
+
+
 def _candados_codigos(info, d, add, analisis, consultar_sat):
     """SECCIÓN 2 — Los QR y el código de barras. Son el candado más fuerte:
     llevan al portal del SAT, que muestra los datos REALES del contribuyente.
@@ -1100,104 +1314,9 @@ def _candados_codigos(info, d, add, analisis, consultar_sat):
             "Escanea los QR con el celular.", "")
         return
 
-    # 2.1 — Los dos QR existen y se pueden leer.
-    if len(unicos) == 2 and qr1 and qr2:
-        add("2.1", "Dos QR legibles", OK, "Se leyeron el QR de la cédula y el QR del sello.",
-            "QR borrados, dañados o sustituidos por imágenes que no son QR.")
-    else:
-        add("2.1", "Dos QR legibles", FALLA,
-            f"Se leyeron {len(unicos)} QR, pero " + (
-                "el de la cédula" if not qr1 else "el del sello") +
-            " no tiene el formato del validador del SAT (D1=10 cédula, D1=26 sello).",
-            "QR borrados, dañados o sustituidos por imágenes que no son QR.")
-
-    # 2.2 — DOMINIO OFICIAL. Ambos QR deben llevar EXACTAMENTE a
-    # https://siat.sat.gob.mx/... No basta con "contiene sat": dominios como
-    # siat.sat.gob.mx.validar.com o sat-gob-mx.site son páginas clonadas que
-    # muestran datos falsos para que la constancia "valide".
-    malos = []
-    for p in parsed:
-        if not p:
-            continue
-        if p["esquema"] != "https" or p["dominio"] != DOMINIO_QR or p["ruta"] != RUTA_QR:
-            pista = next((f" [{q}: cualquiera puede publicar ahí gratis]"
-                          for suf, q in HOSTING_GRATUITO.items() if p["dominio"].endswith(suf)), "")
-            malos.append(f"{p['esquema']}://{p['dominio']}{p['ruta']}{pista}")
-        elif p["extra"]:
-            malos.append(f"parámetros extra {p['extra']}")
-    if malos:
-        add("2.2", "QR apuntan al portal oficial del SAT", FALLA,
-            "Dirección no oficial: " + "; ".join(malos) + f". Debe ser https://{DOMINIO_QR}{RUTA_QR}.",
-            "QR que llevan a una página clonada del SAT.")
-    elif parsed:
-        add("2.2", "QR apuntan al portal oficial del SAT", OK,
-            f"Ambos llevan a https://{DOMINIO_QR} (validador oficial).",
-            "QR que llevan a una página clonada del SAT.")
-
-    # 2.3 — QR 1 (cédula) = idCIF y RFC impresos. El QR de la cédula lleva
-    # D3 = idCIF_RFC. Si cambiaron el RFC o el idCIF impresos pero no el QR
-    # (o al revés), aquí no cuadra.
-    if qr1:
-        errores = []
-        if qr1["rfc"] != rfc:
-            errores.append(f"RFC del QR {qr1['rfc']} ≠ impreso {rfc}")
-        if d["idcif"] and qr1["folio"] != d["idcif"]:
-            errores.append(f"idCIF del QR {qr1['folio']} ≠ impreso {d['idcif']}")
-        if qr1["D2"] != "1":
-            errores.append(f"D2={qr1['D2']} (esperado 1)")
-        add("2.3", "QR de la cédula = RFC e idCIF impresos", FALLA if errores else OK,
-            "; ".join(errores) + "." if errores else
-            f"QR: idCIF {qr1['folio']} y RFC {qr1['rfc']}, iguales a los impresos.",
-            "Cambio de RFC/idCIF en el texto conservando el QR de otra persona.")
-
-    # 2.4 — QR 2 (sello) = RFC impreso. Corresponde al paso 3 del boletín:
-    # el 2do QR y la cadena original deben hablar del mismo RFC.
-    if qr2:
-        ok = qr2["rfc"] == rfc and qr2["folio"].isdigit() and qr2["D2"] == "1"
-        add("2.4", "QR del sello = RFC impreso", OK if ok else FALLA,
-            f"QR del sello: folio {qr2['folio']}, RFC {qr2['rfc']}." if ok else
-            f"QR del sello trae RFC {qr2['rfc'] or '—'} / folio {qr2['folio'] or '—'}; el impreso es {rfc}.",
-            "Constancia armada con el sello de otra persona.")
-
-    # 2.5 — CÓDIGO DE BARRAS. Bajo "Lugar y Fecha de Emisión" va un Code 128
-    # con el RFC. Pocos falsificadores lo regeneran.
-    if barras:
-        ok = barras[0] == rfc
-        add("2.5", "Código de barras = RFC", OK if ok else FALLA,
-            f"Código de barras: {barras[0]}" + ("." if ok else f" ≠ RFC impreso {rfc}."),
-            "Cambio de RFC sin regenerar el código de barras.")
-    else:
-        add("2.5", "Código de barras = RFC", FALLA,
-            "No se pudo leer el código de barras del RFC.",
-            "Cambio de RFC sin regenerar el código de barras.")
-
-    # 2.6 — LO QUE SE VE = LO QUE TRAE ADENTRO. Se "imprime" la página como
-    # imagen y se escanea, igual que haría un celular. Si alguien pegó un QR
-    # encima del original (otra imagen, otra capa), el que se ve no es el
-    # incrustado.
-    if info.get("render_error"):
-        add("2.6", "QR visibles = QR incrustados", INFO,
-            "No se pudo renderizar la página para escanearla.", "")
-    else:
-        vistos = {x["texto"] for x in info["render_codigos"] if x["formato"].upper().startswith("QR")}
-        vistos_b = {x["texto"] for x in info["render_codigos"] if "128" in x["formato"]}
-        # El código de barras renderizado no siempre se alcanza a leer; solo
-        # cuenta si se LEE y dice otra cosa.
-        if vistos == set(unicos) and (not vistos_b or not barras or vistos_b == set(barras)):
-            add("2.6", "QR visibles = QR incrustados", OK,
-                "Al escanear la página se leen exactamente los mismos códigos.",
-                "QR falso pegado encima del original.")
-        else:
-            add("2.6", "QR visibles = QR incrustados", FALLA,
-                f"Al escanear la página se ven {len(vistos)} QR distintos a los incrustados.",
-                "QR falso pegado encima del original.")
-
-    # 2.7 — CONSULTA EN LÍNEA: el script abre el 1er QR en el SAT y compara
-    # CURP, nombre, situación, inicio de operaciones, CP, entidad y régimen.
-    # Si el servidor no alcanza al SAT (servidores fuera de México, conexión
-    # segura rechazada) queda como INFO con el motivo, y toca hacerlo a mano.
-    if consultar_sat and qr1 and not malos:
-        add("2.7", "Consulta al portal del SAT", *_consultar_sat(qr1, d))
+    c = _Codigos(rfc, unicos, barras, parsed, qr1, qr2, _qr_no_oficiales(parsed))
+    for candado in CANDADOS_CODIGOS:
+        candado(c, info, d, add, consultar_sat)
 
 
 def _imagen_vacia():
@@ -1352,13 +1471,9 @@ def _consultar_sat(qr1, d):
             "Datos cambiados en el texto de la constancia.")
 
 
-def _candados_datos(d, add, hoy):
-    """SECCIÓN 3 — Coherencia de los datos. Una constancia fabricada (a mano
-    o con IA) "se ve" bien, pero sus datos no cumplen las reglas con que el
-    SAT y RENAPO los forman. Aquí se cruzan unos contra otros."""
-    rfc, curp, tipo = d["rfc"], d["curp"], d["tipo"]
-
+def _candado_3_1_rfc_valido(d, add, hoy):
     # 3.1 — RFC: formato y dígito verificador.
+    rfc = d["rfc"]
     patron = PAT_RFC_MORAL if len(rfc) == 12 else PAT_RFC_FISICA
     if not rfc:
         add("3.1", "RFC válido (formato y dígito verificador)", FALLA,
@@ -1376,9 +1491,13 @@ def _candados_datos(d, add, hoy):
             f"El último carácter debería ser {dv}, no {rfc[-1]}: el RFC no existe así.",
             "RFC inventado o con un carácter cambiado.")
 
+
+def _candado_3_2_tipo_de_persona(d, add, hoy):
     # 3.2 — TIPO DE PERSONA. Persona física: RFC de 13 y CURP + apellidos.
     # Persona moral: RFC de 12 y razón social. Mezclarlos es típico de una
     # constancia "armada" con partes de dos documentos.
+    rfc = d["rfc"]
+    tipo = d["tipo"]
     esperado = {12: "moral", 13: "fisica"}.get(len(rfc))
     if tipo and esperado and tipo != esperado:
         add("3.2", "Tipo de persona coherente con el RFC", FALLA,
@@ -1390,9 +1509,14 @@ def _candados_datos(d, add, hoy):
             if tipo else "No se identificó el tipo de persona.",
             "Constancia armada con partes de dos documentos.")
 
+
+def _candado_3_3_curp(d, add, hoy):
     # 3.3 — CURP (solo física): formato, dígito verificador y que su fecha y
     # letras sean las del RFC. RFC y CURP se calculan con la misma fecha de
     # nacimiento: si no coinciden, uno de los dos se cambió.
+    rfc = d["rfc"]
+    curp = d["curp"]
+    tipo = d["tipo"]
     if tipo == "fisica":
         errores, avisos = [], []
         if not PAT_CURP.match(curp or ""):
@@ -1418,10 +1542,14 @@ def _candados_datos(d, add, hoy):
             f"CURP con dígito correcto; misma fecha y letras que el RFC ({rfc[:10]}).",
             "CURP o RFC cambiados; datos de dos personas mezclados.")
 
+
+def _candado_3_4_nombre(d, add, hoy):
     # 3.4 — NOMBRE. (a) El nombre de la cédula (junto al QR) es el mismo que
     # el de la tabla: al editar se suele olvidar uno de los dos. (b) Las
     # letras del RFC salen del nombre: si cambian el nombre, ya no cuadran.
     # (b) tiene excepciones legítimas, por eso solo es AVISO.
+    rfc = d["rfc"]
+    tipo = d["tipo"]
     errores, avisos = [], []
     if d["cedula_nombre"] and d["nombre_completo"] and \
             _compacto(d["cedula_nombre"]) != _compacto(d["nombre_completo"]):
@@ -1443,6 +1571,8 @@ def _candados_datos(d, add, hoy):
         if errores or avisos else "El nombre coincide en cédula y tabla y corresponde a las letras del RFC.",
         "Cambio del nombre del titular.")
 
+
+def _candado_3_5_fechas(d, add, hoy):
     # 3.5 — FECHAS.
     #   FALLA (imposible en una CSF real): inicio de operaciones o último
     #   cambio de estado POSTERIORES a la fecha de emisión.
@@ -1453,6 +1583,8 @@ def _candados_datos(d, add, hoy):
     #   operaciones. Es normal: alguien se inscribe al RFC (o lo inscribe un
     #   patrón) años antes de empezar a tener obligaciones; ese "cambio de
     #   estado" es la inscripción. Así viene en CSF auténticas.
+    rfc = d["rfc"]
+    tipo = d["tipo"]
     emision = d["fecha_emision"]
     inicio = _fecha_texto(d["inicio_operaciones"])
     cambio = _fecha_texto(d["ultimo_cambio"])
@@ -1483,6 +1615,8 @@ def _candados_datos(d, add, hoy):
         f"Inicio {_fmt(inicio)}, último cambio {_fmt(cambio)}, emisión {_fmt(emision)}: en orden.",
         "Fechas alteradas (antigüedad, estatus) o constancia inventada.")
 
+
+def _candado_3_6_porcentajes_actividades(d, add, hoy):
     # 3.6 — ACTIVIDADES. Las actividades VIGENTES (sin fecha fin) suman 100 %.
     # Una IA o una edición manual de la tabla suele romperlo. PASABLE (AVISO):
     # una tabla partida entre páginas o una actividad dada de baja pueden
@@ -1500,9 +1634,12 @@ def _candados_datos(d, add, hoy):
         add("3.6", "Porcentajes de actividades suman 100", AVISO,
             "No se encontró la tabla de actividades económicas.", "")
 
+
+def _candado_3_7_regimen(d, add, hoy):
     # 3.7 — RÉGIMEN acorde al tipo de persona. "Sueldos y Salarios" en una
     # persona moral, o "General de Ley Personas Morales" en una física, no
     # existen. Igual con las obligaciones "Personas Morales" en una física.
+    tipo = d["tipo"]
     regs = [_norm(r["regimen"]) for r in d["regimenes"]]
     obls = [_norm(o["obligacion"]) for o in d["obligaciones"]]
     # FALLA: un RÉGIMEN que no existe para ese tipo de persona.
@@ -1528,6 +1665,8 @@ def _candados_datos(d, add, hoy):
             if avisos else "; ".join(r.title() for r in regs) + ".",
             "Régimen cambiado para aparentar otro perfil de ingresos.")
 
+
+def _candado_3_8_codigo_postal(d, add, hoy):
     # 3.8 — DOMICILIO. El código postal tiene 5 dígitos y sus dos primeros
     # corresponden a la entidad (Colima 28xxx, Jalisco 44–49xxx, ...).
     # PASABLE (AVISO): SEPOMEX tiene códigos en zonas limítrofes que no
@@ -1542,11 +1681,15 @@ def _candados_datos(d, add, hoy):
             f"CP {cp} pertenece a {ent.title()}." if coincide else
             f"El CP {cp} no pertenece a {ent.title()}.", "Domicilio cambiado o inventado.")
 
+
+def _candado_3_9_cadena_original(d, add, hoy):
     # 3.9 — CADENA ORIGINAL (paso 3 del boletín). Formato:
     #   ||AAAA/MM/DD HH:MM:SS|RFC|CONSTANCIA DE SITUACIÓN FISCAL|<certificado>|<cifrado>||
     # La fecha debe ser la de emisión y el RFC el del documento. El último
     # bloque es un cifrado OpenSSL ("Salted__" + sal + 32 bytes): un texto
     # inventado por una persona o una IA no tiene esa estructura binaria.
+    rfc = d["rfc"]
+    emision = d["fecha_emision"]
     cad = d["cadena"]
     m = re.match(r"^\|\|(\d{4})/(\d{2})/(\d{2}) ?(\d{2}):(\d{2}):(\d{2})\|([A-ZÑ&0-9]{12,13})\|"
                  r"CONSTANCIA ?DE ?SITUACI[OÓ]N ?FISCAL\|(\d+)\|([A-Za-z0-9+/=]+)\|\|$", cad)
@@ -1576,6 +1719,8 @@ def _candados_datos(d, add, hoy):
         f"Fecha {_fmt(emision)} y RFC {rfc} coinciden; bloque cifrado con estructura válida.",
         "Cadena copiada de otra constancia o inventada.")
 
+
+def _candado_3_10_sello_digital(d, add, hoy):
     # 3.10 — SELLO DIGITAL. Firma RSA de 1024 bits codificada en base64:
     # exactamente 128 bytes. Un sello inventado o recortado no da 128.
     try:
@@ -1588,6 +1733,8 @@ def _candados_datos(d, add, hoy):
          f"El sello {'no es base64 válido' if n < 0 else f'mide {n} bytes'} (deben ser 128)."),
         "Sello copiado, recortado o inventado.")
 
+
+def _candado_3_11_lugar_de_emision(d, add, hoy):
     # 3.11 — LUGAR DE EMISIÓN (informativo). El SAT pone el municipio y
     # estado del domicilio fiscal. Si no coincide, solo es una nota.
     lugar = d["lugar_emision"]
@@ -1599,11 +1746,32 @@ def _candados_datos(d, add, hoy):
             + ("." if coincide else " (no coinciden; revisa en el QR)."), "")
 
 
-def _candados_politicas(d, add, hoy):
-    """SECCIÓN 4 — Requisitos de la financiera. No indican alteración: una
-    CSF vieja es auténtica, pero no sirve para el expediente."""
-    emision = d["fecha_emision"]
+CANDADOS_DATOS = (
+    _candado_3_1_rfc_valido,
+    _candado_3_2_tipo_de_persona,
+    _candado_3_3_curp,
+    _candado_3_4_nombre,
+    _candado_3_5_fechas,
+    _candado_3_6_porcentajes_actividades,
+    _candado_3_7_regimen,
+    _candado_3_8_codigo_postal,
+    _candado_3_9_cadena_original,
+    _candado_3_10_sello_digital,
+    _candado_3_11_lugar_de_emision,
+)
+
+
+def _candados_datos(d, add, hoy):
+    """SECCIÓN 3 — Coherencia de los datos. Una constancia fabricada (a mano
+    o con IA) "se ve" bien, pero sus datos no cumplen las reglas con que el
+    SAT y RENAPO los forman. Aquí se cruzan unos contra otros."""
+    for candado in CANDADOS_DATOS:
+        candado(d, add, hoy)
+
+
+def _candado_4_1_vigencia(d, add, hoy):
     # 4.1 — VIGENCIA (paso 1 del boletín): emitida en el último mes.
+    emision = d["fecha_emision"]
     if not emision:
         add("4.1", f"Emitida en los últimos {DIAS_VIGENCIA} días", FALLA, "Sin fecha de emisión legible.", "")
     elif emision > hoy:
@@ -1617,6 +1785,8 @@ def _candados_politicas(d, add, hoy):
             ("" if dias <= DIAS_VIGENCIA else " Pide al cliente una constancia reciente."),
             "Constancias viejas que ya no reflejan la situación actual.")
 
+
+def _candado_4_2_estatus_activo(d, add, hoy):
     # 4.2 — ESTATUS EN EL PADRÓN: ACTIVO. Suspendido, cancelado o "no
     # localizado" no es apto para crédito.
     # REACTIVADO = volvió a estar activo después de una suspensión: es apto,
@@ -1629,6 +1799,19 @@ def _candados_politicas(d, add, hoy):
     else:
         add("4.2", "Estatus en el padrón: ACTIVO", OK if est == "ACTIVO" else FALLA,
             f"Estatus: {d['estatus'] or 'no encontrado'}.", "Contribuyentes suspendidos o cancelados.")
+
+
+CANDADOS_POLITICAS = (
+    _candado_4_1_vigencia,
+    _candado_4_2_estatus_activo,
+)
+
+
+def _candados_politicas(d, add, hoy):
+    """SECCIÓN 4 — Requisitos de la financiera. No indican alteración: una
+    CSF vieja es auténtica, pero no sirve para el expediente."""
+    for candado in CANDADOS_POLITICAS:
+        candado(d, add, hoy)
 
 
 # ===========================================================================
