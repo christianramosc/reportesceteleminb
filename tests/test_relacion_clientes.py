@@ -55,7 +55,7 @@ def _leer(ruta):
 # --------------------------------------------------------------- solicitudes
 def test_solicitud_persona_fisica(lector, interlineado, tmp_path):
     ruta = P.solicitud_fisica(tmp_path / "s.pdf", "17665240", "JUAN CARLOS", "ARROYO", "BUSTOS",
-                              "15/03/1988", "52", "3121234567", "juan.arroyo@ejemplo.com",
+                              "15/03/1988", "3123300000", "3121234567", "juan.arroyo@ejemplo.com",
                               "ANA RUIZ LOPEZ")
     assert bz.parsear_solicitud(_leer(ruta)) == {
         "tipo_persona": "FÍSICA",
@@ -72,7 +72,7 @@ def test_solicitud_persona_fisica(lector, interlineado, tmp_path):
 
 def test_solicitud_con_actividad_empresarial_es_pfae(lector, tmp_path):
     ruta = P.solicitud_fisica(tmp_path / "s.pdf", "17665242", "MARIA", "PEREZ", "GIL",
-                              "01/07/1979", "52", "3129876543", "maria@ejemplo.com",
+                              "01/07/1979", "3123300001", "3129876543", "maria@ejemplo.com",
                               "ANA RUIZ LOPEZ", actividad_empresarial=True)
     datos = bz.parsear_solicitud(_leer(ruta))
     assert datos["tipo_persona"] == "PFAE"
@@ -94,11 +94,40 @@ def test_solicitud_persona_moral_usa_la_razon_social(lector, interlineado, tmp_p
         "primer_apellido": "",
         "segundo_apellido": "",
         "fecha_nacimiento": "01/02/2015",      # fecha de constitución
-        "telefono_movil": "312 555 1234",
+        "telefono_movil": "3125551234",       # solo dígitos, como el resto
         "correo_electronico": "contacto@transpac.mx",
         "nombre_vendedor": "LUIS MORA DIAZ",
     }
     assert "PEDRO" not in datos["nombre_completo"]
+    assert "representante" not in datos["correo_electronico"]
+
+
+@pytest.mark.parametrize("fijo, movil, esperado", [
+    ("", "3129876543", "3129876543"),                   # sin teléfono fijo
+    ("3123300000", "312 987 6543", "3129876543"),       # móvil con espacios
+    ("312 330 0000", "312 987 6543", "3129876543"),     # los dos con espacios
+], ids=["sin-fijo", "movil-con-espacios", "ambos-con-espacios"])
+def test_solicitud_telefono_y_correo_sin_importar_columnas(lector, interlineado, tmp_path,
+                                                          fijo, movil, esperado):
+    """Antes se tomaba "el segundo número" del renglón Teléfono fijo /
+    Teléfono móvil / Correo: sin teléfono fijo el cliente se quedaba sin
+    móvil ni correo, y con espacios ("312 987 6543") salía un pedazo."""
+    ruta = P.solicitud_fisica(tmp_path / "s.pdf", "17665244", "LAURA", "SOLIS", "RAMOS",
+                              "09/09/1990", fijo, movil, "laura.solis@ejemplo.com",
+                              "ANA RUIZ LOPEZ")
+    datos = bz.parsear_solicitud(_leer(ruta))
+    assert datos["telefono_movil"] == esperado
+    assert datos["correo_electronico"] == "laura.solis@ejemplo.com"
+    assert datos["nombre_vendedor"] == "ANA RUIZ LOPEZ"
+
+
+def test_solicitud_formato_anterior_lada_y_movil(lector, tmp_path):
+    """Sin renglón "Teléfono fijo / móvil / correo" se usa la lectura de
+    respaldo: lada y móvil."""
+    ruta = P.solicitud_fisica_formato_anterior(tmp_path / "s.pdf", "17665245", "52",
+                                               "3121234567", "juan@ejemplo.com")
+    datos = bz.parsear_solicitud(_leer(ruta))
+    assert (datos["telefono_movil"], datos["correo_electronico"]) == ("3121234567", "juan@ejemplo.com")
 
 
 def test_solicitud_en_blanco_no_inventa_datos(lector, interlineado, tmp_path):
@@ -108,6 +137,7 @@ def test_solicitud_en_blanco_no_inventa_datos(lector, interlineado, tmp_path):
     assert datos["folio_cck"] == "17665249"
     assert datos["nombre_completo"] == datos["primer_apellido"] == datos["segundo_apellido"] == ""
     assert datos["fecha_nacimiento"] == ""
+    assert datos["telefono_movil"] == datos["correo_electronico"] == ""
 
 
 # ------------------------------------------------------------ amortizaciones
@@ -133,6 +163,9 @@ def test_amortizacion_con_gap(lector, interlineado, tmp_path):
         "aseguradora": "INBURSA",
         "tiene_accesorios": "NO",
         "tiene_garantia_extendida": "SI",
+        "casilla_gap": "",                  # no se le pasó la casilla
+        "solicitante": "JUAN CARLOS ARROYO BUSTOS",
+        "tipo_persona": "FÍSICA",
     }
 
 
@@ -149,6 +182,31 @@ def test_amortizacion_sin_gap_y_contado(lector, tmp_path):
     assert (datos["plazo_meses"], datos["tasa_interes_anual"]) == ("60", "16.50%")
 
 
+@pytest.mark.parametrize("casilla, gap, tiene_gap, monto", [
+    ("Financiado", "9,800.00", "SI", "$9,800.00"),
+    ("Contado", "0.00", "SI", "$0.00"),     # pagado aparte: no se financia
+    ("No", "0.00", "NO", "$0.00"),
+])
+def test_casilla_gap(lector, tmp_path, casilla, gap, tiene_gap, monto):
+    """El GAP de contado no aparece como monto financiado: antes salía
+    "¿Tiene GAP? NO" aunque el cliente sí lo compró. La casilla marcada
+    (un dibujo, no texto) es la que lo dice."""
+    ruta = P.amortizacion(tmp_path / "a.pdf", "17665246", gap=gap, casilla_gap=casilla)
+    assert bz.leer_casilla_gap(ruta) == casilla
+    datos = bz.parsear_amortizacion(_leer(ruta), bz.leer_casilla_gap(ruta))
+    assert (datos["tiene_gap"], datos["gap_monto"]) == (tiene_gap, monto)
+
+
+def test_casilla_gap_ilegible_no_estorba(tmp_path):
+    """Sin casilla en el formato, o con un PDF dañado, se decide por el
+    monto como antes y el proceso sigue."""
+    sin_casilla = P.amortizacion(tmp_path / "a.pdf", "17665247", casilla_gap=None)
+    assert bz.leer_casilla_gap(sin_casilla) == ""
+    danado = tmp_path / "danado.pdf"
+    danado.write_bytes(b"%PDF-1.4 esto no es un PDF")
+    assert bz.leer_casilla_gap(str(danado)) == ""
+
+
 # --------------------------------------------------------- del ZIP al Excel
 def _zip_del_mes(carpeta, nombre="Bitacora OCTUBRE 2026.zip", raiz=""):
     """ZIP como el que arman en el PDV: una carpeta por estatus. Los nombres
@@ -163,11 +221,16 @@ def _zip_del_mes(carpeta, nombre="Bitacora OCTUBRE 2026.zip", raiz=""):
             r, "17665241", "TRANSPORTES DEL PACIFICO SA DE CV", "01/02/2015",
             "312 555 1234", "contacto@transpac.mx", "LUIS MORA DIAZ"),
         "Rechazados/amortizacion 17665241.pdf": lambda r: P.amortizacion(
-            r, "17665241", vehiculo="MG5 EXCITE MT", gap="0.00", tipo_seguro="Contado anual"),
+            r, "17665241", vehiculo="MG5 EXCITE MT", gap="0.00", tipo_seguro="Contado anual",
+            solicitante="TRANSPORTES DEL PACIFICO SA DE CV", persona="MORAL",
+            casilla_gap="Contado"),
+        # Sin solicitud: nombre y tipo de persona salen de la amortización.
+        "Aprobados/amortizacion_17665243.pdf": lambda r: P.amortizacion(
+            r, "17665243", solicitante="ROSA MARTINEZ VEGA", casilla_gap="No", gap="0.00"),
         # Sin amortización: el cliente debe aparecer igual, con los datos de
         # la solicitud y el vehículo vacío.
         "Contrapropuestas/Solicitud_17665242.pdf": lambda r: P.solicitud_fisica(
-            r, "17665242", "MARIA", "PEREZ", "GIL", "01/07/1979", "52", "3129876543",
+            r, "17665242", "MARIA", "PEREZ", "GIL", "01/07/1979", "3123300001", "3129876543",
             "maria@ejemplo.com", "LUIS MORA DIAZ", actividad_empresarial=True),
         # No es solicitud ni amortización: se ignora (y se avisa en el log).
         "Contrapropuestas/Contrato_17665242.pdf": lambda r: P.amortizacion(r, "99999999"),
@@ -207,7 +270,7 @@ def test_del_zip_sale_el_excel_de_la_bitacora(lector, tmp_path):
     assert list(df.columns) == COLUMNAS_EXCEL
 
     filas = df.set_index("Folio CCK")
-    assert sorted(filas.index) == ["17665240", "17665241", "17665242"]
+    assert sorted(filas.index) == ["17665240", "17665241", "17665242", "17665243"]
 
     fisica = filas.loc["17665240"]
     assert fisica["STATUS"] == "APROBADO"
@@ -220,13 +283,21 @@ def test_del_zip_sale_el_excel_de_la_bitacora(lector, tmp_path):
     moral = filas.loc["17665241"]
     assert (moral["STATUS"], moral["Tipo de Persona"]) == ("RECHAZADO", "MORAL")
     assert moral["Nombre Completo"] == "TRANSPORTES DEL PACIFICO SA DE CV"
-    assert (moral["Vehículo"], moral["¿Tiene GAP?"]) == ("MG5 EXCITE MT", "NO")
+    assert moral["Vehículo"] == "MG5 EXCITE MT"
+    assert (moral["¿Tiene GAP?"], moral["Monto GAP"]) == ("SI", "$0.00")   # GAP de contado
 
     sin_amortizacion = filas.loc["17665242"]
     assert (sin_amortizacion["STATUS"], sin_amortizacion["Tipo de Persona"]) == ("CONTRAPROPUESTA", "PFAE")
     assert sin_amortizacion["Nombre Completo"] == "MARIA PEREZ GIL"
     assert sin_amortizacion["Vehículo"] == ""
     assert "SIN AMORTIZACIÓN" in log
+
+    sin_solicitud = filas.loc["17665243"]
+    assert (sin_solicitud["Nombre Completo"], sin_solicitud["Tipo de Persona"]) == (
+        "ROSA MARTINEZ VEGA", "FÍSICA")
+    assert sin_solicitud["Correo Electrónico"] == ""       # ese dato solo viene en la solicitud
+    assert sin_solicitud["¿Tiene GAP?"] == "NO"
+    assert "SIN SOLICITUD" in log
     assert "Contrato_17665242.pdf" in log          # el PDF ignorado se reporta
 
     # Los PDFs extraídos (con datos de clientes) no se quedan en disco.
@@ -238,7 +309,7 @@ def test_zip_con_carpeta_raiz_toma_el_mes_de_la_carpeta(lector, tmp_path):
     excel, _log = _generar(_zip_del_mes(tmp_path, nombre="export.zip", raiz="JULIO 2026"), tmp_path)
     with pd.ExcelFile(excel) as xls:
         assert xls.sheet_names == ["JULIO 2026"]
-        assert len(xls.parse("JULIO 2026")) == 3
+        assert len(xls.parse("JULIO 2026")) == 4
     assert os.path.basename(excel).startswith("Bitacora_Jul26_al_")
 
 

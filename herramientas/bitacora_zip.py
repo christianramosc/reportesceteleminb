@@ -268,6 +268,69 @@ def _extraer_apellidos(texto: str) -> tuple:
             limpiar(m2.group(1)) if m2 else "")
 
 
+def _renglon_bajo(texto: str, etiquetas: list):
+    """Devuelve el renglón de VALORES de varias etiquetas que comparten línea.
+
+    En los formatos de Inbursa varias etiquetas van en la MISMA línea y sus
+    valores en la de abajo:
+
+        Teléfono fijo:      Teléfono móvil:      Correo electrónico:
+        3121234567          3129876543           cliente@correo.mx
+
+    No se parte por posición de columna: pdfplumber (el lector de Streamlit
+    Cloud) no conserva la alineación en esta línea —las etiquetas se
+    "empujan" a la derecha y los valores no—, y cortar por posición mochaba
+    teléfonos y correos. Quien llama decide qué es cada cosa por su forma
+    (ver _telefonos y _solo_correo).
+
+    Devuelve "" si el formato está en blanco (abajo va otra etiqueta) y None
+    si no hay una línea con todas las etiquetas en ese orden.
+    """
+    lineas = texto.split("\n")
+    claves = [_sin_acentos(e).lower() for e in etiquetas]
+    for i, linea in enumerate(lineas[:-1]):
+        bajo = _sin_acentos(linea).lower()
+        desde = 0
+        for clave in claves:
+            p = bajo.find(clave, desde)
+            if p < 0:
+                break
+            desde = p + len(clave)
+        else:
+            j = i + 1
+            while j < len(lineas) and not lineas[j].strip():
+                j += 1
+            valores = lineas[j] if j < len(lineas) else ""
+            return "" if ":" in valores else valores
+    return None
+
+
+def _telefonos(renglon: str) -> list:
+    """Teléfonos de 10 dígitos en un renglón, en orden.
+
+    Junta los grupos de dígitos hasta completar 10, así "312 1234567" es UN
+    teléfono y "3121234567  3129876543" son dos, sin importar cuántos
+    espacios deje cada lector entre columnas. Si los dígitos no cuadran en
+    bloques de 10 (un número incompleto), se devuelve cada grupo tal cual.
+    """
+    sin_correo = re.sub(r"[\w._%+\-]+@[\w.\-]+", " ", renglon)
+    grupos = re.findall(r"\d+", sin_correo)
+    telefonos, actual = [], ""
+    for g in grupos:
+        actual += g
+        if len(actual) == 10:
+            telefonos.append(actual)
+            actual = ""
+        elif len(actual) > 10:
+            return grupos
+    return grupos if actual else telefonos
+
+
+def _solo_correo(valor: str) -> str:
+    m = re.search(r"[\w._%+\-]+@[\w.\-]+", valor)
+    return m.group(0) if m else ""
+
+
 def es_persona_moral(texto: str) -> bool:
     """Distingue la forma CTL-022 (persona moral) de la CTL-008 (persona física).
 
@@ -330,7 +393,16 @@ def _parsear_solicitud_pm(texto: str) -> dict:
     datos["fecha_nacimiento"] = m.group(1).strip() if m else ""
 
     # Teléfono y correo del DOMICILIO FISCAL de la empresa (no los del
-    # representante legal, que aparecen más abajo).
+    # representante legal, que aparecen más abajo). Primero por columnas;
+    # las expresiones de abajo quedan de respaldo.
+    renglon = _renglon_bajo(texto, ["Teléfono fijo:", "Correo electrónico:"])
+    if renglon is not None:
+        telefonos = _telefonos(renglon)
+        datos["telefono_movil"] = telefonos[0] if telefonos else ""
+        datos["correo_electronico"] = _solo_correo(renglon)
+        datos["nombre_vendedor"] = _extraer_vendedor(texto)
+        return datos
+
     m = re.search(r"Tel[eé]fono fijo:[^\n]*Correo electr[oó]nico:[^\n]*\n\s*([\d\s\-]+?)\s{2,}",
                   texto, re.IGNORECASE)
     datos["telefono_movil"] = limpiar(m.group(1)) if m else ""
@@ -385,14 +457,26 @@ def parsear_solicitud(texto: str) -> dict:
     )
     datos["fecha_nacimiento"] = m.group(1).strip() if m else ""
 
-    m = re.search(r"Tel[eé]fono m[oó]vil:.*?\n\s*\d+\s+(\d+)", texto, re.IGNORECASE)
-    datos["telefono_movil"] = m.group(1).strip() if m else ""
+    # Teléfono fijo / móvil / correo van en un solo renglón (ver
+    # _renglon_bajo). La expresión de respaldo toma "el segundo número": si el
+    # cliente no daba teléfono fijo se quedaba sin móvil y sin correo, y con
+    # un teléfono escrito "312 1234567" tomaba solo los 7 dígitos finales.
+    # Aquí, con dos teléfonos el móvil es el segundo; con uno solo, ese es.
+    renglon = _renglon_bajo(
+        texto, ["Teléfono fijo:", "Teléfono móvil:", "Correo electrónico:"])
+    if renglon is not None:
+        telefonos = _telefonos(renglon)
+        datos["telefono_movil"] = telefonos[-1] if telefonos else ""
+        datos["correo_electronico"] = _solo_correo(renglon)
+    else:
+        m = re.search(r"Tel[eé]fono m[oó]vil:.*?\n\s*\d+\s+(\d+)", texto, re.IGNORECASE)
+        datos["telefono_movil"] = m.group(1).strip() if m else ""
 
-    m = re.search(
-        r"Correo electr[oó]nico:\s*\n\s*[\d\s]+\s+([\w._%+\-]+@[\w.\-]+)",
-        texto, re.IGNORECASE
-    )
-    datos["correo_electronico"] = m.group(1).strip() if m else ""
+        m = re.search(
+            r"Correo electr[oó]nico:\s*\n\s*[\d\s]+\s+([\w._%+\-]+@[\w.\-]+)",
+            texto, re.IGNORECASE
+        )
+        datos["correo_electronico"] = m.group(1).strip() if m else ""
 
     datos["nombre_vendedor"] = _extraer_vendedor(texto)
 
@@ -422,7 +506,54 @@ def _primera_columna(linea: str) -> str:
     return trozo.strip()
 
 
-def parsear_amortizacion(texto: str) -> dict:
+def leer_casilla_gap(ruta: str) -> str:
+    """Devuelve la opción marcada en la casilla GAP de la amortización:
+    "Contado", "Financiado", "No", o "" si no se pudo leer.
+
+    La casilla no es texto: son tres cuadritos dibujados y la marca es una
+    "X" hecha con dos líneas DENTRO de uno de ellos. El texto extraído
+    (pdftotext o pdfplumber) solo ve "GAP: Contado Financiado No", sin
+    saber cuál está marcada; por eso se mira el dibujo con pdfplumber.
+    Cualquier trazo o carácter dentro del cuadro cuenta como marca, por si
+    otra versión del formato usa una palomita en lugar de la X.
+    """
+    try:
+        import pdfplumber
+        with pdfplumber.open(ruta) as pdf:
+            pagina = pdf.pages[0]
+            palabras = pagina.extract_words()
+            for i, palabra in enumerate(palabras):
+                if palabra["text"] != "GAP:":
+                    continue
+                fila = [p for p in palabras[i + 1:]
+                        if abs(p["top"] - palabra["top"]) < 3]
+                opciones = [p for p in fila if p["text"] in ("Contado", "Financiado", "No")]
+                if len(opciones) < 2:
+                    continue        # el "GAP: $ ..." de FINANCIAMIENTO
+                marcadas = []
+                for opcion in opciones:
+                    # El cuadro va justo a la IZQUIERDA de su etiqueta.
+                    cuadros = [r for r in pagina.rects
+                               if 5 <= r["width"] <= 15 and 5 <= r["height"] <= 15
+                               and 0 <= opcion["x0"] - r["x1"] <= 8
+                               and abs(r["top"] - opcion["top"]) < 6]
+                    if not cuadros:
+                        continue
+                    c = cuadros[0]
+                    trazos = [o for o in pagina.lines + pagina.curves + pagina.chars
+                              + [r for r in pagina.rects if r is not c]
+                              if o["x0"] >= c["x0"] - 1 and o["x1"] <= c["x1"] + 1
+                              and o["top"] >= c["top"] - 1 and o["bottom"] <= c["bottom"] + 1]
+                    if trazos:
+                        marcadas.append(opcion["text"])
+                return marcadas[0] if len(marcadas) == 1 else ""
+    except Exception as e:      # la casilla es un extra: nunca tumba el proceso
+        print(f"  ⚠ No se pudo leer la casilla GAP ({e}): {os.path.basename(ruta)}")
+    return ""
+
+
+def parsear_amortizacion(texto: str, casilla_gap: str = "") -> dict:
+    """casilla_gap: lo que devolvió leer_casilla_gap() del mismo PDF."""
     if not texto:
         return {}
 
@@ -452,11 +583,28 @@ def parsear_amortizacion(texto: str) -> dict:
     m = re.search(r"Enganche\*?:\s*[\d.]+%\s*(\$\s*[\d,]+\.?\d*)", texto, re.IGNORECASE)
     datos["enganche"] = extraer_monto(m.group(1)) if m else ""
 
-    # GAP (monto financiado o de contado, dentro de FINANCIAMIENTO)
+    # GAP. El formato lo trae dos veces: la casilla "GAP: ☐ Contado
+    # ☐ Financiado ☐ No" en DATOS DEL VEHÍCULO y el monto financiado en
+    # FINANCIAMIENTO. Esta expresión salta la casilla (después de "GAP:"
+    # viene "Contado", no "$") y lee el monto. Un GAP pagado de contado no
+    # se financia (monto $0): solo la casilla dice que sí lo compró. La
+    # casilla es un dibujo, no texto, y la lee leer_casilla_gap().
     m = re.search(r"GAP:\s*(\$\s*[\d,]+\.?\d*)", texto, re.IGNORECASE)
     gap_raw = m.group(1) if m else ""
     datos["gap_monto"] = extraer_monto(gap_raw) if gap_raw else "$0"
-    datos["tiene_gap"] = "SI" if extraer_monto_float(gap_raw) > 0 else "NO"
+    datos["tiene_gap"] = "SI" if (extraer_monto_float(gap_raw) > 0
+                                  or casilla_gap in ("Contado", "Financiado")) else "NO"
+    datos["casilla_gap"] = casilla_gap
+
+    # Nombre y tipo de persona del cliente, por si falta su solicitud en el
+    # ZIP: la amortización también los trae. En los PDFs reales coinciden
+    # con la solicitud en todos los casos revisados.
+    m = re.search(r"Solicitante y/o acreditado:[ \t]*([^\n]*)", texto, re.IGNORECASE)
+    nombre = m.group(1) if m else ""
+    nombre = re.split(r"\s{3,}|\s+No\. de contrato", nombre.strip())[0]
+    datos["solicitante"] = "" if ":" in nombre else limpiar(nombre)
+    m = re.search(r"PERSONA (MORAL|F[ÍI]SICA)", texto, re.IGNORECASE)
+    datos["tipo_persona"] = ("MORAL" if m.group(1).upper() == "MORAL" else "FÍSICA") if m else ""
 
     m = re.search(r"Plazo:\s*(\d+)\s*meses", texto, re.IGNORECASE)
     datos["plazo_meses"] = m.group(1).strip() if m else ""
@@ -563,7 +711,7 @@ def procesar_carpeta(carpeta_pdf: str, status: str) -> list:
 
     dict_amortizaciones = {}
     for ruta in amortizaciones_raw:
-        datos = parsear_amortizacion(extraer_texto_pdf(ruta))
+        datos = parsear_amortizacion(extraer_texto_pdf(ruta), leer_casilla_gap(ruta))
         folio = datos.get("folio_cck", "")
         if folio:
             dict_amortizaciones[folio] = datos
@@ -581,8 +729,9 @@ def procesar_carpeta(carpeta_pdf: str, status: str) -> list:
         registro = {
             "Folio CCK":               folio,
             "STATUS":                  status,
-            "Tipo de Persona":         sol.get("tipo_persona", ""),
-            "Nombre Completo":         sol.get("nombre_completo", ""),
+            # Sin solicitud en el ZIP, nombre y tipo salen de la amortización.
+            "Tipo de Persona":         sol.get("tipo_persona") or amo.get("tipo_persona", ""),
+            "Nombre Completo":         sol.get("nombre_completo") or amo.get("solicitante", ""),
             "Fecha de Nacimiento":     sol.get("fecha_nacimiento", ""),
             "Teléfono Móvil":          sol.get("telefono_movil", ""),
             "Correo Electrónico":      sol.get("correo_electronico", ""),
