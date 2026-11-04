@@ -9,11 +9,9 @@ from . import folios as _folios
 from .docx_reportes import generar_docx_comparativo
 from .ficha_resumen import fichas_ambos_formatos, ficha_comparativo
 from .libros_analisis import libro_comparativo
+from .config import DatosReporte
 from .registro import Herramienta
 from . import nombres_archivo as _nombres
-
-_PDV_DEFECTO = _comparativo.SUBTITULO_EMPRESA
-_ANALISTA_DEFECTO = _comparativo.NOMBRE_ANALISTA
 
 
 def _validar_meses_distintos(archivos, rutas_archivos):
@@ -40,11 +38,8 @@ def _validar_meses_distintos(archivos, rutas_archivos):
 
 def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
              nombre_pdv=None, nombre_analista=None, **_opciones):
-    nombre_pdv = (nombre_pdv or "").strip() or _PDV_DEFECTO
-    nombre_analista = (nombre_analista or "").strip() or _ANALISTA_DEFECTO
-
-    _comparativo.SUBTITULO_EMPRESA = nombre_pdv
-    _comparativo.NOMBRE_ANALISTA = nombre_analista
+    datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista)
+    nombre_pdv, nombre_analista = datos.pdv, datos.analista
 
     os.makedirs(carpeta_salida, exist_ok=True)
 
@@ -76,7 +71,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
     elementos_pdf = []
     _comparativo.generar_reporte_pdf_comparativo(
         datos_por_mes, orden_meses, tabla_comp, df_combinado, nombre_archivo=ruta_pdf,
-        recolectar_elementos=elementos_pdf,
+        recolectar_elementos=elementos_pdf, datos=datos,
     )
 
     ruta_docx = generar_docx_comparativo(
@@ -120,4 +115,10 @@ HERRAMIENTA = Herramienta(
     tipos_permitidos=["xlsx"],
     ejecutar=ejecutar,
     ayuda_archivo="Un Excel por cada mes que quieras comparar (etiqueta de mes = nombre de la hoja).",
+    icono=":material/compare_arrows:",
+    nombre_corto="Comparativo mensual",
+    vista_previa_bitacora=True,
+    minimo_archivos=2,
+    pide_pdv_e_implant=True,
+    pide_etiquetas_mes=True,
 )

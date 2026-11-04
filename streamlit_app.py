@@ -23,10 +23,8 @@ from herramientas import REGISTRO
 from herramientas import estatus as _est
 from herramientas import fechas as _fechas
 from herramientas.ejecucion import ejecutar_aislado
-from herramientas.avance_preliminar_original import (
-    NOMBRE_ANALISTA as _ANALISTA_DEFECTO,
-    SUBTITULO_EMPRESA as _PDV_DEFECTO,
-)
+from herramientas.config import ANALISTA_DEFECTO as _ANALISTA_DEFECTO
+from herramientas.config import PDV_DEFECTO as _PDV_DEFECTO
 
 # =======================================================================
 # MANEJO DE ARCHIVOS — datos personales
@@ -62,22 +60,10 @@ st.set_page_config(
 
 ui.aplicar_estilos()
 
-# Menú lateral: icono (Material Symbols de Streamlit) y nombre corto por
-# herramienta. El nombre completo se sigue usando como título de la página.
-_MENU = {
-    "relacion_zip": (":material/folder_zip:", "Relación de clientes"),
-    "avance_preliminar": (":material/trending_up:", "Avance preliminar"),
-    "comparativo_mensual": (":material/compare_arrows:", "Comparativo mensual"),
-    "resumen_mensual": (":material/calendar_month:", "Resumen mensual"),
-    "resumen_vendedor": (":material/groups:", "Resumen por vendedor"),
-    "modelo_datos": (":material/dataset:", "Modelo de datos"),
-    "validar_csf": (":material/verified_user:", "Validar CSF"),
-}
-
-
 def _etiqueta_menu(h):
-    icono, corto = _MENU.get(h.id, (":material/description:", ui.nombre_limpio(h.nombre)))
-    return f"{icono} {corto}"
+    """Menú lateral: icono y nombre corto que declara cada herramienta
+    (registro.py). El nombre completo se usa como título de la página."""
+    return f"{h.icono} {h.nombre_corto or ui.nombre_limpio(h.nombre)}"
 
 
 def _procesar(herramienta, archivos_subidos, opciones):
@@ -129,9 +115,9 @@ def _procesar(herramienta, archivos_subidos, opciones):
         return archivos, log, resumen
     finally:
         aviso_fila.empty()
+        # Se lleva también las gráficas: cada reporte las dibuja dentro de
+        # esta carpeta, junto a su PDF.
         shutil.rmtree(carpeta, ignore_errors=True)
-        # Las gráficas intermedias (graficas_temp_*) las borra
-        # ejecutar_aislado() antes de soltar el candado.
 
 
 def _vista_previa(archivos_subidos):
@@ -223,11 +209,9 @@ etiquetas = ["." + t.upper() for t in herramienta.tipos_permitidos]
 etiquetas.append("Varios archivos" if herramienta.multiple_archivos else "1 archivo")
 ui.encabezado(ui.nombre_limpio(herramienta.nombre), herramienta.descripcion, etiquetas)
 
-usa_datos_reporte = herramienta.id in ("avance_preliminar", "comparativo_mensual",
-                                       "resumen_mensual", "resumen_vendedor")
-usa_etiquetas_mes = herramienta.id in ("comparativo_mensual", "modelo_datos")
-tiene_opciones = (usa_datos_reporte or usa_etiquetas_mes
-                  or herramienta.id == "resumen_vendedor")
+# Qué campos mostrar lo declara cada herramienta (registro.py), no una
+# lista de ids aquí: una herramienta nueva no obliga a tocar este archivo.
+tiene_opciones = herramienta.tiene_opciones
 opciones = {}
 
 # Los resultados se guardan en session_state, NO se dibujan solo dentro
@@ -263,13 +247,12 @@ with st.container(border=True, key="tarjeta_archivo"):
         archivos_subidos = [archivos_subidos]
 
     # La vista previa lee la bitácora en Excel; no aplica a ZIP ni a CSF en PDF.
-    if archivos_subidos and herramienta.id not in ("relacion_zip", "validar_csf"):
+    if archivos_subidos and herramienta.vista_previa_bitacora:
         _vista_previa(archivos_subidos)
 
-    # El comparativo necesita al menos dos meses para poder comparar.
-    if (herramienta.id == "comparativo_mensual" and archivos_subidos
-            and len(archivos_subidos) < 2):
-        st.warning("Sube al menos dos archivos para poder comparar meses.")
+    # El comparativo, por ejemplo, necesita al menos dos meses para comparar.
+    if archivos_subidos and len(archivos_subidos) < herramienta.minimo_archivos:
+        st.warning(f"Sube al menos {herramienta.minimo_archivos} archivos para poder comparar.")
 
 # --- 2. Datos del reporte (solo si la herramienta los pide) --------------
 if tiene_opciones:
@@ -277,7 +260,7 @@ if tiene_opciones:
         ui.paso(2, "Datos del reporte",
                 "Aparecen en el encabezado y el pie de los documentos.")
 
-        if usa_datos_reporte:
+        if herramienta.pide_pdv_e_implant:
             col_pdv, col_analista = st.columns(2)
             opciones["nombre_pdv"] = col_pdv.text_input(
                 "Nombre del PDV", value=_PDV_DEFECTO, key=f"pdv_{herramienta.id}",
@@ -286,7 +269,7 @@ if tiene_opciones:
                 "Implant", value=_ANALISTA_DEFECTO, key=f"analista_{herramienta.id}",
             )
 
-        if herramienta.id == "avance_preliminar":
+        if herramienta.pide_fecha_corte:
             usar_hoy = st.toggle("Usar la fecha de hoy como fecha de corte", value=True,
                                  key=f"hoy_{herramienta.id}")
             if not usar_hoy:
@@ -295,7 +278,7 @@ if tiene_opciones:
                                               key=f"fecha_{herramienta.id}")
                 opciones["fecha_corte"] = fecha_elegida.strftime("%d/%m/%Y")
 
-        if herramienta.id == "resumen_vendedor":
+        if herramienta.pide_vendedores:
             with st.expander("Generar solo para ciertos vendedores (opcional)",
                              icon=":material/filter_list:"):
                 st.caption(
@@ -310,7 +293,7 @@ if tiene_opciones:
                         l.strip() for l in texto_vend.splitlines() if l.strip()
                     ]
 
-        if usa_etiquetas_mes:
+        if herramienta.pide_etiquetas_mes:
             with st.expander("Etiquetas de mes (opcional)", icon=":material/label:"):
                 st.caption(
                     "Por default se usa el nombre de la hoja de cada Excel. "

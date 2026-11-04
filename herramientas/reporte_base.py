@@ -143,10 +143,6 @@ from . import pdf_util as _pdf_util
 ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
 COLOR_CATEGORIA = _est.COLOR_CATEGORIA
 
-NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
-SUBTITULO_EMPRESA = "MG Colima PYD"
-NOMBRE_ANALISTA = "Christian Ramos"
-
 _MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
              "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 
@@ -156,7 +152,6 @@ __all__ = [
     "secciones_detalladas",
     "crear_estilos",
     "crear_maquetadores",
-    "CARPETA_GRAFICAS",
     "COLUMNAS_ESPERADAS",
     "COLUMNAS_MONEDA",
     "COLUMNAS_PORCENTAJE",
@@ -187,11 +182,8 @@ __all__ = [
     "MG_ROJO_OSCURO",
     "MG_ROJO_PALIDO",
     "MG_ROJO_PASTEL",
-    "NOMBRE_ANALISTA",
-    "NOMBRE_EMPRESA",
     "ORDEN_CATEGORIAS",
     "PALETA_ROJOS",
-    "SUBTITULO_EMPRESA",
     "_CMAP_ROJOS",
     "_FUENTES_DISPONIBLES",
     "_MESES_ES",
@@ -226,13 +218,18 @@ __all__ = [
 
 
 def _limpiar_moneda(serie):
-    return (
+    """Convierte una columna de montos a número. Se usa pd.to_numeric con
+    errors='coerce' en vez de astype(float): así una celda con texto raro
+    ("PENDIENTE", "N/A", un guion) se vuelve NaN en lugar de tumbar todo
+    el reporte con un ValueError. (Era la versión del Resumen por vendedor;
+    el Avance, el Resumen y el Comparativo usaban astype(float).)"""
+    limpia = (
         serie.astype(str)
-             .str.replace(r"[\$,]", "", regex=True)
+             .str.replace(r"[^\d\.\-]", "", regex=True)
              .str.strip()
-             .replace({"nan": np.nan, "": np.nan, "None": np.nan})
-             .astype(float)
+             .replace({"": np.nan, "-": np.nan, ".": np.nan})
     )
+    return pd.to_numeric(limpia, errors="coerce")
 
 def _limpiar_porcentaje(serie):
     """Convierte la columna de tasa de interés a número (ej. "14.99%" -> 14.99).
@@ -315,8 +312,6 @@ plt.rcParams.update({
 })
 
 # Carpeta temporal para las imágenes de las gráficas que se insertarán en el PDF
-CARPETA_GRAFICAS = "graficas_temp_bitacora"
-os.makedirs(CARPETA_GRAFICAS, exist_ok=True)
 
 
 # =======================================================================
@@ -858,7 +853,7 @@ def grafica_status(df, guardar_como=None):
     _h.etiquetas_categorias_x(ax, list(conteo.index))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
-    plt.show()
+    plt.close(fig)
     return guardar_como
 
 def grafica_dona_categoria(df, guardar_como=None):
@@ -901,11 +896,13 @@ def grafica_dona_categoria(df, guardar_como=None):
     _h.titular(ax, _h.mezcla_de_cierre(conteo), "Proporción de solicitudes por estatus de cierre")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
-    plt.show()
+    plt.close(fig)
     return guardar_como
 
-def grafica_vendedores(df, guardar_como=None):
-    """Barras horizontales: total de solicitudes por vendedor."""
+def grafica_vendedores(df, guardar_como=None, sufijo=""):
+    """Barras horizontales: total de solicitudes por vendedor.
+
+    sufijo: se agrega al subtítulo (el Comparativo pasa " en el periodo")."""
     if "Nombre del Vendedor" not in df.columns:
         return None
     total_equipo = len(df)   # con capturas genéricas: cuadra con la portada
@@ -919,11 +916,11 @@ def grafica_vendedores(df, guardar_como=None):
     for i, valor in enumerate(conteo.values):
         ax.text(valor + max(conteo.values) * 0.01, i, str(valor), va="center", fontsize=9)
 
-    _h.titular(ax, _h.vendedor_con_mas(conteo, total_equipo), "Solicitudes ingresadas por vendedor" + (" · sin capturas genéricas" if excluidos else ""))
+    _h.titular(ax, _h.vendedor_con_mas(conteo, total_equipo), f"Solicitudes ingresadas por vendedor{sufijo}" + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Número de solicitudes")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
-    plt.show()
+    plt.close(fig)
     return guardar_como
 
 def grafica_vendedor_status(df, guardar_como=None):
@@ -961,7 +958,7 @@ def grafica_vendedor_status(df, guardar_como=None):
               ncol=min(3, max(1, len(orden_cols))))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
-    plt.show()
+    plt.close(fig)
     return guardar_como
 
 def grafica_monto_por_vendedor(df, guardar_como=None):
@@ -1018,11 +1015,13 @@ def grafica_monto_por_vendedor(df, guardar_como=None):
     ax.legend(loc="lower right", frameon=False)
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
-    plt.show()
+    plt.close(fig)
     return guardar_como
 
-def grafica_modelos(df, guardar_como=None):
-    """Barras horizontales: modelos de vehículo más solicitados."""
+def grafica_modelos(df, guardar_como=None, sufijo=""):
+    """Barras horizontales: modelos de vehículo más solicitados.
+
+    sufijo: se agrega al subtítulo (el Comparativo pasa " en el periodo")."""
     if "Vehículo" not in df.columns:
         return None
     conteo_completo = df["Vehículo"].dropna().value_counts()
@@ -1044,11 +1043,11 @@ def grafica_modelos(df, guardar_como=None):
     if recortado:
         titulo += f" (top {TOP_N})"
     _h.titular(ax, _h.modelo_lider(conteo_completo),
-               f"Modelos con más solicitudes (top {min(TOP_N, len(conteo_completo))})")
+               f"Modelos con más solicitudes{sufijo} (top {min(TOP_N, len(conteo_completo))})")
     ax.set_xlabel("Número de solicitudes")
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
-    plt.show()
+    plt.close(fig)
     return guardar_como
 
 def grafica_gap_por_categoria(df, guardar_como=None):
@@ -1087,7 +1086,7 @@ def grafica_gap_por_categoria(df, guardar_como=None):
     plt.tight_layout()
     _h.leyenda_bajo_eje(ax, ncol=2, fontsize=8.5)
     _guardar_si_procede(fig, guardar_como)
-    plt.show()
+    plt.close(fig)
     return guardar_como
 
 def grafica_gap_por_vendedor_total(df, guardar_como=None):
@@ -1137,7 +1136,7 @@ def grafica_gap_por_vendedor_total(df, guardar_como=None):
     ax.legend(loc="lower right", frameon=False)
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
-    plt.show()
+    plt.close(fig)
     return guardar_como
 
 def grafica_gap_por_vendedor_y_status(df, guardar_como=None):
@@ -1179,7 +1178,7 @@ def grafica_gap_por_vendedor_y_status(df, guardar_como=None):
               ncol=min(3, max(1, len(orden_cols))))
     plt.tight_layout()
     _guardar_si_procede(fig, guardar_como)
-    plt.show()
+    plt.close(fig)
     return guardar_como
 
 def grafica_gap_financiado_por_vendedor(df, guardar_como=None):
@@ -1223,8 +1222,8 @@ def grafica_gap_financiado_por_vendedor(df, guardar_como=None):
     plt.close(fig)
     return guardar_como
 
-def generar_graficas_para_pdf(df):
-    """Genera todas las gráficas guardándolas como PNG en CARPETA_GRAFICAS,
+def generar_graficas_para_pdf(df, carpeta):
+    """Genera todas las gráficas guardándolas como PNG en `carpeta`,
     listas para incrustarse en el reporte narrativo. Devuelve un diccionario
     {clave: ruta_png} solo con las gráficas que sí se pudieron generar
     (si falta una columna o no hay datos, esa clave simplemente no aparece)."""
@@ -1249,7 +1248,7 @@ def generar_graficas_para_pdf(df):
     ]
     rutas = {}
     for clave, funcion, nombre_archivo in especificaciones:
-        ruta = os.path.join(CARPETA_GRAFICAS, nombre_archivo)
+        ruta = os.path.join(carpeta, nombre_archivo)
         resultado = funcion(df, guardar_como=ruta)
         plt.close("all")
         if resultado:
@@ -1264,7 +1263,7 @@ def generar_graficas_para_pdf(df):
         raise RuntimeError(
             "No se pudo generar ninguna gráfica. Revisa que el archivo traiga "
             "las columnas esperadas (STATUS, Nombre del Vendedor, etc.) y que "
-            f"la carpeta '{CARPETA_GRAFICAS}' se pueda escribir."
+            f"la carpeta '{carpeta}' se pueda escribir."
         )
 
     return rutas

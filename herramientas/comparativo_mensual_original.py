@@ -16,19 +16,13 @@ from . import fechas as _fechas   # hora de México, no la del servidor
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
-from matplotlib.colors import LinearSegmentedColormap, to_rgb
 
-pd.set_option("display.max_columns", None)
-pd.set_option("display.width", 140)
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
 from reportlab.lib import colors as rl_colors
-from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image,
-    HRFlowable, KeepTogether, CondPageBreak
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable, KeepTogether, CondPageBreak
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
@@ -36,123 +30,51 @@ from xml.sax.saxutils import escape as _xml_escape
 
 
 # =======================================================================
-# 1) PALETA DE COLORES — misma identidad de marca que el avance preliminar
-#    (rojos MG para categorías de cierre, azules Inbursa para el eje
-#    temporal / comparación entre meses, neutros para el resto)
-# =======================================================================
-MG_ROJO          = "#E4002B"
-MG_ROJO_OSCURO   = "#7A0019"
-INBURSA_AZUL     = "#191970"
-MG_ROJO_MEDIO    = "#B3001B"
-MG_ROJO_CLARO    = "#FF6B6B"
-MG_ROJO_PASTEL   = "#FFB3B3"
-MG_ROJO_PALIDO   = "#FBE7E9"
-MG_GRIS_OSCURO   = "#2B2B2B"
-MG_GRIS_CLARO    = "#EAEAEA"
-BLANCO           = "#FFFFFF"
-
-GRIS_TEXTO_SEC   = "#6B7280"
-GRIS_LINEA       = "#E3E5E9"
-GRIS_ZEBRA       = "#F6F7F9"
-AZUL_PALIDO      = "#EEF0F8"
-
-# gradiente de rojos: se usa para lo que ya usaba el avance preliminar
-# (vendedores, modelos, montos por vendedor, etc.)
-PALETA_ROJOS = ["#7A0019", "#9E001F", "#C10024", "#E4002B",
-                 "#F1354D", "#FF6B6B", "#FF9B9B", "#FFC7C7"]
-_CMAP_ROJOS = LinearSegmentedColormap.from_list("rojos_mg", PALETA_ROJOS)
-
-# gradiente de azules: NUEVO para este reporte — identifica "mes" en las
-# gráficas comparativas, para no confundirlo visualmente con el rojo que
-# ya está reservado para las categorías de cierre (Financiado/Aprobado/...)
-PALETA_AZULES = ["#0D0D3D", "#191970", "#2E2E93", "#4B4BB8",
-                  "#6E6ED0", "#9797E0", "#C2C2ED", "#E4E4F7"]
-_CMAP_AZULES = LinearSegmentedColormap.from_list("azules_inbursa", PALETA_AZULES)
-
-
-def _gradiente(n, cmap=_CMAP_ROJOS, tope=0.82):
-    if n <= 1:
-        return [MG_ROJO if cmap is _CMAP_ROJOS else INBURSA_AZUL]
-    valores = np.linspace(0.0, tope, n)
-    return [cmap(v) for v in valores]
-
-
-def _color_texto_legible(color_fondo):
-    r, g, b = to_rgb(color_fondo)
-    luminancia = 0.299 * r + 0.587 * g + 0.114 * b
-    return "white" if luminancia < 0.6 else MG_GRIS_OSCURO
-
-
-# =======================================================================
-# 1B) TIPOGRAFÍA — igual que el avance preliminar; cambia solo esta línea
-# =======================================================================
-FUENTE_BASE = "Helvetica"
-
-_FUENTES_DISPONIBLES = {
-    "Helvetica": {"regular": "Helvetica",   "bold": "Helvetica-Bold",
-                  "italica": "Helvetica-Oblique", "bold_italica": "Helvetica-BoldOblique"},
-    "Times":     {"regular": "Times-Roman", "bold": "Times-Bold",
-                  "italica": "Times-Italic",      "bold_italica": "Times-BoldItalic"},
-    "Courier":   {"regular": "Courier",     "bold": "Courier-Bold",
-                  "italica": "Courier-Oblique",    "bold_italica": "Courier-BoldOblique"},
-}
-_fuente_activa = _FUENTES_DISPONIBLES.get(FUENTE_BASE, _FUENTES_DISPONIBLES["Helvetica"])
-FUENTE_REGULAR      = _fuente_activa["regular"]
-FUENTE_BOLD         = _fuente_activa["bold"]
-FUENTE_ITALICA      = _fuente_activa["italica"]
-FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
-
-# =======================================================================
-# CATÁLOGO DE ESTATUS
-# Los colores, el orden y las etiquetas de cada categoría ya NO viven aquí:
-# están en herramientas/estatus.py, que es la fuente única de verdad para
-# los tres reportes. Para agregar un estatus nuevo, edita ESE archivo.
+# LO COMPARTIDO CON LOS DEMÁS REPORTES
+# La paleta, las fuentes, el estilo de las gráficas (plt.rcParams), las
+# columnas esperadas, la limpieza de montos y porcentajes y 5 gráficas
+# (vendedores, estatus por vendedor, GAP, GAP en financiados y modelos)
+# viven en reporte_base.py. Antes este archivo tenía su propia copia de
+# todo eso. El catálogo de estatus está en estatus.py.
 # =======================================================================
 from . import estatus as _est
 from . import conclusiones as _conclusiones
 from . import pdf_util as _pdf_util
 from . import lateral as _lateral
 from . import folios as _folios
-from . import metricas as _metricas
 from . import hallazgos as _h
+from .config import DatosReporte
+from .reporte_base import (  # paleta, fuentes, limpieza y gráficas compartidas
+    COLOR_CATEGORIA,
+    COLUMNAS_ESPERADAS,
+    COLUMNAS_MONEDA,
+    COLUMNAS_PORCENTAJE,
+    FUENTE_BOLD,
+    FUENTE_ITALICA,
+    FUENTE_REGULAR,
+    GRIS_LINEA,
+    GRIS_TEXTO_SEC,
+    INBURSA_AZUL,
+    MG_GRIS_CLARO,
+    MG_GRIS_OSCURO,
+    MG_ROJO,
+    MG_ROJO_OSCURO,
+    ORDEN_CATEGORIAS,
+    _MESES_ES,
+    _color_texto_legible,
+    _guardar_si_procede,
+    _limpiar_moneda,
+    _limpiar_porcentaje,
+    clasificar_status,
+    grafica_gap_financiado_por_vendedor,
+    grafica_gap_por_vendedor_total,
+    grafica_modelos,
+    grafica_vendedor_status,
+    grafica_vendedores,
+    imagen_ajustada,
+)
 
-ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
-COLOR_CATEGORIA = _est.COLOR_CATEGORIA
 
-NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
-SUBTITULO_EMPRESA = "MG Colima PYD"
-NOMBRE_ANALISTA = "Christian Ramos"
-
-_MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
-             "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-
-plt.rcParams.update({
-    "figure.facecolor":  "white",
-    "axes.facecolor":    "white",
-    "axes.edgecolor":    GRIS_LINEA,
-    "axes.labelcolor":   GRIS_TEXTO_SEC,
-    "text.color":        MG_GRIS_OSCURO,
-    "xtick.color":       GRIS_TEXTO_SEC,
-    "ytick.color":       GRIS_TEXTO_SEC,
-    "font.size":         10,
-    "axes.titlesize":    12.5,
-    "axes.titleweight":  "bold",
-    "axes.titlecolor":   MG_GRIS_OSCURO,
-    "axes.titlepad":     14,
-    "axes.labelsize":    9.5,
-    "axes.linewidth":    0.8,
-    "axes.spines.top":   False,
-    "axes.spines.right": False,
-    "axes.spines.left":  True,
-    "axes.grid":         False,
-    "xtick.labelsize":   9,
-    "ytick.labelsize":   9,
-    "legend.fontsize":   9,
-    "legend.frameon":    False,
-})
-
-CARPETA_GRAFICAS = "graficas_temp_comparativo"
-os.makedirs(CARPETA_GRAFICAS, exist_ok=True)
 
 
 # =======================================================================
@@ -207,66 +129,6 @@ def cargar_multiples_archivos(rutas_locales, nombres_meses=None):
 # =======================================================================
 # 3) LIMPIEZA Y NORMALIZACIÓN — idéntico al avance preliminar
 # =======================================================================
-COLUMNAS_ESPERADAS = [
-    "Folio CCK", "STATUS", "Nombre Completo", "Fecha de Nacimiento",
-    "Teléfono Móvil", "Correo Electrónico", "Nombre del Vendedor",
-    "Marca", "Vehículo", "Año Modelo", "Precio Venta (c/IVA)",
-    "Enganche", "¿Tiene GAP?", "Monto GAP", "Plazo (meses)",
-    "Tasa Interés Anual", "Monto Total a Financiar",
-    "Mensualidad Mínima", "Mensualidad Máxima",
-]
-
-COLUMNAS_MONEDA = [
-    "Precio Venta (c/IVA)", "Enganche", "Monto GAP",
-    "Monto Total a Financiar", "Mensualidad Mínima", "Mensualidad Máxima",
-]
-COLUMNAS_PORCENTAJE = ["Tasa Interés Anual"]
-
-# Los sinónimos de cada estatus están definidos en herramientas/estatus.py.
-# Se re-exportan por compatibilidad con código que los importara de aquí.
-STATUS_APROBADO   = _est.STATUS_APROBADO
-STATUS_FINANCIADO = _est.STATUS_FINANCIADO
-STATUS_RECHAZADOS = _est.STATUS_RECHAZADOS
-
-
-def _limpiar_moneda(serie):
-    return (
-        serie.astype(str)
-             .str.replace(r"[\$,]", "", regex=True)
-             .str.strip()
-             .replace({"nan": np.nan, "": np.nan, "None": np.nan})
-             .astype(float)
-    )
-
-
-def _limpiar_porcentaje(serie):
-    def _convertir(valor):
-        if pd.isna(valor):
-            return np.nan
-        if isinstance(valor, str):
-            texto = valor.strip().replace("%", "")
-            if texto in ("", "nan", "None"):
-                return np.nan
-            try:
-                return float(texto)
-            except ValueError:
-                return np.nan
-        try:
-            numero = float(valor)
-        except (TypeError, ValueError):
-            return np.nan
-        return numero * 100 if numero <= 1 else numero
-    return serie.apply(_convertir)
-
-
-def clasificar_status(status):
-    """Traduce el STATUS crudo del Excel a su categoría.
-
-    Un estatus que no esté en el catálogo YA NO se mete a la fuerza en
-    "CONTRAPROPUESTA": se respeta como categoría propia.
-    Ver herramientas/estatus.py.
-    """
-    return _est.clasificar_status(status)
 
 
 def limpiar_datos(df_original, mes=None):
@@ -450,15 +312,6 @@ def analisis_financiero_por_categoria(df):
     return tabla
 
 
-def _nombres_y(nombres):
-    nombres = [str(n) for n in nombres]
-    if not nombres:
-        return ""
-    if len(nombres) == 1:
-        return nombres[0]
-    return ", ".join(nombres[:-1]) + " y " + nombres[-1]
-
-
 def _lista_vendedores_por_categoria(df, categoria, max_nombres=4):
     nombres = (df.loc[df["Categoria"] == categoria, "Nombre del Vendedor"]
                .dropna().unique().tolist())
@@ -532,37 +385,6 @@ def construir_tabla_comparativa(datos_por_mes, orden_meses):
 # =======================================================================
 # 6) GRÁFICAS — utilidades comunes
 # =======================================================================
-def _formato_miles(ax, eje="y"):
-    formatter = mticker.FuncFormatter(lambda x, _: f"{x:,.0f}")
-    (ax.yaxis if eje == "y" else ax.xaxis).set_major_formatter(formatter)
-
-
-def _guardar_si_procede(fig, guardar_como):
-    if guardar_como:
-        # La carpeta de gráficas se creaba UNA sola vez, al importar el
-        # módulo. En un proceso de larga vida (Streamlit) eso no basta: si
-        # algo la borra entre corridas —por ejemplo la limpieza de temporales
-        # de la app— la siguiente corrida truena con "No such file or
-        # directory", o peor, se queda sin gráficas en silencio. Asegurarla
-        # aquí la vuelve a crear cuando haga falta.
-        carpeta = os.path.dirname(guardar_como)
-        if carpeta:
-            os.makedirs(carpeta, exist_ok=True)
-        # Titular demasiado ancho -> se parte en renglones (ver hallazgos).
-        _h.ajustar_titulos(fig)
-        fig.savefig(guardar_como, dpi=150, bbox_inches="tight", facecolor="white")
-    return guardar_como
-
-
-def imagen_ajustada(ruta, ancho_cm, alto_max_cm=None):
-    ancho_px, alto_px = ImageReader(ruta).getSize()
-    alto_cm = ancho_cm * (alto_px / ancho_px)
-    if alto_max_cm and alto_cm > alto_max_cm:
-        alto_cm = alto_max_cm
-        ancho_cm = alto_cm * (ancho_px / alto_px)
-    return Image(ruta, width=ancho_cm * cm, height=alto_cm * cm, hAlign="CENTER")
-
-
 # --- 6A) Gráficas AGREGADAS del periodo completo (mismas del avance
 #         preliminar, aplicadas al DataFrame combinado de todos los meses) ---
 def tabla_ticket_promedio_vendedor(df_combinado):
@@ -668,164 +490,6 @@ def tabla_promedio_vendedor(df_combinado, orden_meses):
         tabla["Variación"] = ultimo - primero
 
     return tabla.sort_values("Total", ascending=False)
-
-
-def grafica_vendedores(df, guardar_como=None, titulo="Solicitudes por vendedor"):
-    if "Nombre del Vendedor" not in df.columns:
-        return None
-    total_equipo = len(df)   # con capturas genéricas: cuadra con la portada
-    df, excluidos = _h.solo_personas(df)
-    conteo = df["Nombre del Vendedor"].value_counts().sort_values(ascending=True)
-    fig, ax = plt.subplots(figsize=(8, max(4, len(conteo) * 0.5)))
-    colores = list(reversed(_gradiente(len(conteo))))
-    ax.barh(conteo.index, conteo.values, color=colores, edgecolor="white")
-    for i, valor in enumerate(conteo.values):
-        ax.text(valor + max(conteo.values) * 0.01, i, str(valor), va="center", fontsize=9)
-    _h.titular(ax, _h.vendedor_con_mas(conteo, total_equipo),
-               "Solicitudes ingresadas por vendedor en el periodo"
-               + (" · sin capturas genéricas" if excluidos else ""))
-    ax.set_xlabel("Número de solicitudes")
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
-def grafica_vendedor_status(df, guardar_como=None, titulo=None):
-    if "Nombre del Vendedor" not in df.columns or "Categoria" not in df.columns:
-        return None
-    df, excluidos = _h.solo_personas(df)
-    pivote = pd.crosstab(df["Nombre del Vendedor"], df["Categoria"])
-    orden_cols = [c for c in ORDEN_CATEGORIAS if c in pivote.columns]
-    # El título lista las categorías que de verdad hay en el periodo.
-    if titulo is None:
-        # Sin enumerar categorías: la leyenda ya las muestra y, con muchos
-        # estatus, el título deformaba la imagen exportada.
-        titulo = "Estatus de cierre por vendedor"
-    pivote = pivote[orden_cols]
-    hallazgo = _h.vendedor_mejor_conversion(pivote)
-    pivote["Total"] = pivote.sum(axis=1)
-    pivote = pivote.sort_values("Total", ascending=True).drop(columns="Total")
-    fig, ax = plt.subplots(figsize=(9, max(4, len(pivote) * 0.55) + 0.8))
-    izquierda = np.zeros(len(pivote))
-    for col in orden_cols:
-        valores = pivote[col].values
-        ax.barh(pivote.index, valores, left=izquierda,
-                 color=COLOR_CATEGORIA.get(col, MG_GRIS_CLARO),
-                 label=_est.etiqueta(col), edgecolor="white")
-        izquierda += valores
-    _h.titular(ax, hallazgo, "Estatus de cierre de las solicitudes de cada vendedor"
-               + (" · sin capturas genéricas" if excluidos else ""))
-    ax.set_xlabel("Número de solicitudes")
-    ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
-              mode="expand", frameon=False, fontsize=8,
-              handlelength=1.4, columnspacing=1.2,
-              ncol=min(3, max(1, len(orden_cols))))
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
-def grafica_modelos(df, guardar_como=None, titulo_extra=""):
-    if "Vehículo" not in df.columns:
-        return None
-    conteo_completo = df["Vehículo"].dropna().value_counts()
-    if conteo_completo.empty:
-        return None
-    TOP_N = 10
-    recortado = len(conteo_completo) > TOP_N
-    conteo = conteo_completo.head(TOP_N).sort_values(ascending=True)
-    fig, ax = plt.subplots(figsize=(8, max(4, len(conteo) * 0.4)))
-    colores = list(reversed(_gradiente(len(conteo))))
-    ax.barh(conteo.index, conteo.values, color=colores, edgecolor="white")
-    for i, valor in enumerate(conteo.values):
-        ax.text(valor + max(conteo.values) * 0.02, i, str(valor), va="center", fontsize=9)
-    titulo = f"Modelos más solicitados {titulo_extra}".strip()
-    if recortado:
-        titulo += f" (top {TOP_N})"
-    _h.titular(ax, _h.modelo_lider(conteo_completo),
-               f"Modelos con más solicitudes en el periodo (top {min(TOP_N, len(conteo_completo))})")
-    ax.set_xlabel("Número de solicitudes")
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
-def grafica_gap_por_vendedor_total(df, guardar_como=None, titulo="Cobertura de GAP por vendedor"):
-    if "Nombre del Vendedor" not in df.columns or "¿Tiene GAP?" not in df.columns:
-        return None
-    total_equipo, gap_equipo = len(df), int((df["¿Tiene GAP?"] == "SI").sum())
-    df, excluidos = _h.solo_personas(df)
-    df_gap = df[df["¿Tiene GAP?"] == "SI"].copy()
-    if df_gap.empty:
-        return None
-    conteo_gap = df_gap["Nombre del Vendedor"].value_counts()
-    conteo_total = df["Nombre del Vendedor"].value_counts()
-    vendedores = conteo_total.sort_values(ascending=True).index.tolist()
-    valores_total = np.array([conteo_total.get(v, 0) for v in vendedores])
-    valores_gap = np.array([conteo_gap.get(v, 0) for v in vendedores])
-    maximo = max(valores_total.max(), valores_gap.max(), 1)
-    y = np.arange(len(vendedores))
-    alto = 0.36
-    fig, ax = plt.subplots(figsize=(9, max(4, len(vendedores) * 0.65)))
-    ax.barh(y + alto / 2, valores_total, height=alto, color=MG_GRIS_CLARO,
-             edgecolor="white", label="Total de solicitudes")
-    ax.barh(y - alto / 2, valores_gap, height=alto, color=MG_ROJO,
-             edgecolor="white", label="Con GAP")
-    # Misma lectura que la gráfica de GAP en financiados: "15 de 21 (71%)".
-    for yi, g, t in zip(y, valores_gap, valores_total):
-        ax.text(max(g, t) + maximo * 0.015, yi, f"{g} de {t} ({g / t * 100:.0f}%)" if t else "—",
-                va="center", fontsize=8.5, color=MG_GRIS_OSCURO)
-    ax.set_yticks(y)
-    ax.set_yticklabels(vendedores)
-    ax.set_xlim(0, maximo * 1.45)
-    _h.titular(ax, _h.cobertura_gap(total_equipo, gap_equipo),
-               "Solicitudes con GAP frente al total de cada vendedor"
-               + (" · sin capturas genéricas" if excluidos else ""))
-    ax.set_xlabel("Número de solicitudes")
-    ax.legend(loc="lower right", frameon=False)
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
-def grafica_gap_financiado_por_vendedor(df, guardar_como=None, titulo="GAP en créditos financiados, por vendedor"):
-    """Misma gráfica y mismo cálculo que en reporte_base.py (ver metricas.py)."""
-    fin_equipo = df[df["Categoria"] == "FINANCIADO"] if "Categoria" in df.columns else df.iloc[0:0]
-    gap_fin_equipo = int((fin_equipo["¿Tiene GAP?"] == "SI").sum()) if "¿Tiene GAP?" in df.columns else 0
-    df, excluidos = _h.solo_personas(df)
-    datos = _metricas.gap_en_financiados_por_vendedor(df)
-    if datos.empty:
-        return None
-
-    fig, ax = plt.subplots(figsize=(8, max(4, len(datos) * 0.5)))
-    # Color por valor, no por posición: los empates se ven iguales.
-    rangos, n_valores = _metricas.rango_de_valor(datos)
-    paleta = list(reversed(_gradiente(n_valores)))
-    ax.barh(datos.index, datos["con_gap"], color=[paleta[r] for r in rangos],
-            edgecolor="white")
-
-    # Cada barra lleva el dato que permite juzgarla, no una felicitación.
-    tope = datos["con_gap"].max()
-    for i, (_, fila) in enumerate(datos.iterrows()):
-        ax.text(fila["con_gap"] + tope * 0.02, i,
-                _metricas.etiqueta_gap(fila["con_gap"], fila["financiados"], fila["pct"]),
-                va="center", fontsize=9, color=MG_GRIS_OSCURO)
-
-    # Espacio a la derecha para la etiqueta, que es más larga que un número.
-    ax.set_xlim(0, tope * 2.1)
-    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
-    ax.set_xlabel("Créditos financiados con GAP")
-    _h.titular(ax, _h.gap_en_financiados(gap_fin_equipo, len(fin_equipo)),
-               "Créditos financiados con GAP, por vendedor"
-               + (" · sin capturas genéricas" if excluidos else ""))
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
 
 
 # --- 6B) Gráficas COMPARATIVAS entre meses (nuevas de este reporte) ---
@@ -994,7 +658,7 @@ def grafica_comp_gap_vs_gap_financiado(tabla_comp, guardar_como=None):
     return guardar_como
 
 
-def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado):
+def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado, carpeta):
     # Vendedores y modelos cuentan cada folio una vez (ver folios.py). Las
     # gráficas por mes no usan df_combinado, así que siguen siendo la foto
     # de cada bitácora.
@@ -1018,15 +682,15 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
         ("tasa_conversion",    lambda ruta: grafica_comp_tasa_conversion(tabla_comp, ruta),                   "c02_tasa_conversion.png"),
         ("montos_mes",         lambda ruta: grafica_comp_montos_por_mes(tabla_comp, ruta),                    "c03_montos_mes.png"),
         ("gap_vs_gap_fin_mes", lambda ruta: grafica_comp_gap_vs_gap_financiado(tabla_comp, ruta),              "c04b_gap_vs_gap_fin_mes.png"),
-        ("vendedores",         lambda ruta: grafica_vendedores(df_combinado, ruta),                           "c06_vendedores.png"),
+        ("vendedores",         lambda ruta: grafica_vendedores(df_combinado, ruta, " en el periodo"),"c06_vendedores.png"),
         ("vendedor_status",    lambda ruta: grafica_vendedor_status(df_combinado, ruta),                      "c07_vendedor_status.png"),
         ("gap_por_vendedor",   lambda ruta: grafica_gap_por_vendedor_total(df_combinado, ruta),               "c09_gap_vendedor.png"),
         ("gap_financiado_vend", lambda ruta: grafica_gap_financiado_por_vendedor(df_combinado, ruta),         "c10_gap_financiado_vendedor.png"),
-        ("modelos",            lambda ruta: grafica_modelos(df_combinado, ruta),                              "c11_modelos.png"),
+        ("modelos",            lambda ruta: grafica_modelos(df_combinado, ruta, " en el periodo"),"c11_modelos.png"),
     ]
     rutas = {}
     for clave, funcion, nombre_png in especificaciones:
-        ruta = os.path.join(CARPETA_GRAFICAS, nombre_png)
+        ruta = os.path.join(carpeta, nombre_png)
         try:
             resultado = funcion(ruta)
         except Exception as e:
@@ -1047,7 +711,7 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
         raise RuntimeError(
             "No se pudo generar ninguna gráfica. Revisa que el archivo traiga "
             "las columnas esperadas (STATUS, Nombre del Vendedor, etc.) y que "
-            f"la carpeta '{CARPETA_GRAFICAS}' se pueda escribir."
+            f"la carpeta '{carpeta}' se pueda escribir."
         )
 
     return rutas
@@ -1068,7 +732,10 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
 # =======================================================================
 def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
                                      df_combinado, nombre_archivo=None,
-                                     recolectar_elementos=None):
+                                     recolectar_elementos=None, datos=None,
+                                     carpeta_graficas=None):
+    """datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config."""
+    datos = datos or DatosReporte()
     if nombre_archivo is None:
         fecha_archivo = _fechas.ahora().strftime("%Y%m%d_%H%M")
         rango = f"{orden_meses[0].title()}" if len(orden_meses) == 1 else \
@@ -1079,7 +746,13 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     print(" GENERANDO REPORTE PDF COMPARATIVO")
     print("=" * 72)
 
-    rutas_graficas = generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado)
+    # Las gráficas van en una carpeta junto al PDF (en la app, dentro del
+    # temporal de la corrida, que se borra al terminar). Antes era una
+    # carpeta fija en la raíz, compartida por todas las corridas.
+    carpeta_graficas = carpeta_graficas or os.path.join(
+        os.path.dirname(os.path.abspath(nombre_archivo)), "graficas")
+    rutas_graficas = generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp,
+                                                   df_combinado, carpeta_graficas)
     lectura, conclusiones_fin = _conclusiones.lectura_y_conclusiones_comparativo(
         tabla_comp, orden_meses, df_combinado)
 
@@ -1142,7 +815,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         """Encabezado y pie: el dibujo vive en pdf_util.pintar_encabezado_pie,
         compartido por los cuatro reportes."""
         _pdf_util.pintar_encabezado_pie(
-            canvas_obj, doc, NOMBRE_EMPRESA, f"Reporte Comparativo Mensual · {SUBTITULO_EMPRESA}", FECHA_REPORTE, NOMBRE_ANALISTA,
+            canvas_obj, doc, datos.empresa, f"Reporte Comparativo Mensual · {datos.pdv}", FECHA_REPORTE, datos.analista,
             fuente_regular=FUENTE_REGULAR, fuente_bold=FUENTE_BOLD)
 
     def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1,
@@ -1214,7 +887,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     elementos.append(Paragraph("REPORTE&nbsp;&nbsp;·&nbsp;&nbsp;COMPARATIVO MENSUAL DE BITÁCORA",
                                 estilo_kicker_portada))
     elementos.append(Paragraph("Reporte Comparativo Mensual", estilo_titulo_portada))
-    elementos.append(Paragraph(f"{NOMBRE_EMPRESA} · {SUBTITULO_EMPRESA}", estilo_subtitulo_portada))
+    elementos.append(Paragraph(f"{datos.empresa} · {datos.pdv}", estilo_subtitulo_portada))
     elementos.append(Spacer(1, 0.12 * cm))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(GRIS_LINEA),
                                  spaceBefore=6, spaceAfter=10, hAlign="LEFT"))

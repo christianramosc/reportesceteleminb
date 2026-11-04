@@ -1,22 +1,22 @@
 """
-REPORTE DE AVANCE PRELIMINAR — corte a mitad de mes.
+REPORTE MENSUAL DE LA BITÁCORA — en dos modos:
 
-La carga del Excel, la limpieza, los cálculos y las 10 gráficas NO viven
-aquí: son iguales para los dos reportes y están en reporte_base.py. Este
-archivo solo tiene lo que distingue a ESTE reporte: su portada, su
-narrativa, el orden de sus secciones y sus conclusiones.
+  · modo="avance": corte a mitad de mes (Avance Preliminar). Ubica el corte
+    en el calendario ("día 15 de 31"), dice cuántos días quedan y qué
+    solicitudes todavía pueden convertirse.
+  · modo="cierre": mes ya cerrado (Resumen Mensual).
 
-Si vas a corregir algo que aplica también al otro reporte, hazlo en
-reporte_base.py — para eso existe.
+Antes eran dos archivos (avance_preliminar_original.py y
+resumen_mensual_original.py) iguales en un 84%: cada arreglo había que
+aplicarlo dos veces. Ahora el cuerpo es uno solo y lo que cambia entre los
+dos modos está marcado con `es_avance`.
+
+La carga del Excel, la limpieza, los cálculos y las gráficas viven en
+reporte_base.py; aquí solo están la portada, la narrativa y el orden de
+las secciones.
 """
 
-from .reporte_base import *          # noqa: F401,F403  (ver __all__ allí)
-from . import estatus as _est
-from . import conclusiones as _conclusiones
-from . import pdf_util as _pdf_util
-from . import lateral as _lateral
-
-from . import fechas as _fechas   # hora de México, no la del servidor
+import os
 
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.pagesizes import letter
@@ -26,47 +26,71 @@ from reportlab.platypus import (
     Spacer, Table, TableStyle,
 )
 
-# Estos tres SÍ se redeclaran aquí (aunque estén en la base) porque los
-# adaptadores de la app los reasignan sobre ESTE módulo antes de generar,
-# y la portada los lee desde aquí.
-NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
-SUBTITULO_EMPRESA = "MG Colima PYD"
-NOMBRE_ANALISTA = "Christian Ramos"
+from . import conclusiones as _conclusiones
+from . import estatus as _est
+from . import fechas as _fechas   # hora de México, no la del servidor
+from . import lateral as _lateral
+from . import pdf_util as _pdf_util
+from .config import DatosReporte
+from .reporte_base import (
+    GRIS_LINEA,
+    MG_ROJO,
+    clasificar_status,
+    contexto_de_corte,
+    crear_estilos,
+    crear_maquetadores,
+    filas_tabla_vendedor,
+    generar_graficas_para_pdf,
+    secciones_detalladas,
+)
+
+MODOS = ("avance", "cierre")
 
 
-def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
-                                nombre_archivo=None, fecha_corte=None,
-                                recolectar_elementos=None, hoja=None):
+def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
+                        nombre_archivo=None, fecha_corte=None,
+                        recolectar_elementos=None, hoja=None, datos=None,
+                        carpeta_graficas=None):
     """
-    Arma el reporte de AVANCE PRELIMINAR: portada con KPIs y el contexto
-    del corte dentro del mes, resumen ejecutivo redactado, reporte
-    detallado por sección (con tablas y gráficas) y conclusiones. Recibe
-    los resultados ya calculados por resumen_general(), analisis_por_vendedor()
-    y analisis_financiero_por_categoria() para no repetir esos cálculos ni
-    duplicar la salida de consola.
+    Arma el reporte: portada con KPIs, resumen ejecutivo redactado, reporte
+    detallado por sección (con tablas y gráficas) y conclusiones. Recibe los
+    resultados ya calculados por resumen_general(), analisis_por_vendedor()
+    y analisis_financiero_por_categoria() para no repetir esos cálculos.
 
-    fecha_corte: fecha a la que corresponde el avance (por defecto, hoy).
-    Sirve para ubicar el corte en el calendario del mes -día X de N, %
-    transcurrido- y para fechar la portada y el pie de página.
+    modo: "avance" (corte a mitad de mes) o "cierre" (mes cerrado).
+    fecha_corte: solo en modo avance. Fecha del corte (por defecto, hoy):
+        ubica el corte en el calendario del mes y fecha la portada.
+    hoja: nombre de la hoja del Excel ("JULIO 2026"). En modo avance sirve
+        para advertir si la fecha de corte cae en otro mes.
+    datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config.
+    carpeta_graficas: dónde dibujar las gráficas (por defecto, junto al PDF).
     """
-    ctx = contexto_de_corte(fecha_corte)
+    if modo not in MODOS:
+        raise ValueError(f"modo debe ser uno de {MODOS}, no {modo!r}")
+    es_avance = modo == "avance"
+    datos = datos or DatosReporte()
+    ctx = contexto_de_corte(fecha_corte) if es_avance else None
 
     if nombre_archivo is None:
         fecha_archivo = _fechas.ahora().strftime("%Y%m%d_%H%M")
-        nombre_archivo = f"Avance_Preliminar_{fecha_archivo}.pdf"
+        prefijo = "Avance_Preliminar" if es_avance else "Reporte_Bitacora"
+        nombre_archivo = f"{prefijo}_{fecha_archivo}.pdf"
 
     print("=" * 72)
-    print(" GENERANDO REPORTE PDF DE AVANCE PRELIMINAR")
+    print(" GENERANDO REPORTE PDF DE AVANCE PRELIMINAR" if es_avance
+          else " GENERANDO REPORTE PDF NARRATIVO")
     print("=" * 72)
 
-    rutas_graficas = generar_graficas_para_pdf(df)
+    # Las gráficas van en una carpeta junto al PDF (en la app, dentro del
+    # temporal de la corrida, que se borra al terminar). Antes era una
+    # carpeta fija en la raíz, compartida por todas las corridas.
+    carpeta_graficas = carpeta_graficas or os.path.join(
+        os.path.dirname(os.path.abspath(nombre_archivo)), "graficas")
+    rutas_graficas = generar_graficas_para_pdf(df, carpeta_graficas)
 
     # -------------------------------------------------------------
     # Estilos
     # -------------------------------------------------------------
-    # Estilos y maquetación vienen de reporte_base: eran ~220 líneas
-    # idénticas en los dos reportes. Se reatan a nombres locales con la
-    # misma grafía de antes para que la narrativa de abajo no cambie.
     _estilos = crear_estilos()
     estilo_kicker_portada = _estilos["kicker_portada"]
     estilo_titulo_portada = _estilos["titulo_portada"]
@@ -77,14 +101,19 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     estilo_cuerpo = _estilos["cuerpo"]
     estilo_nota = _estilos["nota"]
 
-    FECHA_REPORTE = ctx["fecha_corte"].strftime("%d/%m/%Y")
+    FECHA_REPORTE = (ctx["fecha_corte"] if es_avance else _fechas.hoy()).strftime("%d/%m/%Y")
 
     _maq = crear_maquetadores(
-        _estilos, subtitulo=f"Avance Preliminar de Bitácora · {SUBTITULO_EMPRESA}",
-        empresa=NOMBRE_EMPRESA, analista=NOMBRE_ANALISTA, fecha=FECHA_REPORTE,
+        _estilos,
+        subtitulo=(f"Avance Preliminar de Bitácora · {datos.pdv}" if es_avance
+                   else "Reporte de Bitácora de Solicitudes"),
+        empresa=datos.empresa, analista=datos.analista, fecha=FECHA_REPORTE,
     )
     encabezado_pie_pagina = _maq["encabezado_pie_pagina"]
     tabla_estilo_mg = _maq["tabla_estilo_mg"]
+
+    # Frases que cambian según el modo.
+    periodo = "hasta la fecha de corte" if es_avance else "en el periodo"
 
     # -------------------------------------------------------------
     # Datos clave ya disponibles en `resumen` (de resumen_general),
@@ -93,9 +122,6 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     total = resumen.get("total", len(df))
     financiados = resumen.get("financiados", 0)
     tiene_categoria = "financiados" in resumen
-
-    def pct(n):
-        return (n / total * 100) if total else 0
 
     n_vendedores = int(tabla_vendedor.shape[0]) if tabla_vendedor is not None else 0
 
@@ -114,39 +140,51 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
 
     # --- Portada ---
     elementos.append(Spacer(1, 0.2 * cm))
-    elementos.append(Paragraph("AVANCE PRELIMINAR&nbsp;&nbsp;·&nbsp;&nbsp;BITÁCORA DE SOLICITUDES",
-                                estilo_kicker_portada))
-    elementos.append(Paragraph("Reporte de Avance Mensual", estilo_titulo_portada))
-    elementos.append(Paragraph(f"{NOMBRE_EMPRESA} · {SUBTITULO_EMPRESA}", estilo_subtitulo_portada))
+    if es_avance:
+        elementos.append(Paragraph("AVANCE PRELIMINAR&nbsp;&nbsp;·&nbsp;&nbsp;BITÁCORA DE SOLICITUDES",
+                                    estilo_kicker_portada))
+        elementos.append(Paragraph("Reporte de Avance Mensual", estilo_titulo_portada))
+    else:
+        elementos.append(Paragraph("RESUMEN MENSUAL&nbsp;&nbsp;·&nbsp;&nbsp;BITÁCORA DE SOLICITUDES",
+                                    estilo_kicker_portada))
+        elementos.append(Paragraph("Resumen Mensual", estilo_titulo_portada))
+    elementos.append(Paragraph(f"{datos.empresa} · {datos.pdv}", estilo_subtitulo_portada))
     elementos.append(Spacer(1, 0.12 * cm))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(GRIS_LINEA),
                                  spaceBefore=6, spaceAfter=10, hAlign="LEFT"))
-    # ¿La fecha de corte cae en el mismo mes que los datos? Se decide una sola
-    # vez y lo respetan la portada, la introducción y los focos. Antes solo
-    # los focos lo sabían, y la portada seguía diciendo "quedan 9 días para
-    # el cierre de septiembre" sobre datos de julio.
-    _mes_datos = _conclusiones.mes_desde_hoja(hoja)
-    corte_coherente = not (_mes_datos and _mes_datos != ctx["fecha_corte"].month)
 
-    if corte_coherente:
-        elementos.append(Paragraph(
-            f"Corte: <b>{FECHA_REPORTE}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
-            f"Día {ctx['dia_actual']} de {ctx['dias_en_mes']} de {ctx['nombre_mes']} "
-            f"&nbsp;&nbsp;|&nbsp;&nbsp; "
-            f"<font color='{MG_ROJO}'><b>{ctx['pct_transcurrido']:.0f}% del mes transcurrido</b></font>",
-            estilo_meta_portada
-        ))
+    corte_coherente = False
+    if es_avance:
+        # ¿La fecha de corte cae en el mismo mes que los datos? Se decide una
+        # sola vez y lo respetan la portada, la introducción y los focos.
+        # Antes solo los focos lo sabían, y la portada seguía diciendo
+        # "quedan 9 días para el cierre de septiembre" sobre datos de julio.
+        _mes_datos = _conclusiones.mes_desde_hoja(hoja)
+        corte_coherente = not (_mes_datos and _mes_datos != ctx["fecha_corte"].month)
+
+        if corte_coherente:
+            elementos.append(Paragraph(
+                f"Corte: <b>{FECHA_REPORTE}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+                f"Día {ctx['dia_actual']} de {ctx['dias_en_mes']} de {ctx['nombre_mes']} "
+                f"&nbsp;&nbsp;|&nbsp;&nbsp; "
+                f"<font color='{MG_ROJO}'><b>{ctx['pct_transcurrido']:.0f}% del mes transcurrido</b></font>",
+                estilo_meta_portada
+            ))
+        else:
+            elementos.append(Paragraph(
+                f"Corte: <b>{FECHA_REPORTE}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+                f"<font color='{MG_ROJO}'><b>La fecha de corte no corresponde al mes "
+                f"de los datos</b></font>",
+                estilo_meta_portada
+            ))
+        elementos.append(Spacer(1, 0.5 * cm))
     else:
-        elementos.append(Paragraph(
-            f"Corte: <b>{FECHA_REPORTE}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
-            f"<font color='{MG_ROJO}'><b>La fecha de corte no corresponde al mes "
-            f"de los datos</b></font>",
-            estilo_meta_portada
-        ))
-    elementos.append(Spacer(1, 0.5 * cm))
+        elementos.append(Paragraph(f"Elaborado por <b>{datos.analista}</b> el <b>{FECHA_REPORTE}</b>",
+                                   estilo_meta_portada))
+        elementos.append(Spacer(1, 0.45 * cm))
 
     # Las categorías se enumeran a partir de las que REALMENTE trae la
-    # bitácora de este mes, no de una lista fija de cuatro.
+    # bitácora del mes, no de una lista fija de cuatro.
     _presentes = _est.categorias_presentes(df)
     _abiertas_presentes = [c for c in _presentes
                            if _est.GRUPO_CATEGORIA.get(c, _est.ABIERTA) == _est.ABIERTA]
@@ -155,26 +193,33 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
         f"<b>{_est.frase_enumerada(_presentes)}</b>. "
         if _presentes else ""
     )
-    _texto_pueden_moverse = (
-        f"{'Queda' if ctx['dias_restantes'] == 1 else 'Quedan'} "
-        f"{ctx['dias_restantes']} día{'s' if ctx['dias_restantes'] != 1 else ''} "
-        f"para el cierre de {ctx['nombre_mes']}, así que las solicitudes en "
-        f"<b>{_est.frase_enumerada(_abiertas_presentes, y='y')}</b> "
-        f"aún pueden convertirse en FINANCIADAS. "
-        if _abiertas_presentes and corte_coherente else ""
-    )
-    intro_portada = Table(
-        [[Paragraph(
+    if es_avance:
+        _texto_pueden_moverse = (
+            f"{'Queda' if ctx['dias_restantes'] == 1 else 'Quedan'} "
+            f"{ctx['dias_restantes']} día{'s' if ctx['dias_restantes'] != 1 else ''} "
+            f"para el cierre de {ctx['nombre_mes']}, así que las solicitudes en "
+            f"<b>{_est.frase_enumerada(_abiertas_presentes, y='y')}</b> "
+            f"aún pueden convertirse en FINANCIADAS. "
+            if _abiertas_presentes and corte_coherente else ""
+        )
+        texto_intro = (
             f"Este es un corte <b>PRELIMINAR</b>: resume el comportamiento de las "
             f"{total} solicitudes de crédito automotriz registradas en la bitácora hasta el "
             f"{FECHA_REPORTE}, {_texto_clasificadas}"
             f"{_texto_pueden_moverse}"
             f"Cubre el desempeño por vendedor, la colocación del seguro GAP y los modelos "
-            f"de mayor demanda.",
-            estilo_cuerpo
-        )]],
-        colWidths=[_pdf_util.ANCHO_UTIL]
-    )
+            f"de mayor demanda."
+        )
+    else:
+        texto_intro = (
+            f"Este reporte resume el comportamiento de las {total} solicitudes de crédito automotriz "
+            f"registradas en la bitácora, desde su ingreso hasta su cierre de mes, "
+            f"{_texto_clasificadas}"
+            f"Incluye el desempeño por vendedor, la colocación "
+            f"del seguro GAP y los modelos de vehículo con mayor demanda."
+        )
+    intro_portada = Table([[Paragraph(texto_intro, estilo_cuerpo)]],
+                          colWidths=[_pdf_util.ANCHO_UTIL])
     intro_portada.setStyle(TableStyle([
         ("TOPPADDING", (0, 0), (-1, -1), 2),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
@@ -187,29 +232,34 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
 
     # Cifras clave: en el PDF se dibujan como la columna lateral de la
     # portada (pdf_util.construir_con_lateral); en el Word quedan como tabla.
-    elementos.append(_lateral.bloque_cifras(_lateral.cifras_avance(df, ctx=ctx, hoja=hoja)))
+    cifras = (_lateral.cifras_avance(df, ctx=ctx, hoja=hoja) if es_avance
+              else _lateral.cifras_resumen(df))
+    elementos.append(_lateral.bloque_cifras(cifras))
     elementos.append(Spacer(1, 0.5 * cm))
 
     # --- Resumen Ejecutivo ---
-    elementos.append(Paragraph("Resumen Ejecutivo (a la fecha de corte)", estilo_h1))
+    elementos.append(Paragraph("Resumen Ejecutivo (a la fecha de corte)" if es_avance
+                               else "Resumen Ejecutivo", estilo_h1))
     elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     elementos.append(Paragraph("Panorama general", estilo_h2))
     if tiene_categoria:
         # El desglose enumera todas las categorías con solicitudes este mes.
-        _conteo_cats = resumen.get("conteo_categorias", {})
-        _desglose = _est.frase_desglose(_conteo_cats, total)
-        _moviles = _est.frase_enumerada(_abiertas_presentes, y="y", mayusculas=True)
-        elementos.append(Paragraph(
-            f"De las {total} solicitudes registradas hasta el {FECHA_REPORTE}, "
-            f"{_desglose}. "
-            + (f"Por tratarse de un corte preliminar, las cifras de "
-               f"{_moviles} pueden variar antes del cierre de {ctx['nombre_mes']}."
-               if _moviles else
-               f"Por tratarse de un corte preliminar, las cifras pueden variar "
-               f"antes del cierre de {ctx['nombre_mes']}."),
-            estilo_cuerpo
-        ))
+        _desglose = _est.frase_desglose(resumen.get("conteo_categorias", {}), total)
+        if es_avance:
+            _moviles = _est.frase_enumerada(_abiertas_presentes, y="y", mayusculas=True)
+            texto_panorama = (
+                f"De las {total} solicitudes registradas hasta el {FECHA_REPORTE}, "
+                f"{_desglose}. "
+                + (f"Por tratarse de un corte preliminar, las cifras de "
+                   f"{_moviles} pueden variar antes del cierre de {ctx['nombre_mes']}."
+                   if _moviles else
+                   f"Por tratarse de un corte preliminar, las cifras pueden variar "
+                   f"antes del cierre de {ctx['nombre_mes']}.")
+            )
+        else:
+            texto_panorama = f"De las {total} solicitudes registradas en el periodo, {_desglose}."
+        elementos.append(Paragraph(texto_panorama, estilo_cuerpo))
         # La tabla agrupa por CATEGORÍA, no por el texto crudo del Excel: si la
         # bitácora trae "FINANCIADO" y "FINANCIADOS", ambos suman una sola
         # fila. Se ordena igual que las gráficas (del cierre más fuerte al
@@ -240,10 +290,16 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
                     f"bitácora y aquí se agrupan en una sola fila ({detalle}).",
                     estilo_nota
                 ))
-    else:
+    elif es_avance:
         elementos.append(Paragraph(
             f"Se registraron {total} solicitudes hasta la fecha de corte. No fue posible clasificarlas "
             f"por status porque la columna 'STATUS' no está presente en el archivo fuente.",
+            estilo_cuerpo
+        ))
+    else:
+        elementos.append(Paragraph(
+            f"Se registraron {total} solicitudes en el periodo. No fue posible clasificarlas por Estatus "
+            f"porque la columna 'ESTATUS' no está presente en el archivo fuente.",
             estilo_cuerpo
         ))
     elementos.append(Spacer(1, 0.3 * cm))
@@ -255,10 +311,19 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
             f"El monto total a financiar de todas las solicitudes asciende a <b>${resumen['monto_total']:,.2f}</b>."
         )
     if "monto_financiado" in resumen:
+        # El avance resalta en negritas el monto y el ticket; el cierre no.
+        if es_avance:
+            monto_fin = f"<b> ${resumen['monto_financiado']:,.2f} </b> "
+            ticket_fin = (f"<b> ${resumen['ticket_financiado']:,.2f} </b> "
+                          if "ticket_financiado" in resumen else "")
+        else:
+            monto_fin = f" ${resumen['monto_financiado']:,.2f} "
+            ticket_fin = (f"${resumen['ticket_financiado']:,.2f} "
+                          if "ticket_financiado" in resumen else "")
         partes_financiero.append(
-            f"De ese total,<b> ${resumen['monto_financiado']:,.2f} </b> ya corresponden a crédito "
+            f"De ese total,{monto_fin}ya corresponden a crédito "
             f"<b>FINANCIADO</b> (dispersado)"
-            + (f", con un ticket promedio de <b> ${resumen['ticket_financiado']:,.2f} </b> por crédito"
+            + (f", con un ticket promedio de {ticket_fin}por crédito"
                if "ticket_financiado" in resumen else "") + "."
         )
     if "monto_aprobado" in resumen:
@@ -289,7 +354,7 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
             "No se encontraron columnas de monto, enganche, plazo o tasa en el archivo fuente para "
             "construir el panorama financiero.", estilo_nota
         ))
-    elementos.append(Spacer(1, 0.3 * cm))
+    elementos.append(Spacer(1, 0.3 * cm if es_avance else 0.6 * cm))
 
     elementos.append(Paragraph("Seguro GAP", estilo_h2))
     if "pct_gap" in resumen:
@@ -324,8 +389,7 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
                       f"el detalle de cada uno.")
         elementos.append(Paragraph(_pdf_util.resaltar(texto_vend), estilo_cuerpo))
 
-        # Tabla por vendedor. El texto de arriba solo nombra a los que
-        # destacan; esto da el panorama completo, incluido el GAP colocado
+        # Tabla por vendedor: el panorama completo, incluido el GAP colocado
         # en créditos ya financiados.
         filas_vend, nota_vend, anchos_vend = filas_tabla_vendedor(tabla_vendedor)
         if filas_vend:
@@ -345,19 +409,23 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     if modelo_top:
         elementos.append(Paragraph("Modelo más solicitado", estilo_h2))
         elementos.append(Paragraph(
-            f"El vehículo más solicitado hasta la fecha de corte es <b>{modelo_top}</b>, con {modelo_top_val} solicitudes.",
+            f"El vehículo más solicitado {periodo} es <b>{modelo_top}</b>, con {modelo_top_val} solicitudes.",
             estilo_cuerpo
         ))
         elementos.append(Spacer(1, 0.2 * cm))
 
-
-
     # --- Focos de atención ---
-    # En un avance, esto es lo más importante del documento: qué se puede
-    # rescatar antes del cierre y a quién hay que seguir. Si la fecha de
-    # corte no corresponde al mes de los datos, el primer foco lo advierte.
-    focos, conclusiones = _conclusiones.focos_y_conclusiones_mensual(
-        df, "avance", resumen=resumen, ctx=ctx, hoja=hoja)
+    # Lo que pide una acción va aquí, arriba, porque es lo primero que alguien
+    # con poco tiempo debe leer. En un avance: qué se puede rescatar antes del
+    # cierre y a quién hay que seguir (si la fecha de corte no corresponde al
+    # mes de los datos, el primer foco lo advierte). Los criterios viven en
+    # herramientas/conclusiones.py y no se repiten en las conclusiones finales.
+    if es_avance:
+        focos, conclusiones = _conclusiones.focos_y_conclusiones_mensual(
+            df, "avance", resumen=resumen, ctx=ctx, hoja=hoja)
+    else:
+        focos, conclusiones = _conclusiones.focos_y_conclusiones_mensual(
+            df, "cierre", resumen=resumen)
     if focos:
         elementos.append(Paragraph("Focos de atención", estilo_h2))
         for nota in focos:
@@ -369,20 +437,21 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
 
     # ===============================================================
     # REPORTE DETALLADO
-    # Las secciones 1 a 6 son iguales en los dos reportes: viven en
-    # reporte_base.secciones_detalladas(). Aquí solo van las tres frases
-    # que sí cambian entre un corte preliminar y un cierre de mes.
+    # Las secciones 1 a 6 viven en reporte_base.secciones_detalladas().
+    # Aquí solo van las tres frases que cambian entre los dos modos.
     secciones_detalladas(
         elementos, _estilos,
         textos={
             "estatus": "La primera gráfica cuenta las solicitudes de cada estatus; la dona muestra "
                        "esos mismos estatus como proporción del total e indica qué vendedores "
                        "aportan a cada uno.",
-            "vendedores": f"Se registran {n_vendedores} vendedores con solicitudes a la fecha de corte. "
+            "vendedores": f"Se registran {n_vendedores} vendedores con solicitudes "
+                          f"{'a la fecha de corte' if es_avance else 'en el periodo'}. "
                           f"La tabla desglosa, para cada uno, cuántas solicitudes generó, en qué estatus "
-                          f"quedaron y su porcentaje de conversión a crédito financiado.",
+                          f"{'quedaron' if es_avance else 'cerraron'} y su porcentaje de conversión a "
+                          f"crédito financiado.",
             "modelos": "La siguiente gráfica muestra los modelos de vehículo con mayor número "
-                       "de solicitudes hasta la fecha de corte.",
+                       f"de solicitudes {periodo}.",
         },
         df=df, rutas_graficas=rutas_graficas, tabla_vendedor=tabla_vendedor,
         tabla_categoria=tabla_categoria, tabla_estilo_mg=tabla_estilo_mg,
@@ -391,11 +460,9 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     )
 
     # ===============================================================
-    elementos.append(Paragraph("Conclusiones y Factores Importantes (a la fecha)", estilo_h1))
+    elementos.append(Paragraph("Conclusiones y Factores Importantes (a la fecha)" if es_avance
+                               else "Conclusiones y Factores Importantes", estilo_h1))
     elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
-
-    # `conclusiones` ya se calculó arriba junto con los focos.
-
 
     for c in conclusiones:
         elementos.append(Paragraph(_pdf_util.resaltar("•  " + c), estilo_cuerpo))
@@ -405,17 +472,16 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     # -------------------------------------------------------------
     doc = SimpleDocTemplate(
         nombre_archivo, pagesize=letter,
-        topMargin=_pdf_util.MARGEN_SUPERIOR, bottomMargin=_pdf_util.MARGEN_INFERIOR, leftMargin=_pdf_util.MARGEN, rightMargin=_pdf_util.MARGEN
+        topMargin=_pdf_util.MARGEN_SUPERIOR, bottomMargin=_pdf_util.MARGEN_INFERIOR,
+        leftMargin=_pdf_util.MARGEN, rightMargin=_pdf_util.MARGEN,
     )
-    # `recolectar_elementos`: si el llamador pasa una lista, aquí se le
-    # deja una copia de todos los flowables del PDF. Es lo que usa
-    # docx_reportes.py para generar el Word a partir de ESTE mismo
-    # contenido, en vez de volver a redactarlo por su cuenta.
-    # Se copia ANTES de doc.build() porque ReportLab va vaciando la lista
-    # que recibe conforme la maqueta.
     # Sin esto, un Spacer que no cabe al final de una página genera una
     # hoja en blanco antes del siguiente salto. Ver pdf_util.py.
     elementos[:] = _pdf_util.pulir(_pdf_util.quitar_espacios_antes_de_salto(elementos))
+    # `recolectar_elementos`: si el llamador pasa una lista, aquí se le deja
+    # una copia de todos los flowables del PDF. Es lo que usa docx_reportes.py
+    # para generar el Word a partir de ESTE mismo contenido. Se copia ANTES de
+    # doc.build() porque ReportLab va vaciando la lista conforme la maqueta.
     if recolectar_elementos is not None:
         from . import flowables_a_docx as _fd
         recolectar_elementos.extend(_fd.capturar_guion(elementos))

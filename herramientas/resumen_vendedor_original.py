@@ -51,85 +51,60 @@ import matplotlib
 matplotlib.use("Agg")   # servidor sin pantalla: hay que fijarlo ANTES de pyplot
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
-from matplotlib.colors import LinearSegmentedColormap, to_rgb
+from matplotlib.colors import to_rgb
 
 from . import conclusiones as _conclusiones
 from . import pdf_util as _pdf_util
 from . import lateral as _lateral
 from . import hallazgos as _h
 from . import estatus as _est
+from .config import DatosReporte
+# Paleta, fuentes, estilo de las gráficas, columnas esperadas y limpieza
+# de montos y porcentajes: compartidos con los demás reportes.
+from .reporte_base import (
+    COLOR_CATEGORIA,
+    COLUMNAS_ESPERADAS,
+    COLUMNAS_MONEDA,
+    COLUMNAS_PORCENTAJE,
+    FUENTE_BOLD,
+    FUENTE_ITALICA,
+    FUENTE_REGULAR,
+    GRIS_LINEA,
+    GRIS_TEXTO_SEC,
+    INBURSA_AZUL,
+    MG_GRIS_CLARO,
+    MG_GRIS_OSCURO,
+    MG_ROJO,
+    MG_ROJO_OSCURO,
+    ORDEN_CATEGORIAS,
+    _MESES_ES,
+    _color_texto_legible,
+    _gradiente,
+    _guardar_si_procede,
+    _limpiar_moneda,
+    _limpiar_porcentaje,
+    _nombres_y,
+    clasificar_status,
+    imagen_ajustada,
+)
 
-pd.set_option("display.max_columns", None)
-pd.set_option("display.width", 140)
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
 from reportlab.lib import colors as rl_colors
-from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image,
-    PageBreak, HRFlowable, KeepTogether, Flowable
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, HRFlowable, KeepTogether, Flowable
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
 
-# =======================================================================
-# 1) PALETA DE COLORES — misma paleta de marca que el reporte de Avance
-#    Preliminar, para que ambos reportes se vean como parte de la misma
-#    familia de documentos.
-# =======================================================================
-MG_ROJO          = "#E4002B"
-MG_ROJO_OSCURO   = "#7A0019"
-INBURSA_AZUL     = "#191970"
-MG_ROJO_MEDIO    = "#B3001B"
-MG_ROJO_CLARO    = "#FF6B6B"
-MG_ROJO_PASTEL   = "#FFB3B3"
-MG_ROJO_PALIDO   = "#FBE7E9"
-MG_GRIS_OSCURO   = "#2B2B2B"
-MG_GRIS_CLARO    = "#EAEAEA"
-MG_GRIS_MEDIO    = "#B7B7B7"
-BLANCO           = "#FFFFFF"
-
-# --- Tonos neutros del rediseño corporativo/moderno (misma familia que
-#     el reporte de Avance Preliminar) ---
-GRIS_TEXTO_SEC   = "#6B7280"   # texto secundario (labels, notas, pie)
-GRIS_LINEA       = "#E3E5E9"   # reglas y bordes discretos
-GRIS_ZEBRA       = "#F6F7F9"   # fondo de fila alterna en tablas (casi blanco)
-AZUL_PALIDO      = "#EEF0F8"   # fondo muy sutil para acentos en azul Inbursa
-
-PALETA_ROJOS = ["#7A0019", "#9E001F", "#C10024", "#E4002B",
-                 "#F1354D", "#FF6B6B", "#FF9B9B", "#FFC7C7"]
-_CMAP_ROJOS = LinearSegmentedColormap.from_list("rojos_mg", PALETA_ROJOS)
-
-# =======================================================================
-# 1B) FUENTE — igual que en el reporte de Avance Preliminar; cambia solo
-#     FUENTE_BASE si se quiere otra tipografía en todo el PDF.
-# =======================================================================
-FUENTE_BASE = "Helvetica"
-
-_FUENTES_DISPONIBLES = {
-    "Helvetica": {"regular": "Helvetica",   "bold": "Helvetica-Bold",
-                  "italica": "Helvetica-Oblique", "bold_italica": "Helvetica-BoldOblique"},
-    "Times":     {"regular": "Times-Roman", "bold": "Times-Bold",
-                  "italica": "Times-Italic",      "bold_italica": "Times-BoldItalic"},
-    "Courier":   {"regular": "Courier",     "bold": "Courier-Bold",
-                  "italica": "Courier-Oblique",    "bold_italica": "Courier-BoldOblique"},
-}
-_fuente_activa = _FUENTES_DISPONIBLES.get(FUENTE_BASE, _FUENTES_DISPONIBLES["Helvetica"])
-FUENTE_REGULAR      = _fuente_activa["regular"]
-FUENTE_BOLD         = _fuente_activa["bold"]
-FUENTE_ITALICA      = _fuente_activa["italica"]
-FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
-
 # Estatus, orden y colores salen del catálogo central (estatus.py), igual
 # que en los otros reportes. Antes este reporte tenía solo 4 categorías fijas
 # y cualquier estatus distinto (EN PROCESO, PENDIENTE, CANCELADO...) se metía
 # a la fuerza en CONTRAPROPUESTA. Ahora cada estatus es su propia categoría y
 # recibe color solo si aparece en la bitácora (ver estatus.asignar_colores).
-COLOR_CATEGORIA = _est.COLOR_CATEGORIA     # mismo objeto: se actualiza solo
-ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
 
 # Los colores de arriba están pensados para RELLENOS de gráfica. Para TEXTO
 # sobre fondo blanco hacen falta tonos con más contraste (el rosa pastel de
@@ -148,13 +123,6 @@ def color_texto_categoria(clave):
         r, g, b = r * factor, g * factor, b * factor
     return "#{:02X}{:02X}{:02X}".format(int(r * 255), int(g * 255), int(b * 255))
 
-NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
-SUBTITULO_EMPRESA = "MG Colima PYD"
-NOMBRE_ANALISTA = "Christian Ramos"
-
-_MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
-             "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-
 # --- Geometría de página: se define UNA sola vez y se reutiliza tanto en
 #     los márgenes del documento como en el cálculo de anchos de tabla,
 #     para que ninguna tabla se salga de la caja de texto. ---
@@ -162,39 +130,6 @@ MARGEN_IZQ = 2.4 * cm   # igual que pdf_util.MARGEN
 MARGEN_DER = 2.4 * cm
 ANCHO_UTIL = letter[0] - MARGEN_IZQ - MARGEN_DER   # ≈ 18.6 cm
 
-# Estas dos rutas las REAPUNTA herramienta_resumen_vendedor.py al
-# directorio temporal de cada corrida. No se crean al importar: en un
-# servidor compartido eso dejaría PDFs con nombres de clientes en el
-# directorio de trabajo, sobreviviendo entre sesiones.
-# Se leen en tiempo de ejecución (dentro de las funciones), así que
-# reasignarlas desde fuera basta para redirigir toda la salida.
-CARPETA_GRAFICAS = "graficas_temp_resumen_vendedor"
-CARPETA_PDFS = "reportes_por_vendedor"
-
-plt.rcParams.update({
-    "figure.facecolor":  "white",
-    "axes.facecolor":    "white",
-    "axes.edgecolor":    GRIS_LINEA,
-    "axes.labelcolor":   GRIS_TEXTO_SEC,
-    "text.color":        MG_GRIS_OSCURO,
-    "xtick.color":       GRIS_TEXTO_SEC,
-    "ytick.color":       GRIS_TEXTO_SEC,
-    "font.size":         10,
-    "axes.titlesize":    12.5,
-    "axes.titleweight":  "bold",
-    "axes.titlecolor":   MG_GRIS_OSCURO,
-    "axes.titlepad":     14,
-    "axes.labelsize":    9.5,
-    "axes.linewidth":    0.8,
-    "axes.spines.top":   False,
-    "axes.spines.right": False,
-    "axes.spines.left":  True,
-    "axes.grid":         False,
-    "xtick.labelsize":   9,
-    "ytick.labelsize":   9,
-    "legend.fontsize":   9,
-    "legend.frameon":    False,
-})
 
 
 # =======================================================================
@@ -251,19 +186,6 @@ def contexto_mensual(mes_anio=None, hoja_nombre=None, fecha_corte=None):
     return {"nombre_mes": _MESES_ES[hoy.month - 1], "anio": hoy.year, "mes_num": hoy.month}
 
 
-def _gradiente(n):
-    if n <= 1:
-        return [MG_ROJO]
-    valores = np.linspace(0.0, 0.82, n)
-    return [_CMAP_ROJOS(v) for v in valores]
-
-
-def _color_texto_legible(color_fondo):
-    r, g, b = to_rgb(color_fondo)
-    luminancia = 0.299 * r + 0.587 * g + 0.114 * b
-    return "white" if luminancia < 0.6 else MG_GRIS_OSCURO
-
-
 # =======================================================================
 # 3) CARGA DEL ARCHIVO
 # =======================================================================
@@ -284,34 +206,7 @@ def cargar_archivo(ruta_local):
 # =======================================================================
 # 4) LIMPIEZA Y NORMALIZACIÓN DE DATOS (igual que en Avance Preliminar)
 # =======================================================================
-COLUMNAS_ESPERADAS = [
-    "Folio CCK", "STATUS", "Nombre Completo", "Fecha de Nacimiento",
-    "Teléfono Móvil", "Correo Electrónico", "Nombre del Vendedor",
-    "Marca", "Vehículo", "Año Modelo", "Precio Venta (c/IVA)",
-    "Enganche", "¿Tiene GAP?", "Monto GAP", "Plazo (meses)",
-    "Tasa Interés Anual", "Monto Total a Financiar",
-    "Mensualidad Mínima", "Mensualidad Máxima",
-]
-COLUMNAS_MONEDA = [
-    "Precio Venta (c/IVA)", "Enganche", "Monto GAP",
-    "Monto Total a Financiar", "Mensualidad Mínima", "Mensualidad Máxima",
-]
-COLUMNAS_PORCENTAJE = ["Tasa Interés Anual"]
 
-
-
-def _limpiar_moneda(serie):
-    """Convierte una columna de montos a número. Se usa pd.to_numeric con
-    errors='coerce' en vez de astype(float): así una celda con texto raro
-    ("PENDIENTE", "N/A", un guion) se vuelve NaN en lugar de tumbar todo
-    el script con un ValueError."""
-    limpia = (
-        serie.astype(str)
-             .str.replace(r"[^\d\.\-]", "", regex=True)
-             .str.strip()
-             .replace({"": np.nan, "-": np.nan, ".": np.nan})
-    )
-    return pd.to_numeric(limpia, errors="coerce")
 
 
 def _limpiar_texto(serie, modo=None):
@@ -332,31 +227,6 @@ def _limpiar_texto(serie, modo=None):
     elif modo == "mayusculas":
         limpia = limpia.str.upper()
     return limpia
-
-
-def _limpiar_porcentaje(serie):
-    def _convertir(valor):
-        if pd.isna(valor):
-            return np.nan
-        if isinstance(valor, str):
-            texto = valor.strip().replace("%", "")
-            if texto in ("", "nan", "None"):
-                return np.nan
-            try:
-                return float(texto)
-            except ValueError:
-                return np.nan
-        try:
-            numero = float(valor)
-        except (TypeError, ValueError):
-            return np.nan
-        return numero * 100 if numero <= 1 else numero
-    return serie.apply(_convertir)
-
-
-def clasificar_status(status):
-    """Mismo criterio que los demás reportes (catálogo de estatus.py)."""
-    return _est.clasificar_status(status)
 
 
 def limpiar_datos(df_original):
@@ -589,22 +459,6 @@ def analisis_individual(df_total, vendedor, tabla_vendedor, resumen_eq):
 # =======================================================================
 # 7) GRÁFICAS
 # =======================================================================
-def _guardar_si_procede(fig, guardar_como):
-    if guardar_como:
-        # Titular demasiado ancho -> se parte en renglones (ver hallazgos).
-        _h.ajustar_titulos(fig)
-        fig.savefig(guardar_como, dpi=150, bbox_inches="tight", facecolor="white")
-    return guardar_como
-
-
-def _formato_miles(ax, eje="y"):
-    formatter = mticker.FuncFormatter(lambda x, _: f"{x:,.0f}")
-    if eje == "y":
-        ax.yaxis.set_major_formatter(formatter)
-    else:
-        ax.xaxis.set_major_formatter(formatter)
-
-
 def grafica_dona_status_vendedor(df_v, vendedor, guardar_como=None):
     """Dona con la distribución de status de las solicitudes de ESTE vendedor."""
     if "Categoria" not in df_v.columns or df_v.empty:
@@ -715,15 +569,16 @@ def grafica_modelos_vendedor(df_v, vendedor, guardar_como=None):
     return guardar_como
 
 
-def generar_graficas_vendedor(df_total, df_v, vendedor):
+def generar_graficas_vendedor(df_total, df_v, vendedor, carpeta):
+    """Gráficas del vendedor, como PNG en `carpeta` (la de la corrida)."""
     # Se vuelve a repartir con el equipo completo por si otra herramienta
     # cambió los colores entre la limpieza y las gráficas (Streamlit).
     if "Categoria" in df_total.columns:
         _est.asignar_colores(df_total["Categoria"])
     especificaciones = [
-        ("dona_status", lambda: grafica_dona_status_vendedor(df_v, vendedor, os.path.join(CARPETA_GRAFICAS, f"dona_{_slug(vendedor)}.png"))),
-        ("equipo_destacado", lambda: grafica_equipo_destacado(df_total, vendedor, os.path.join(CARPETA_GRAFICAS, f"equipo_{_slug(vendedor)}.png"))),
-        ("modelos", lambda: grafica_modelos_vendedor(df_v, vendedor, os.path.join(CARPETA_GRAFICAS, f"modelos_{_slug(vendedor)}.png"))),
+        ("dona_status", lambda: grafica_dona_status_vendedor(df_v, vendedor, os.path.join(carpeta, f"dona_{_slug(vendedor)}.png"))),
+        ("equipo_destacado", lambda: grafica_equipo_destacado(df_total, vendedor, os.path.join(carpeta, f"equipo_{_slug(vendedor)}.png"))),
+        ("modelos", lambda: grafica_modelos_vendedor(df_v, vendedor, os.path.join(carpeta, f"modelos_{_slug(vendedor)}.png"))),
     ]
     rutas = {}
     for clave, funcion in especificaciones:
@@ -741,15 +596,6 @@ def _slug(texto):
 # =======================================================================
 # 8) REPORTE PDF INDIVIDUAL (ReportLab)
 # =======================================================================
-def _nombres_y(nombres):
-    nombres = [str(n) for n in nombres]
-    if not nombres:
-        return ""
-    if len(nombres) == 1:
-        return nombres[0]
-    return ", ".join(nombres[:-1]) + " y " + nombres[-1]
-
-
 def _texto_seguro(valor):
     """Prepara un texto para meterlo en una celda de tabla: colapsa los
     espacios repetidos y escapa los caracteres que ReportLab interpreta
@@ -841,24 +687,15 @@ def anchos_ajustados(datos, ancho_total=None, tam_fuente=8.2, tam_encabezado=8.3
     return anchos
 
 
-def imagen_ajustada(ruta, ancho_cm, alto_max_cm=None):
-    ancho_px, alto_px = ImageReader(ruta).getSize()
-    alto_cm = ancho_cm * (alto_px / ancho_px)
-    if alto_max_cm and alto_cm > alto_max_cm:
-        alto_cm = alto_max_cm
-        ancho_cm = alto_cm * (ancho_px / alto_px)
-    return Image(ruta, width=ancho_cm * cm, height=alto_cm * cm, hAlign="CENTER")
-
-
 def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq, ctx_mes,
-                                  rutas_graficas, nombre_archivo=None):
+                                  rutas_graficas, nombre_archivo=None, datos=None):
+    """datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config."""
+    datos = datos or DatosReporte()
     df_v = resumen_v["df"]
     total_v = resumen_v["total"]
 
     if nombre_archivo is None:
-        nombre_archivo = os.path.join(
-            CARPETA_PDFS, f"Resumen_Mensual_{_slug(vendedor)}_{ctx_mes['nombre_mes']}_{ctx_mes['anio']}.pdf"
-        )
+        nombre_archivo = f"Resumen_Mensual_{_slug(vendedor)}_{ctx_mes['nombre_mes']}_{ctx_mes['anio']}.pdf"
 
     MES_TITULO = f"{ctx_mes['nombre_mes'].capitalize()} {ctx_mes['anio']}"
 
@@ -915,7 +752,7 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
         """Encabezado y pie: el dibujo vive en pdf_util.pintar_encabezado_pie,
         compartido por los cuatro reportes."""
         _pdf_util.pintar_encabezado_pie(
-            canvas_obj, doc, NOMBRE_EMPRESA, f"Resumen Mensual Individual · {vendedor}", MES_TITULO, NOMBRE_ANALISTA,
+            canvas_obj, doc, datos.empresa, f"Resumen Mensual Individual · {vendedor}", MES_TITULO, datos.analista,
             fuente_regular=FUENTE_REGULAR, fuente_bold=FUENTE_BOLD)
 
     def celda(texto, alineacion="left", negrita=False, color=None, tam=8.2):
@@ -1022,7 +859,7 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     elementos.append(Paragraph("RESUMEN MENSUAL&nbsp;&nbsp;·&nbsp;&nbsp;DESEMPEÑO INDIVIDUAL", estilo_kicker_portada))
     elementos.append(Paragraph("Resumen Mensual de Desempeño", estilo_titulo_portada))
     elementos.append(Paragraph(vendedor, estilo_nombre_portada))
-    elementos.append(Paragraph(f"{NOMBRE_EMPRESA} · {SUBTITULO_EMPRESA}", estilo_subtitulo_portada))
+    elementos.append(Paragraph(f"{datos.empresa} · {datos.pdv}", estilo_subtitulo_portada))
     elementos.append(Spacer(1, 0.12 * cm))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(GRIS_LINEA),
                                  spaceBefore=6, spaceAfter=10, hAlign="LEFT"))
@@ -1307,7 +1144,7 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
         topMargin=_pdf_util.MARGEN_SUPERIOR, bottomMargin=_pdf_util.MARGEN_INFERIOR,
         leftMargin=MARGEN_IZQ, rightMargin=MARGEN_DER,
         title=f"Resumen Mensual {vendedor} — {MES_TITULO}",
-        author=NOMBRE_EMPRESA, subject="Resumen mensual de desempeño individual",
+        author=datos.empresa, subject="Resumen mensual de desempeño individual",
     )
     # Sin esto, un Spacer que no cabe al final de una página genera una
     # hoja en blanco antes del siguiente salto. Ver pdf_util.py.

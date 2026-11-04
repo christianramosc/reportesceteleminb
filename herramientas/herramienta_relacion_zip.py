@@ -22,4 +22,6 @@ HERRAMIENTA = Herramienta(
     multiple_archivos=False,
     tipos_permitidos=["zip"],
     ejecutar=ejecutar,
+    icono=":material/folder_zip:",
+    nombre_corto="Relación de clientes",
 )

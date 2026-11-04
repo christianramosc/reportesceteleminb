@@ -1,33 +1,28 @@
 """Corre una herramienta a la vez, para que los reportes no se mezclen.
 
 Streamlit atiende a todos los usuarios en UN solo proceso de Python, así que
-los módulos de reportes son compartidos. Y esos módulos guardan cosas a nivel
-de módulo:
+los módulos de reportes son compartidos. El PDV, el implant y la carpeta de
+gráficas ya viajan como parámetro (fase 3), pero sigue habiendo estado
+compartido:
 
-  · el PDV y el implant (SUBTITULO_EMPRESA, NOMBRE_ANALISTA), que cada
-    adaptador herramienta_*.py sobrescribe antes de generar;
-  · la carpeta de gráficas, con nombres fijos (g01_status.png, ...);
-  · los colores de estatus (estatus.COLOR_CATEGORIA) y las figuras de
-    matplotlib;
+  · los colores de estatus (estatus.COLOR_CATEGORIA), que cada corrida
+    reparte según los estatus de SU bitácora;
+  · matplotlib.pyplot, que guarda "la figura actual" para todo el proceso y
+    no está hecho para dibujar desde dos hilos a la vez;
   · sys.stdout: contextlib.redirect_stdout lo cambia para TODO el proceso.
 
-Si dos personas generaban al mismo tiempo, el PDF de una salía con el PDV,
-las gráficas o el log de la otra (comprobado: tests/test_ejecucion.py). Con
-el candado, las corridas se forman: la segunda espera a que termine la
-primera. Cuando los reportes reciban todo por parámetro, el candado sobra.
+Antes del candado, con dos personas generando al mismo tiempo, el PDF de una
+salía con datos de la otra (tests/test_ejecucion.py). Con el candado, las
+corridas se forman: la segunda espera a que termine la primera (unos 5 s).
+Quitarlo exigiría dibujar las ~30 gráficas sin pyplot; con pocos usuarios no
+vale la pena.
 """
 
 import contextlib
-import glob
 import io
-import shutil
 import threading
 
 _CANDADO = threading.Lock()
-
-# Las gráficas intermedias se escriben junto al script (reporte_base y el
-# comparativo usan carpetas fijas) y llevan nombres de vendedores.
-_PATRON_GRAFICAS = "graficas_temp_*"
 
 
 def ejecutar_aislado(herramienta, rutas_archivos, carpeta_salida,
@@ -53,8 +48,4 @@ def ejecutar_aislado(herramienta, rutas_archivos, carpeta_salida,
             )
         return resultados, registro.getvalue()
     finally:
-        # Dentro del candado: borrar fuera de él podía llevarse las gráficas
-        # de una corrida que todavía estaba armando su PDF.
-        for temporal in glob.glob(_PATRON_GRAFICAS):
-            shutil.rmtree(temporal, ignore_errors=True)
         _CANDADO.release()

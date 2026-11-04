@@ -40,4 +40,6 @@ HERRAMIENTA = Herramienta(
         "Sube el PDF tal como se descargó del SAT. Escaneos y fotos también se revisan "
         "(códigos y datos visibles), pero su autenticidad no se puede comprobar."
     ),
+    icono=":material/verified_user:",
+    nombre_corto="Validar CSF",
 )
