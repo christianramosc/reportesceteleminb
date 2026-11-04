@@ -243,7 +243,15 @@ def _extraer_apellidos(texto: str) -> tuple:
         bajo = linea.lower()
         if "primer apellido:" in bajo and "segundo apellido:" in bajo:
             corte = bajo.index("segundo apellido:")
-            valores = lineas[i + 1]
+            # Se saltan líneas en blanco: pdfplumber (el que se usa en
+            # Streamlit Cloud) y también pdftotext dejan una línea vacía entre
+            # etiquetas y valores cuando el formato trae renglones espaciados.
+            # Antes se tomaba lineas[i + 1] tal cual y, si estaba vacía, el
+            # cliente se quedaba sin apellidos.
+            j = i + 1
+            while j < len(lineas) and not lineas[j].strip():
+                j += 1
+            valores = lineas[j] if j < len(lineas) else ""
             # Margen de 2 caracteres: la columna de valores puede quedar
             # desplazada un carácter respecto a la de etiquetas.
             if ":" in valores:      # formato en blanco: abajo va otra etiqueta
@@ -327,7 +335,8 @@ def _parsear_solicitud_pm(texto: str) -> dict:
                   texto, re.IGNORECASE)
     datos["telefono_movil"] = limpiar(m.group(1)) if m else ""
 
-    m = re.search(r"Tel[eé]fono fijo:[^\n]*Correo electr[oó]nico:[^\n]*\n[^\n]*?([\w._%+\-]+@[\w.\-]+)",
+    # (?:[ \t]*\n)* salta líneas en blanco entre la etiqueta y el valor.
+    m = re.search(r"Tel[eé]fono fijo:[^\n]*Correo electr[oó]nico:[^\n]*\n(?:[ \t]*\n)*[^\n]*?([\w._%+\-]+@[\w.\-]+)",
                   texto, re.IGNORECASE)
     datos["correo_electronico"] = m.group(1).strip() if m else ""
 
