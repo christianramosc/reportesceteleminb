@@ -110,4 +110,9 @@ HERRAMIENTA = Herramienta(
     tipos_permitidos=["xlsx"],
     ejecutar=ejecutar,
     ayuda_archivo="El Excel de la bitácora de solicitudes del mes.",
+    icono=":material/groups:",
+    nombre_corto="Resumen por vendedor",
+    vista_previa_bitacora=True,
+    pide_pdv_e_implant=True,
+    pide_vendedores=True,
 )

@@ -76,4 +76,8 @@ HERRAMIENTA = Herramienta(
     tipos_permitidos=["xlsx"],
     ejecutar=ejecutar,
     ayuda_archivo="El Excel de la bitácora de solicitudes del mes ya cerrado.",
+    icono=":material/calendar_month:",
+    nombre_corto="Resumen mensual",
+    vista_previa_bitacora=True,
+    pide_pdv_e_implant=True,
 )

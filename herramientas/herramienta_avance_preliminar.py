@@ -96,4 +96,9 @@ HERRAMIENTA = Herramienta(
     tipos_permitidos=["xlsx"],
     ejecutar=ejecutar,
     ayuda_archivo="El Excel de la bitácora de solicitudes del mes en curso.",
+    icono=":material/trending_up:",
+    nombre_corto="Avance preliminar",
+    vista_previa_bitacora=True,
+    pide_pdv_e_implant=True,
+    pide_fecha_corte=True,
 )

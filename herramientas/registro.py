@@ -1,4 +1,11 @@
-"""Definición del objeto Herramienta que usa el registro central (__init__.py)."""
+"""Definición del objeto Herramienta que usa el registro central (__init__.py).
+
+Todo lo que la app necesita saber de una herramienta (icono, qué campos
+pedir, si muestra vista previa) se declara aquí. Antes streamlit_app.py
+decidía eso con listas de ids escritas a mano ("si es avance_preliminar o
+comparativo_mensual, pide PDV..."), así que agregar una herramienta
+obligaba a tocar la app en varios lugares.
+"""
 
 from dataclasses import dataclass
 from typing import Callable, List, Optional
@@ -7,7 +14,7 @@ from typing import Callable, List, Optional
 @dataclass
 class Herramienta:
     id: str                      # identificador único, usado como key de Streamlit
-    nombre: str                  # título de la pestaña / botón
+    nombre: str                  # título de la página
     descripcion: str             # texto explicativo para el usuario final
     multiple_archivos: bool      # True si acepta varios archivos a la vez
     tipos_permitidos: List[str]  # extensiones que acepta el file_uploader, ej. ["xlsx"]
@@ -18,3 +25,24 @@ class Herramienta:
     # la app guarda obj y llama mostrar_resumen(obj) para dibujar el
     # resultado EN LA PÁGINA, antes de las descargas (ej. Validar CSF).
     mostrar_resumen: Optional[Callable[..., None]] = None
+
+    # --- Menú lateral ---------------------------------------------------
+    icono: str = ":material/description:"   # Material Symbols de Streamlit
+    nombre_corto: Optional[str] = None      # en el menú; por defecto, el nombre sin emoji
+
+    # --- Qué muestra y qué pide la página ---------------------------------
+    # Vista previa de la bitácora (filas y estatus) al subir el Excel.
+    vista_previa_bitacora: bool = False
+    # Aviso si se suben menos archivos de los necesarios (el comparativo, 2).
+    minimo_archivos: int = 1
+    # Campos del paso "Datos del reporte". Cada uno llega a ejecutar() como
+    # opción con el mismo nombre que usa hoy la herramienta:
+    pide_pdv_e_implant: bool = False   # nombre_pdv, nombre_analista
+    pide_fecha_corte: bool = False     # fecha_corte ("DD/MM/AAAA")
+    pide_vendedores: bool = False      # vendedores_incluir (lista)
+    pide_etiquetas_mes: bool = False   # nombres_meses (lista)
+
+    @property
+    def tiene_opciones(self):
+        return (self.pide_pdv_e_implant or self.pide_fecha_corte
+                or self.pide_vendedores or self.pide_etiquetas_mes)

@@ -85,3 +85,25 @@ def test_vista_previa_avisa_si_hay_varias_hojas(app):
 
     avisos = " ".join(i.value for i in app.info)
     assert "varias hojas" in avisos and "OCTUBRE 2026" in avisos
+
+
+@pytest.mark.parametrize("herramienta", REGISTRO, ids=[h.id for h in REGISTRO])
+def test_cada_herramienta_muestra_los_campos_que_declara(app, herramienta):
+    """Qué pide cada página lo declara la herramienta (registro.py); la app
+    ya no decide con listas de ids. Si alguien agrega una herramienta, esta
+    prueba la recorre sola."""
+    _elegir(app, herramienta.id)
+    assert not app.exception, app.exception
+
+    def hay_texto(etiqueta):
+        return any(t.label == etiqueta for t in app.text_input)
+
+    assert hay_texto("Nombre del PDV") == herramienta.pide_pdv_e_implant
+    assert hay_texto("Implant") == herramienta.pide_pdv_e_implant
+    assert any("fecha de corte" in t.label for t in app.toggle) == herramienta.pide_fecha_corte
+    areas = {a.label for a in app.text_area}
+    assert ("Un vendedor por línea" in areas) == herramienta.pide_vendedores
+    assert ("Un mes por línea" in areas) == herramienta.pide_etiquetas_mes
+    # El menú usa el icono y el nombre corto declarados.
+    opciones_menu = app.radio(key="herramienta_activa").options
+    assert any(herramienta.icono in o and (herramienta.nombre_corto or "") in o for o in opciones_menu)

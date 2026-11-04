@@ -115,4 +115,10 @@ HERRAMIENTA = Herramienta(
     tipos_permitidos=["xlsx"],
     ejecutar=ejecutar,
     ayuda_archivo="Un Excel por cada mes que quieras comparar (etiqueta de mes = nombre de la hoja).",
+    icono=":material/compare_arrows:",
+    nombre_corto="Comparativo mensual",
+    vista_previa_bitacora=True,
+    minimo_archivos=2,
+    pide_pdv_e_implant=True,
+    pide_etiquetas_mes=True,
 )

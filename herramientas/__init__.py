@@ -14,12 +14,15 @@ Cómo agregar un nuevo script más adelante (sin tocar streamlit_app.py):
          archivo(s) generado(s)
        - un objeto HERRAMIENTA = Herramienta(id=..., nombre=..., descripcion=...,
          multiple_archivos=..., tipos_permitidos=[...], ejecutar=ejecutar)
-     (usa herramienta_avance_preliminar.py como plantilla — es el más simple)
+         y, si aplica, su icono y lo que pide la página (icono=,
+         nombre_corto=, pide_pdv_e_implant=True, pide_fecha_corte=True, ...;
+         la lista completa está en registro.py)
+     (usa herramienta_resumen_mensual.py como plantilla — es el más simple)
 
   3. Impórtalo abajo y agrégalo a la lista REGISTRO.
 
-  streamlit_app.py arma una pestaña con file uploader y botón "Generar" de
-  forma automática por cada elemento de REGISTRO.
+  streamlit_app.py arma la página (menú, file uploader, campos y botón
+  "Generar") con lo que declara cada elemento de REGISTRO.
 """
 
 from .registro import Herramienta  # noqa: F401 (re-exportado para las herramienta_*.py)
@@ -30,7 +33,9 @@ from .herramienta_resumen_mensual import HERRAMIENTA as _resumen_mensual
 from .herramienta_resumen_vendedor import HERRAMIENTA as _resumen_vendedor
 from .herramienta_validar_csf import HERRAMIENTA as _validar_csf
 # Modelo de Datos: oculto en la app por ahora. Para volver a mostrarlo,
-# descomenta esta línea y agrega _modelo_datos a REGISTRO.
+# descomenta esta línea, agrega _modelo_datos a REGISTRO y, en su
+# HERRAMIENTA, declara icono=":material/dataset:", nombre_corto="Modelo de
+# datos", vista_previa_bitacora=True y pide_etiquetas_mes=True (ver registro.py).
 # from .herramienta_modelo_datos import HERRAMIENTA as _modelo_datos
 
 REGISTRO = [
