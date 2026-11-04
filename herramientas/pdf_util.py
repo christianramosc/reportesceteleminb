@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Utilidades de maquetación compartidas por los cuatro reportes."""
 
 from reportlab.platypus import PageBreak, Spacer
@@ -28,10 +27,7 @@ def quitar_espacios_antes_de_salto(elementos):
 
 import re as _re
 
-try:
-    from . import iconos as _iconos
-except ImportError:  # ejecución suelta (Colab)
-    import iconos as _iconos
+from . import iconos as _iconos
 
 from reportlab.lib import colors as _col
 from reportlab.lib.pagesizes import letter as _letter

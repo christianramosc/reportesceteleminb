@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Dibuja los iconos de Lucide (carpeta iconos/) directamente en matplotlib.
 
 iconos.py los convierte para ReportLab (PDF) con svglib. La ficha PNG se
@@ -216,7 +215,7 @@ def cargar(nombre):
     for el in raiz.iter():
         tag = el.tag.split("}")[-1]
         a = el.attrib
-        f = lambda k, d=0.0: float(a.get(k, d))
+        f = lambda k, d=0.0, a=a: float(a.get(k, d))
         if tag == "path":
             piezas.append(_path_d(a["d"]))
         elif tag == "circle":

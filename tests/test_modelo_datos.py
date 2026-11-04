@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Pruebas del modelo de datos (esquema estrella) y su exportación a Excel."""
 
 import pandas as pd

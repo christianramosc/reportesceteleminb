@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Adaptador de validar_csf.py (Validación de Constancia de Situación Fiscal) para el registro."""
 
 import os

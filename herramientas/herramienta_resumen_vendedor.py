@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
 """Adaptador de resumen_vendedor_original.py (un PDF por vendedor) para el registro.
 
 Este script es distinto de los demás en un punto: no genera UN archivo,
-genera uno por cada asesor. Por eso el adaptador no llama a su main() —
-main() empaqueta el ZIP en el directorio de trabajo y, en Colab, dispara
-la descarga— sino que repite sus pasos aquí, escribiendo todo dentro del
-directorio temporal que la app borra al terminar.
+genera uno por cada asesor. El adaptador arma un PDF por vendedor y los
+empaqueta en un ZIP, todo dentro del directorio temporal que la app borra
+al terminar.
 """
 
 import os

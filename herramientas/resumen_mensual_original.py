@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 REPORTE MENSUAL (RESUMEN) — mes ya cerrado.
 
@@ -11,44 +10,21 @@ Si vas a corregir algo que aplica también al otro reporte, hazlo en
 reporte_base.py — para eso existe.
 """
 
-try:
-    from .reporte_base import *          # noqa: F401,F403  (ver __all__ allí)
-    from . import estatus as _est
-    from . import reporte_base as _base
-    from . import conclusiones as _conclusiones
-    from . import pdf_util as _pdf_util
-    from . import lateral as _lateral
-except ImportError:                       # ejecución suelta (Colab)
-    from reporte_base import *            # noqa: F401,F403
-    import estatus as _est
-    import reporte_base as _base
-    import conclusiones as _conclusiones
-    import pdf_util as _pdf_util
-    import lateral as _lateral
+from .reporte_base import *          # noqa: F401,F403  (ver __all__ allí)
+from . import estatus as _est
+from . import conclusiones as _conclusiones
+from . import pdf_util as _pdf_util
+from . import lateral as _lateral
 
-import datetime
-try:
-    from . import fechas as _fechas   # hora de México, no la del servidor
-except ImportError:  # ejecución suelta (Colab)
-    import fechas as _fechas
-import os
+from . import fechas as _fechas   # hora de México, no la del servidor
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 from reportlab.lib import colors as rl_colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    HRFlowable, Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate,
+    HRFlowable, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate,
     Spacer, Table, TableStyle,
 )
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.utils import ImageReader
 
 # Estos tres SÍ se redeclaran aquí (aunque estén en la base) porque los
 # adaptadores de la app los reasignan sobre ESTE módulo antes de generar,
@@ -84,7 +60,6 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     # idénticas en los dos reportes. Se reatan a nombres locales con la
     # misma grafía de antes para que la narrativa de abajo no cambie.
     _estilos = crear_estilos()
-    styles = _estilos["styles"]
     estilo_kicker_portada = _estilos["kicker_portada"]
     estilo_titulo_portada = _estilos["titulo_portada"]
     estilo_subtitulo_portada = _estilos["subtitulo_portada"]
@@ -93,10 +68,6 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     estilo_h2 = _estilos["h2"]
     estilo_cuerpo = _estilos["cuerpo"]
     estilo_nota = _estilos["nota"]
-    estilo_kpi_valor = _estilos["kpi_valor"]
-    estilo_kpi_label = _estilos["kpi_label"]
-    estilo_encabezado_tabla = _estilos["encabezado_tabla"]
-    estilo_encabezado_tabla_compacto = _estilos["encabezado_tabla_compacto"]
 
     FECHA_REPORTE = _fechas.hoy().strftime("%d/%m/%Y")
 
@@ -106,7 +77,6 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     )
     encabezado_pie_pagina = _maq["encabezado_pie_pagina"]
     tabla_estilo_mg = _maq["tabla_estilo_mg"]
-    tarjeta_kpi = _maq["tarjeta_kpi"]
 
     # -------------------------------------------------------------
     # Datos clave ya disponibles en `resumen` (de resumen_general),
@@ -114,32 +84,12 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     # -------------------------------------------------------------
     total = resumen.get("total", len(df))
     financiados = resumen.get("financiados", 0)
-    aprobados = resumen.get("aprobados", 0)
-    rechazados = resumen.get("rechazados", 0)
-    en_tramite = resumen.get("en_tramite", 0)
     tiene_categoria = "financiados" in resumen
 
     def pct(n):
         return (n / total * 100) if total else 0
 
     n_vendedores = int(tabla_vendedor.shape[0]) if tabla_vendedor is not None else 0
-
-    top_solicitudes_nombres, top_solicitudes_val = ([], 0)
-    top_financiado_nombres, top_financiado_val = ([], 0)
-    top_monto_nombres, top_monto_val = ([], 0)
-    top_gap_nombres, top_gap_val = ([], 0)
-    top_gap_fin_nombres, top_gap_fin_val = ([], 0)
-
-    if tabla_vendedor is not None and not tabla_vendedor.empty:
-        top_solicitudes_nombres, top_solicitudes_val = _quienes_maximo(tabla_vendedor["Total"])
-        if "FINANCIADO" in tabla_vendedor.columns:
-            top_financiado_nombres, top_financiado_val = _quienes_maximo(tabla_vendedor["FINANCIADO"])
-        if "Monto Financiado ($)" in tabla_vendedor.columns:
-            top_monto_nombres, top_monto_val = _quienes_maximo(tabla_vendedor["Monto Financiado ($)"])
-        if "GAP Total" in tabla_vendedor.columns:
-            top_gap_nombres, top_gap_val = _quienes_maximo(tabla_vendedor["GAP Total"])
-        if "GAP Financiado" in tabla_vendedor.columns:
-            top_gap_fin_nombres, top_gap_fin_val = _quienes_maximo(tabla_vendedor["GAP Financiado"])
 
     modelo_top = None
     modelo_top_val = 0
@@ -375,9 +325,9 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     secciones_detalladas(
         elementos, _estilos,
         textos={
-            "estatus": f"La primera gráfica cuenta las solicitudes de cada estatus; la dona muestra "
-                       f"esos mismos estatus como proporción del total e indica qué vendedores "
-                       f"aportan a cada uno.",
+            "estatus": "La primera gráfica cuenta las solicitudes de cada estatus; la dona muestra "
+                       "esos mismos estatus como proporción del total e indica qué vendedores "
+                       "aportan a cada uno.",
             "vendedores": f"Se registran {n_vendedores} vendedores con solicitudes en el periodo. "
                           f"La tabla desglosa, para cada uno, cuántas solicitudes generó, en qué estatus "
                           f"cerraron y su porcentaje de conversión a crédito financiado.",
@@ -417,44 +367,12 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     # hoja en blanco antes del siguiente salto. Ver pdf_util.py.
     elementos[:] = _pdf_util.pulir(_pdf_util.quitar_espacios_antes_de_salto(elementos))
     if recolectar_elementos is not None:
-        try:
-            from . import flowables_a_docx as _fd
-        except ImportError:
-            import flowables_a_docx as _fd
+        from . import flowables_a_docx as _fd
         recolectar_elementos.extend(_fd.capturar_guion(elementos))
 
     _pdf_util.construir_con_lateral(doc, elementos, encabezado_pie_pagina)
 
     print(f"\nReporte PDF generado: {nombre_archivo}")
-    if EN_COLAB:
-        files.download(nombre_archivo)
-    else:
-        print(f"Archivo guardado en: {nombre_archivo}")
+    print(f"Archivo guardado en: {nombre_archivo}")
 
     return nombre_archivo
-
-
-# =======================================================================
-# 9) FLUJO PRINCIPAL
-# =======================================================================
-
-def main(ruta_local=None):
-    df_crudo = cargar_archivo(ruta_local=ruta_local)
-    df = limpiar_datos(df_crudo)
-
-    resumen = resumen_general(df)
-    tabla_vendedor = analisis_por_vendedor(df)
-    tabla_categoria = analisis_financiero_por_categoria(df)
-
-    generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria)
-
-    print("=" * 72)
-    print(" Análisis completo. Se generó un PDF narrativo con resumen ejecutivo,")
-    print(" tablas con estilo y todas las gráficas explicadas.")
-    print(" Puedes volver a correr esta celda con otro archivo.")
-    print("=" * 72)
-
-    return df
-
-if __name__ == "__main__":
-    main()

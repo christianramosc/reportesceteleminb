@@ -1,0 +1,32 @@
+# Corre ruff y las pruebas en cada push y en cada PR. Si algo falla, GitHub
+# marca el commit en rojo y te avisa por correo antes de que llegue a la app.
+name: Pruebas
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Revisar el código (ruff)
+        run: ruff check .
+
+      - name: Pruebas
+        run: python -m pytest

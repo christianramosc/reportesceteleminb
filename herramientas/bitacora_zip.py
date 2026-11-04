@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Relación de clientes por STATUS — MG Colima (versión módulo, sin Colab)
 
@@ -19,13 +18,8 @@ import zipfile
 import subprocess
 import unicodedata
 import pandas as pd
-from datetime import datetime
-try:
-    from . import fechas as _fechas   # hora de México, no la del servidor
-    from . import nombres_archivo as _nombres
-except ImportError:  # ejecución suelta (Colab)
-    import fechas as _fechas
-    import nombres_archivo as _nombres
+from . import fechas as _fechas   # hora de México, no la del servidor
+from . import nombres_archivo as _nombres
 from pathlib import Path
 
 # ─────────────────────────────────────────────
@@ -48,7 +42,6 @@ MAPEO_STATUS = {
     "EN REVISION":      "EN REVISIÓN",
 }
 
-LIMPIAR_TEMPORAL = True   # borra los PDFs extraídos al terminar
 
 MESES_ES = {
     1: "ENERO", 2: "FEBRERO", 3: "MARZO", 4: "ABRIL",

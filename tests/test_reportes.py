@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Pruebas de generación de reportes de punta a punta.
 

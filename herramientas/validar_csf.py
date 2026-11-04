@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 VALIDADOR DE CONSTANCIA DE SITUACIÓN FISCAL (CSF) — candados anti-alteración
 ============================================================================
@@ -36,8 +35,7 @@ hace tres meses es auténtica, pero no sirve para el expediente.
 Uso
 ---
 - En la app de Streamlit: pestaña "Validar CSF".
-- En Colab:   !pip install pdfplumber pypdf pypdfium2 zxing-cpp reportlab
-              import validar_csf;  validar_csf.main()
+- En la terminal: python -m herramientas.validar_csf csf1.pdf csf2.pdf
 - Por código: analisis = analizar_csf("csf.pdf");  generar_pdf(analisis, "salida.pdf")
 """
 
@@ -54,13 +52,10 @@ import urllib.parse
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from typing import Dict, List
 
-try:
-    from . import fechas as _fechas
-except ImportError:  # ejecución suelta (Colab)
-    _fechas = None
+from . import fechas as _fechas
 
 
 # ===========================================================================
@@ -263,7 +258,7 @@ def _fecha_aammdd(aammdd, referencia=None):
 
 
 def _hoy():
-    return _fechas.hoy() if _fechas else date.today()
+    return _fechas.hoy()
 
 
 def _fmt(fecha):
@@ -400,7 +395,8 @@ def _extraer_pdf(ruta):
     import pdfplumber
     import pypdf
 
-    crudo = open(ruta, "rb").read()
+    with open(ruta, "rb") as f:
+        crudo = f.read()
     info = {"crudo": crudo}
 
     # --- Estructura (pypdf) ------------------------------------------------
@@ -425,7 +421,7 @@ def _extraer_pdf(ruta):
     info["claves_raiz"] = sorted(str(k) for k in raiz.keys())
     paginas = []
     xobjetos = {}
-    for i, pg in enumerate(lector.pages):
+    for pg in lector.pages:
         contenidos = pg.get("/Contents")
         n_contenidos = len(contenidos.get_object()) if isinstance(
             contenidos.get_object(), pypdf.generic.ArrayObject) else (1 if contenidos else 0)
@@ -1645,7 +1641,8 @@ def analizar_csf(ruta, hoy=None, consultar_sat=False, nombre=None):
     """Corre todos los candados sobre un archivo. Nunca lanza excepción por
     un PDF raro: cualquier error de lectura se reporta como FALLA."""
     hoy = hoy or _hoy()
-    crudo = open(ruta, "rb").read()
+    with open(ruta, "rb") as f:
+        crudo = f.read()
     analisis = Analisis(archivo=nombre or os.path.basename(ruta),
                         sha256=hashlib.sha256(crudo).hexdigest(),
                         tipo_archivo="pdf" if crudo[:5] == b"%PDF-" else "imagen")
@@ -1655,27 +1652,18 @@ def analizar_csf(ruta, hoy=None, consultar_sat=False, nombre=None):
 
     # COPIAS (foto, escaneo o PDF que es solo imagen): no se puede revisar el
     # archivo; se comparan los códigos y los datos visibles (csf_escaneo.py).
-    try:
-        from . import csf_escaneo as _copia
-    except ImportError:
-        try:
-            import csf_escaneo as _copia
-        except ImportError:
-            _copia = None
+    # Import local: csf_escaneo importa este módulo.
+    from . import csf_escaneo as _copia
     if analisis.tipo_archivo == "imagen" or ruta.lower().endswith(EXT_IMAGEN):
         analisis.tipo_archivo = "imagen"
-        if _copia is None:
-            _analizar_imagen(ruta, analisis, add)
-            return analisis
         _copia.analizar(ruta, analisis, add, hoy, consultar_sat, es_pdf=False)
         _ordenar(analisis)
         return analisis
-    if _copia is not None:
-        es_copia, motivo = _copia.es_copia_pdf(ruta)
-        if es_copia:
-            _copia.analizar(ruta, analisis, add, hoy, consultar_sat, es_pdf=True, motivo=motivo)
-            _ordenar(analisis)
-            return analisis
+    es_copia, motivo = _copia.es_copia_pdf(ruta)
+    if es_copia:
+        _copia.analizar(ruta, analisis, add, hoy, consultar_sat, es_pdf=True, motivo=motivo)
+        _ordenar(analisis)
+        return analisis
 
     try:
         info = _extraer_pdf(ruta)
@@ -1700,32 +1688,6 @@ def analizar_csf(ruta, hoy=None, consultar_sat=False, nombre=None):
 
 def _ordenar(analisis):
     analisis.candados.sort(key=lambda c: tuple(int(x) for x in c.clave.split(".")))
-
-
-def _analizar_imagen(ruta, analisis, add):
-    """Respaldo si falta csf_escaneo.py (script suelto): solo lee los QR."""
-    analisis.modo, analisis.verificable = "copia", False
-    from PIL import Image
-    try:
-        img = Image.open(ruta)
-        img.load()
-    except Exception as e:
-        add("1.1", "Archivo legible", FALLA, f"No se pudo abrir la imagen ({e}).", "")
-        return
-    add("1.1", "PDF con capa de texto (no foto ni escaneo)", FALLA,
-        "Es una imagen (foto/captura/escaneo). Una imagen no se puede validar técnicamente: "
-        "puede estar editada o generada con IA. Pide el PDF original descargado del SAT.",
-        "Constancias fotografiadas, editadas como imagen o generadas con IA.")
-    codigos = _leer_codigos(img) or []
-    qrs = [parse_qr_sat(t) for f, t in codigos if f.upper().startswith("QR")]
-    analisis.urls_qr = [q["url"] for q in qrs if q]
-    if not qrs:
-        add("2.1", "QR legibles", AVISO, "No se pudo leer ningún QR en la imagen.", "")
-    for i, q in enumerate(q for q in qrs if q):
-        ok = q["esquema"] == "https" and q["dominio"] == DOMINIO_QR and q["ruta"] == RUTA_QR
-        add(f"2.{i + 2}", f"QR {i + 1} apunta al portal oficial", OK if ok else FALLA,
-            f"{q['dominio']}{q['ruta']} · RFC {q['rfc']}" + ("" if ok else " — dirección NO oficial."),
-            "QR hacia página clonada del SAT.")
 
 
 def analizar_lote(rutas, hoy=None, consultar_sat=False, nombres=None):
@@ -1780,146 +1742,10 @@ AZUL = "#191970"
 
 
 def generar_pdf(analisis, ruta_salida):
-    """Reporte visual (reporte_csf.py). Si ese módulo no está (script suelto
-    en Colab), se usa la versión sencilla de abajo."""
-    try:
-        from . import reporte_csf
-    except ImportError:
-        reporte_csf = None
-    if reporte_csf is not None:
-        fecha = (_fechas.ahora() if _fechas else datetime.now()).strftime("%d/%m/%Y %H:%M")
-        return reporte_csf.generar(analisis, ruta_salida, fecha_texto=fecha)
-    return _generar_pdf_simple(analisis, ruta_salida)
-
-
-def _generar_pdf_simple(analisis, ruta_salida):
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER
-    from reportlab.lib.pagesizes import letter
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import cm
-    from reportlab.platypus import (KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table,
-                                    TableStyle)
-
-    est = getSampleStyleSheet()
-    cuerpo = ParagraphStyle("c", parent=est["Normal"], fontName="Helvetica", fontSize=8.5, leading=11)
-    chico = ParagraphStyle("ch", parent=cuerpo, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#475569"))
-    h2 = ParagraphStyle("h2", parent=cuerpo, fontName="Helvetica-Bold", fontSize=11, leading=14,
-                        textColor=colors.HexColor(AZUL), spaceBefore=10, spaceAfter=4,
-                        keepWithNext=1)
-    esc = lambda t: html.escape(str(t or ""))  # noqa: E731
-
-    d = analisis.datos or {}
-    fecha_gen = (_fechas.ahora() if _fechas else datetime.now()).strftime("%d/%m/%Y %H:%M")
-    elementos = []
-
-    # --- Veredicto ----------------------------------------------------------
-    ver = analisis.veredicto
-    col = colors.HexColor(_COLOR_VEREDICTO.get(ver, "#475569"))
-    n = analisis.conteo()
-    resumen = (f"{n.get(OK, 0)} candados OK · {n.get(AVISO, 0)} avisos · {n.get(FALLA, 0)} fallas")
-    if ver in ("ALTERADA / NO CONFIABLE", "NO VERIFICABLE"):
-        pol = "No se debe usar para el expediente: solicita la CSF original descargada del SAT"
-    elif analisis.cumple_politicas:
-        pol = "Cumple políticas (vigencia y estatus)"
-    else:
-        pol = "NO cumple políticas de la financiera (ver sección 4)"
-    caja = Table([[Paragraph(f'<font color="white"><b>{esc(ver)}</b></font>',
-                             ParagraphStyle("v", parent=cuerpo, fontSize=16, leading=20, alignment=TA_CENTER))],
-                  [Paragraph(f'<font color="white">{esc(resumen)}<br/>{esc(pol)}</font>',
-                             ParagraphStyle("v2", parent=cuerpo, alignment=TA_CENTER))]],
-                 colWidths=[17.6 * cm])
-    caja.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), col),
-                              ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
-    elementos += [caja, Spacer(1, 4)]
-    for i, u in enumerate(analisis.urls_qr, 1):
-        elementos.append(Paragraph(f'Valida en el SAT · QR {i}: <link href="{esc(u)}" color="#1D4ED8">'
-                                   f'{esc(u)}</link>', chico))
-    elementos.append(Spacer(1, 6))
-
-    # --- Datos leídos --------------------------------------------------------
-    if d:
-        filas = [
-            ("RFC", d.get("rfc")), ("Nombre / razón social", d.get("nombre_completo")),
-            ("Tipo", {"moral": "Persona moral", "fisica": "Persona física"}.get(d.get("tipo"), "—")),
-            ("CURP", d.get("curp") or "—"), ("idCIF", d.get("idcif")),
-            ("Emisión", d.get("emision_texto")), ("Estatus", d.get("estatus")),
-            ("Régimen", "; ".join(r["regimen"] for r in d.get("regimenes", [])) or "—"),
-            ("Domicilio", ", ".join(x for x in (d.get("vialidad"), d.get("num_ext"), d.get("colonia"),
-                                                f"CP {d.get('cp')}" if d.get("cp") else "",
-                                                d.get("municipio"), d.get("entidad")) if x)),
-        ]
-        t = Table([[Paragraph(f"<b>{esc(a)}</b>", cuerpo), Paragraph(esc(b), cuerpo)] for a, b in filas],
-                  colWidths=[4.2 * cm, 13.4 * cm])
-        t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
-                               ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F1F5F9")),
-                               ("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        elementos += [Paragraph("Datos leídos del documento", h2), t]
-
-    # --- Candados por sección -----------------------------------------------
-    for sec, titulo in SECCIONES.items():
-        lista = [c for c in analisis.candados if c.seccion == sec]
-        if not lista:
-            continue
-        filas = [[Paragraph("<b>#</b>", chico), Paragraph("<b>Candado</b>", chico),
-                  Paragraph("<b>Resultado</b>", chico), Paragraph("<b>Detalle</b>", chico)]]
-        estilos = [("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
-                   ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2E8F0")),
-                   ("VALIGN", (0, 0), (-1, -1), "TOP")]
-        for i, c in enumerate(lista, start=1):
-            det = esc(c.detalle)
-            if c.previene and c.estado in (FALLA, AVISO):
-                det += f'<br/><font color="#64748B" size="7">Previene: {esc(c.previene)}</font>'
-            filas.append([Paragraph(c.clave, chico), Paragraph(esc(c.titulo), cuerpo),
-                          Paragraph(f'<font color="{_COLOR_ESTADO[c.estado]}"><b>{c.estado}</b></font>',
-                                    ParagraphStyle("e", parent=cuerpo, alignment=TA_CENTER)),
-                          Paragraph(det, cuerpo)])
-            estilos.append(("BACKGROUND", (2, i), (2, i), colors.HexColor(_FONDO_ESTADO[c.estado])))
-        t = Table(filas, colWidths=[1.0 * cm, 5.0 * cm, 1.8 * cm, 9.8 * cm], repeatRows=1)
-        t.setStyle(TableStyle(estilos))
-        elementos += [Paragraph(f"{sec}. {titulo}", h2), t]
-
-    # --- Validación manual (boletín) -----------------------------------------
-    pasos = [
-        "Escanea el <b>1er QR</b> (junto a la cédula) y confirma que el portal del SAT muestre "
-        "el mismo nombre, RFC, CURP, situación, régimen con fecha de inicio y domicilio.",
-        "Escanea el <b>2do QR</b> (junto al sello) y confirma que la fecha y el RFC coincidan con "
-        "la cadena original.",
-        "Verifica que el link abra en <b>siat.sat.gob.mx</b> y no en otra dirección.",
-        "No solicites usuarios ni contraseñas al cliente; el PDV no debe generar ni editar la constancia.",
-    ]
-    bloque = [Paragraph("Validación manual obligatoria (boletín BMGFS)", h2)]
-    bloque += [Paragraph(f"{i}. {p}", cuerpo) for i, p in enumerate(pasos, 1)]
-    for i, u in enumerate(analisis.urls_qr, 1):
-        bloque.append(Paragraph(f'QR {i}: <link href="{esc(u)}" color="#1D4ED8">{esc(u)}</link>', chico))
-    elementos.append(KeepTogether(bloque))
-    elementos += [Spacer(1, 8), Paragraph(
-        "Este análisis revisa candados técnicos del archivo; no sustituye la consulta al portal del "
-        "SAT. Un resultado sin indicios no garantiza autenticidad si el QR no se valida.", chico),
-        Paragraph(f"Huella SHA-256 del archivo revisado: {analisis.sha256}", chico)]
-
-    def pie(canvas, doc):
-        canvas.saveState()
-        ancho, alto = letter
-        canvas.setFillColor(colors.HexColor(AZUL))
-        canvas.rect(0, alto - 0.15 * cm, ancho, 0.15 * cm, fill=1, stroke=0)
-        canvas.setFont("Helvetica-Bold", 11)
-        canvas.drawString(1.6 * cm, alto - 1.1 * cm, "Validación de Constancia de Situación Fiscal")
-        canvas.setFont("Helvetica", 8)
-        canvas.setFillColor(colors.HexColor("#475569"))
-        canvas.drawString(1.6 * cm, alto - 1.5 * cm, f"Archivo: {analisis.archivo[:90]}")
-        canvas.drawRightString(ancho - 1.6 * cm, alto - 1.1 * cm, fecha_gen)
-        canvas.line(1.6 * cm, 1.3 * cm, ancho - 1.6 * cm, 1.3 * cm)
-        izq = f"Validación de CSF · Folio {analisis.sha256[:10].upper()}"
-        canvas.drawString(1.6 * cm, 0.85 * cm, izq)
-        canvas.drawRightString(ancho - 1.6 * cm, 0.85 * cm, f"Página {doc.page}")
-        canvas.restoreState()
-
-    doc = SimpleDocTemplate(ruta_salida, pagesize=letter, leftMargin=1.6 * cm, rightMargin=1.6 * cm,
-                            topMargin=2.0 * cm, bottomMargin=1.7 * cm,
-                            title=f"Validación CSF {d.get('rfc', '')}")
-    doc.build(elementos, onFirstPage=pie, onLaterPages=pie)
-    return ruta_salida
+    """Reporte visual en PDF (reporte_csf.py)."""
+    from . import reporte_csf   # local: reporte_csf importa este módulo
+    fecha = _fechas.ahora().strftime("%d/%m/%Y %H:%M")
+    return reporte_csf.generar(analisis, ruta_salida, fecha_texto=fecha)
 
 
 def resumen_texto(analisis):
@@ -1933,7 +1759,7 @@ def resumen_texto(analisis):
 
 
 # ===========================================================================
-#  PUNTO DE ENTRADA (Colab / línea de comandos)
+#  PUNTO DE ENTRADA (app y línea de comandos)
 # ===========================================================================
 def resumen_dict(analisis, reporte=None, hoy=None):
     """Lo esencial del análisis en datos simples (str/int/list/dict), para
@@ -1976,20 +1802,10 @@ def resumen_dict(analisis, reporte=None, hoy=None):
     }
 
 
-def main(rutas=None, carpeta_salida="salida", consultar_sat=True, nombres=None,
+def main(rutas, carpeta_salida="salida", consultar_sat=True, nombres=None,
          devolver_resumen=False):
-    """En Colab, sin argumentos, pide subir los archivos y descarga los PDF.
+    """Analiza las constancias de rutas y escribe un PDF por cada una.
     Con devolver_resumen=True regresa (rutas_pdf, [resumen_dict, ...]) para la app."""
-    en_colab = False
-    if rutas is None:
-        try:
-            from google.colab import files  # type: ignore
-            subidos = files.upload()
-            rutas = list(subidos.keys())
-            en_colab = True
-        except ImportError:
-            import sys
-            rutas = sys.argv[1:]
     os.makedirs(carpeta_salida, exist_ok=True)
     salidas, resumenes = [], []
     for a in analizar_lote(rutas, consultar_sat=consultar_sat, nombres=nombres):
@@ -2004,12 +1820,9 @@ def main(rutas=None, carpeta_salida="salida", consultar_sat=True, nombres=None,
         resumenes.append(resumen_dict(a, reporte=os.path.basename(ruta)))
         print(resumen_texto(a))
         print()
-    if en_colab:
-        from google.colab import files  # type: ignore
-        for s in salidas:
-            files.download(s)
     return (salidas, resumenes) if devolver_resumen else salidas
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(sys.argv[1:])

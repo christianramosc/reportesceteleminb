@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Reportes y Herramientas — Bitácora de Solicitudes (Autoexpress Inbursa)
 
@@ -6,7 +5,7 @@ Sirve para cualquier PDV: el nombre del PDV y del implant se capturan en
 cada reporte.
 
 Une, detrás de una interfaz simple de "sube el archivo y descarga el
-resultado", los scripts de Colab que ya se usan para la bitácora mensual.
+resultado", los reportes de la bitácora mensual y el validador de CSF.
 No hay que tocar este archivo para agregar una herramienta nueva más
 adelante — ver las instrucciones en herramientas/__init__.py.
 """

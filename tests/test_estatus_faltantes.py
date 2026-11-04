@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Regresión: un mes sin algún estatus (septiembre 2026 no tuvo APROBADAS)
 hacía tronar el comparativo con KeyError: 'APROBADO'."""
 import pandas as pd

@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 """Definición del objeto Herramienta que usa el registro central (__init__.py)."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, List, Optional
 
 

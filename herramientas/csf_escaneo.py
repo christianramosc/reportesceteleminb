@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 VALIDAR CSF — MODO COPIA (escaneo o foto)
 =========================================
@@ -37,10 +36,7 @@ legítima por una mancha del escáner.
 import re
 from datetime import date
 
-try:
-    from . import validar_csf as v
-except ImportError:  # ejecución suelta (Colab)
-    import validar_csf as v
+from . import validar_csf as v
 
 OK, AVISO, FALLA, INFO = v.OK, v.AVISO, v.FALLA, v.INFO
 

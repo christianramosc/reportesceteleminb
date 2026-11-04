@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Adaptador de comparativo_mensual_original.py (Reporte Comparativo Mensual) para el registro."""
 
 import os
@@ -69,7 +68,6 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
     )
     tabla_comp = _comparativo.construir_tabla_comparativa(datos_por_mes, orden_meses)
     df_combinado = pd.concat([datos_por_mes[m]["df"] for m in orden_meses], ignore_index=True)
-    rutas_graficas = _comparativo.generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado)
 
     # Nombre corto: Comparativo_Jun-Sep26 (+ .pdf, .docx, _datos.xlsx, fichas)
     base = f"Comparativo_{_nombres.rango_corto(orden_meses)}"

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Pruebas de herramientas/conclusiones.py.
 
 Cada prueba protege una de las reglas del docstring de ese módulo. Si una

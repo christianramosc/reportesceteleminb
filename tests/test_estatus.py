@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Pruebas del catálogo de estatus (herramientas/estatus.py).
 

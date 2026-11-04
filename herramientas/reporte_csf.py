@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Reporte PDF de "Validar CSF" — versión visual.
 
@@ -27,10 +26,7 @@ from reportlab.pdfgen import canvas as _canvas
 from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Frame, Image, KeepTogether,
                                 NextPageTemplate, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
-try:
-    from . import iconos as _iconos
-except ImportError:  # ejecución suelta
-    _iconos = None
+from . import iconos as _iconos
 
 # --- Paleta -----------------------------------------------------------------
 AZUL = "#191970"        # azul Inbursa
@@ -71,8 +67,6 @@ def _esc(t):
 
 
 def _ico(nombre, tam, color):
-    if _iconos is None:
-        return None
     return _iconos.icono(nombre, tam, color)
 
 

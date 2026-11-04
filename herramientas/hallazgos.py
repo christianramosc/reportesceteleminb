@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Titulares de hallazgo para las gráficas.
 
 Antes cada gráfica repetía el título de su barra de sección ("Tasa de
@@ -13,10 +12,7 @@ diferencia entre meses es ruido, el titular lo dice en vez de coronar un mes.
 
 import matplotlib.ticker as _mticker
 
-try:
-    from . import conclusiones as _c
-except ImportError:  # ejecución suelta (Colab)
-    import conclusiones as _c
+from . import conclusiones as _c
 
 GRIS = "#6B7280"
 ROJO_ALERTA = "#E4002B"

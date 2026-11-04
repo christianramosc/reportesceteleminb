@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Folios que aparecen en más de un mes del comparativo.
 
 El problema

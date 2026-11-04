@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Pruebas de herramientas/iconos.py."""
 import os
 

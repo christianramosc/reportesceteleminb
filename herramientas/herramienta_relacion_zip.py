@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Adaptador de bitacora_zip.py (Relación de clientes por STATUS) para el registro."""
 
 from .bitacora_zip import procesar_zip_a_excel

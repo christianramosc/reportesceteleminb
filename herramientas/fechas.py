@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Fecha y hora LOCALES (Colima / centro de México).
 
 Por qué existe
