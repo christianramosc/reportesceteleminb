@@ -104,3 +104,14 @@ def test_sin_aprobados_no_truena():
     df = _silencioso(base.limpiar_datos, crudo)
     tabla = _silencioso(base.analisis_por_vendedor, df)
     assert (tabla["% Aprobación"] == 0).all()
+
+
+def test_monto_con_texto_no_tumba_el_reporte():
+    """Una celda de monto con texto ("PENDIENTE") se vuelve vacía en vez de
+    tronar. Antes solo el Resumen por vendedor lo aguantaba; el Avance, el
+    Resumen y el Comparativo fallaban con ValueError."""
+    import math
+    import pandas as pd
+    limpio = base._limpiar_moneda(pd.Series(["$1,234.50", "PENDIENTE", "", None, 500, "N/A"]))
+    assert limpio[0] == 1234.5 and limpio[4] == 500
+    assert all(math.isnan(limpio[i]) for i in (1, 2, 3, 5))
