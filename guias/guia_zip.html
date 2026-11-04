@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Guía de uso · Relación de clientes (ZIP → Excel)</title>
+<style>
+@page { size: 11in 8.5in; margin: 0; }
+* { box-sizing: border-box; }
+:root {
+  --navy: #191970; --rojo: #E4002B; --texto: #1F2430; --suave: #5B6170; --tenue: #8A90A0;
+  --linea: #E3E5EC; --fondo: #F6F7FA;
+  --c1: #191970; --c2: #2F6F8F; --c3: #5B4FC4; --c4: #E4002B; --c5: #15803D; --c6: #B7791F;
+}
+html, body { margin: 0; padding: 0; }
+body { font-family: Inter, "DejaVu Sans", sans-serif; color: var(--texto); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.pagina { width: 11in; height: 8.5in; position: relative; overflow: hidden; background: #FFFFFF; page-break-after: always; }
+.pagina:last-child { page-break-after: auto; }
+
+/* Encabezado */
+.encabezado { position: absolute; left: 0; right: 0; top: 0; height: 74px; padding: 0 28px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--linea); }
+.marca { display: flex; align-items: center; gap: 12px; }
+.marca-sello { width: 38px; height: 38px; border-radius: 9px; background: var(--navy); display: grid; place-items: center; }
+.marca-sup { font-size: 9.5px; font-weight: 600; letter-spacing: .12em; color: var(--rojo); }
+.marca-titulo { font-size: 19px; font-weight: 700; letter-spacing: -.01em; color: var(--navy); }
+.encabezado-der { text-align: right; font-size: 10px; color: var(--suave); line-height: 1.45; }
+.encabezado-der b { color: var(--texto); }
+.pie { position: absolute; left: 28px; right: 28px; bottom: 14px; display: flex; justify-content: space-between; font-size: 8.5px; color: var(--tenue); }
+
+/* Mapa mental */
+.conectores { position: absolute; left: 0; top: 0; width: 1056px; height: 816px; }
+.centro { position: absolute; left: 418px; top: 338px; width: 220px; height: 196px; border-radius: 22px; background: var(--navy); color: #fff; padding: 20px 18px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; box-shadow: 0 10px 28px rgba(25,25,112,.25); }
+.centro-icono { width: 54px; height: 54px; border-radius: 14px; background: rgba(255,255,255,.12); display: grid; place-items: center; }
+.centro-titulo { font-size: 17px; font-weight: 700; line-height: 1.15; }
+.centro-sub { font-size: 10.5px; line-height: 1.4; color: #D6D9F2; }
+.centro-flujo { margin-top: 2px; display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; }
+.centro-flujo span.pill { padding: 3px 8px; border-radius: 999px; background: #fff; color: var(--navy); }
+.lado { position: absolute; top: 84px; font-size: 9px; font-weight: 700; letter-spacing: .14em; color: var(--tenue); }
+
+.rama { position: absolute; width: 344px; height: 218px; border-radius: 16px; background: #fff; border: 1.5px solid var(--linea); padding: 13px 15px 12px; display: flex; flex-direction: column; gap: 7px; }
+.rama-cab { display: flex; align-items: center; gap: 9px; }
+.num { flex: none; width: 26px; height: 26px; border-radius: 8px; color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 800; }
+.rama-titulo { font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; }
+.rama-icono { margin-left: auto; opacity: .9; }
+ul.puntos { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+ul.puntos li { position: relative; padding-left: 13px; font-size: 10.2px; line-height: 1.38; color: var(--texto); }
+ul.puntos li::before { content: ""; position: absolute; left: 2px; top: 5.5px; width: 5px; height: 5px; border-radius: 99px; background: var(--color); }
+ul.puntos li b { font-weight: 700; }
+.ilustra { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 7px; font-size: 9.5px; font-weight: 600; background: var(--fondo); border: 1px solid var(--linea); white-space: nowrap; }
+.chip.oscuro { background: var(--color); color: #fff; border-color: var(--color); }
+.flecha { color: var(--tenue); font-size: 12px; font-weight: 700; }
+code, .mono { font-family: "DejaVu Sans Mono", monospace; font-size: 9.2px; }
+
+/* Página 2 */
+.titulo-sec { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; color: var(--navy); margin: 0 0 10px; }
+.titulo-sec .num { width: 22px; height: 22px; font-size: 11.5px; border-radius: 6px; }
+.caja { border: 1.5px solid var(--linea); border-radius: 14px; padding: 14px 16px; background: #fff; }
+.arbol { font-family: "DejaVu Sans Mono", monospace; font-size: 10px; line-height: 1.75; color: var(--texto); }
+.arbol .carp { font-weight: 700; }
+.arbol .gris { color: var(--tenue); }
+.arbol .nota { font-family: Inter, sans-serif; font-size: 9.2px; color: var(--suave); margin-left: 6px; }
+.arbol .mal { color: var(--rojo); text-decoration: line-through; }
+.tabla-campos { display: flex; gap: 10px; }
+.tabla-campos .col { flex: 1; border-radius: 10px; border: 1px solid var(--linea); overflow: hidden; }
+.tabla-campos .col-cab { padding: 7px 10px; font-size: 10.5px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px; }
+.tabla-campos ul { list-style: none; margin: 0; padding: 7px 10px 8px; display: flex; flex-direction: column; gap: 3px; }
+.tabla-campos li { font-size: 9.6px; line-height: 1.35; display: flex; gap: 6px; }
+.tabla-campos li::before { content: "•"; color: var(--tenue); }
+.check { display: flex; gap: 9px; align-items: flex-start; font-size: 10.2px; line-height: 1.4; margin-bottom: 7px; }
+.check .cuadro { flex: none; width: 13px; height: 13px; border-radius: 3.5px; border: 1.6px solid var(--navy); margin-top: 1px; }
+.estatus { display: flex; flex-wrap: wrap; gap: 5px; }
+.estatus .chip { font-weight: 600; font-size: 9.2px; }
+.estatus .punto { width: 8px; height: 8px; border-radius: 99px; flex: none; }
+.fila-problema { display: grid; grid-template-columns: 1fr 14px 1.15fr; gap: 8px; align-items: start; padding: 6px 0; border-top: 1px solid var(--linea); font-size: 9.8px; line-height: 1.38; }
+.fila-problema:first-of-type { border-top: none; padding-top: 0; }
+.fila-problema .que { font-weight: 600; }
+.fila-problema .sol { color: var(--suave); }
+</style>
+</head>
+<body>
+
+<!-- ================= PÁGINA 1: MAPA MENTAL ================= -->
+<section class="pagina">
+  <div class="encabezado">
+    <div class="marca">
+      <div class="marca-sello"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v1M12 13v1M12 16v1"/></svg></div>
+      <div>
+        <div class="marca-sup">GUÍA DE USO · REPORTES Y HERRAMIENTAS</div>
+        <div class="marca-titulo">Relación de clientes: del ZIP al Excel</div>
+      </div>
+    </div>
+    <div class="encabezado-der"><b>Mapa rápido</b> · sigue los números del 1 al 6</div>
+  </div>
+
+  <div class="lado" style="left: 24px;">ANTES · ARMA EL ZIP</div>
+  <div class="lado" style="right: 24px;">EN LA APP · Y DESPUÉS</div>
+
+  <!-- Conectores -->
+  <svg class="conectores" viewBox="0 0 1056 816" aria-hidden="true">
+    <g fill="none" stroke-width="2.5" stroke-linecap="round">
+      <path d="M418 410 C 390 410, 395 213, 368 213" stroke="#191970"/>
+      <path d="M418 436 C 395 436, 395 445, 368 445" stroke="#2F6F8F"/>
+      <path d="M418 462 C 390 462, 395 677, 368 677" stroke="#5B4FC4"/>
+      <path d="M638 410 C 666 410, 661 213, 688 213" stroke="#E4002B"/>
+      <path d="M638 436 C 661 436, 661 445, 688 445" stroke="#15803D"/>
+      <path d="M638 462 C 666 462, 661 677, 688 677" stroke="#B7791F"/>
+    </g>
+    <g>
+      <circle cx="418" cy="410" r="4" fill="#191970"/><circle cx="418" cy="436" r="4" fill="#2F6F8F"/><circle cx="418" cy="462" r="4" fill="#5B4FC4"/>
+      <circle cx="638" cy="410" r="4" fill="#E4002B"/><circle cx="638" cy="436" r="4" fill="#15803D"/><circle cx="638" cy="462" r="4" fill="#B7791F"/>
+    </g>
+  </svg>
+
+  <!-- Centro -->
+  <div class="centro">
+    <div class="centro-icono"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M10 9h1M10 12h1M10 15h1"/></svg></div>
+    <div class="centro-titulo">Relación de clientes</div>
+    <div class="centro-sub">Lee las solicitudes y amortizaciones del mes y arma la bitácora en Excel</div>
+    <div class="centro-flujo"><span class="pill">ZIP</span><span>→</span><span class="pill">Excel</span></div>
+  </div>
+
+  <!-- 1 -->
+  <div class="rama" style="left: 24px; top: 104px; --color: var(--c1); border-color: #C9CBE8;">
+    <div class="rama-cab"><span class="num" style="background: var(--c1);">1</span><span class="rama-titulo" style="color: var(--c1);">Una carpeta por estatus</span>
+      <svg class="rama-icono" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#191970" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+    <div class="ilustra">
+      <span class="chip">📁 Aprobados</span><span class="chip">📁 Rechazados</span><span class="chip">📁 Contrapropuestas</span>
+    </div>
+    <ul class="puntos">
+      <li>Crea <b>solo las carpetas que tengas</b> ese mes (hay 14 posibles, ver pág. 2).</li>
+      <li>El nombre de la carpeta <b>es el estatus</b> del cliente en el Excel.</li>
+      <li>Da igual mayúsculas, acentos o singular/plural: «APROBADO» y «Aprobados» valen igual.</li>
+      <li>Nada de PDFs sueltos fuera de las carpetas: no se leen.</li>
+    </ul>
+  </div>
+
+  <!-- 2 -->
+  <div class="rama" style="left: 24px; top: 336px; --color: var(--c2); border-color: #C3DAE4;">
+    <div class="rama-cab"><span class="num" style="background: var(--c2);">2</span><span class="rama-titulo" style="color: var(--c2);">Dos PDFs por cliente</span>
+      <svg class="rama-icono" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2F6F8F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg></div>
+    <div class="ilustra">
+      <span class="chip">📄 Solicitud…pdf</span><span class="flecha">+</span><span class="chip">📄 Amortización…pdf</span><span class="flecha">=</span><span class="chip oscuro">1 cliente</span>
+    </div>
+    <ul class="puntos">
+      <li>Los dos van en <b>la misma carpeta</b> de estatus.</li>
+      <li>El nombre del archivo debe decir <b>"Solicitud"</b> o <b>"Amortización"</b>; los demás PDFs se ignoran.</li>
+      <li>Se juntan por el <b>Folio CCK</b> que viene dentro del PDF, no por el nombre.</li>
+      <li>Usa el PDF <b>descargado del sistema</b>, no escaneos ni fotos.</li>
+    </ul>
+  </div>
+
+  <!-- 3 -->
+  <div class="rama" style="left: 24px; top: 568px; --color: var(--c3); border-color: #D6D2F1;">
+    <div class="rama-cab"><span class="num" style="background: var(--c3);">3</span><span class="rama-titulo" style="color: var(--c3);">Comprime y nombra el ZIP</span>
+      <svg class="rama-icono" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B4FC4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M12 3v2M12 7v2M12 11v2"/><rect x="10" y="14" width="4" height="4" rx="1"/></svg></div>
+    <div class="ilustra">
+      <span class="chip mono">OCTUBRE 2026.zip</span><span class="flecha">→</span><span class="chip oscuro">hoja «OCTUBRE 2026»</span>
+    </div>
+    <ul class="puntos">
+      <li>El <b>mes en el nombre</b> del ZIP (o de su carpeta principal) le da nombre a la hoja.</li>
+      <li>Sin mes se usa el mes actual; sin año, el año actual.</li>
+      <li><b>Windows:</b> clic derecho → Enviar a → Carpeta comprimida. <b>Mac:</b> clic derecho → Comprimir.</li>
+      <li>Hasta <b>200 MB</b> por archivo.</li>
+    </ul>
+  </div>
+
+  <!-- 4 -->
+  <div class="rama" style="left: 688px; top: 104px; --color: var(--c4); border-color: #F5C2CC;">
+    <div class="rama-cab"><span class="num" style="background: var(--c4);">4</span><span class="rama-titulo" style="color: var(--c4);">Súbelo en la app</span>
+      <svg class="rama-icono" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E4002B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></div>
+    <div class="ilustra">
+      <span class="chip">Relación de clientes</span><span class="flecha">→</span><span class="chip">Subir ZIP</span><span class="flecha">→</span><span class="chip oscuro">Generar reporte</span>
+    </div>
+    <ul class="puntos">
+      <li>En el menú de la izquierda elige <b>Relación de clientes</b>.</li>
+      <li>Arrastra el ZIP a la zona de carga (o clic en <b>Upload</b>).</li>
+      <li>Presiona <b>Generar reporte</b> y espera: lee todos los PDFs, puede tardar un par de minutos.</li>
+      <li>Los archivos se procesan y <b>se borran al terminar</b>.</li>
+    </ul>
+  </div>
+
+  <!-- 5 -->
+  <div class="rama" style="left: 688px; top: 336px; --color: var(--c5); border-color: #BFE3CB;">
+    <div class="rama-cab"><span class="num" style="background: var(--c5);">5</span><span class="rama-titulo" style="color: var(--c5);">Descarga tu Excel</span>
+      <svg class="rama-icono" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#15803D" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14h18M9 4v16"/></svg></div>
+    <div class="ilustra">
+      <span class="chip mono">Bitacora_Oct26_al_04-11-2026.xlsx</span>
+    </div>
+    <ul class="puntos">
+      <li><b>Una fila por cliente</b> (por Folio CCK) y <b>24 columnas</b>: cliente, vehículo, seguro y crédito.</li>
+      <li>El nombre trae el mes y la fecha en que se generó.</li>
+      <li>Ese Excel es la entrada de <b>Avance preliminar, Resumen mensual, Comparativo</b> y <b>Resumen por vendedor</b>.</li>
+    </ul>
+  </div>
+
+  <!-- 6 -->
+  <div class="rama" style="left: 688px; top: 568px; --color: var(--c6); border-color: #F0DDB8;">
+    <div class="rama-cab"><span class="num" style="background: var(--c6);">6</span><span class="rama-titulo" style="color: #8A5A12;">Revisa antes de usarlo</span>
+      <svg class="rama-icono" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B7791F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg></div>
+    <div class="ilustra">
+      <span class="chip">Detalle del proceso</span><span class="flecha">→</span><span class="chip">✔ / ⚠ por cliente</span>
+    </div>
+    <ul class="puntos">
+      <li>Abre <b>Detalle del proceso</b> en la app: dice qué leyó de cada PDF.</li>
+      <li><b>⚠ SIN AMORTIZACIÓN</b>: falta ese PDF; el vehículo y el crédito quedan vacíos.</li>
+      <li><b>⚠ SIN SOLICITUD</b>: nombre y tipo salen de la amortización; teléfono, correo y vendedor quedan vacíos.</li>
+      <li>Soluciones a cada aviso en la pág. 2.</li>
+    </ul>
+  </div>
+
+  <div class="pie"><span>Guía de uso · Relación de clientes (ZIP → Excel)</span><span>1 / 2</span></div>
+</section>
+
+<!-- ================= PÁGINA 2: EJEMPLOS VISUALES ================= -->
+<section class="pagina">
+  <div class="encabezado">
+    <div class="marca">
+      <div class="marca-sello"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+      <div>
+        <div class="marca-sup">GUÍA DE USO · EJEMPLOS Y SOLUCIONES</div>
+        <div class="marca-titulo">Así se ve un ZIP bien armado</div>
+      </div>
+    </div>
+    <div class="encabezado-der"><b>Ayuda visual</b> · para cuando tengas dudas</div>
+  </div>
+
+  <div style="position: absolute; left: 28px; right: 28px; top: 92px; bottom: 36px; display: grid; grid-template-columns: 1.02fr 1fr; grid-template-rows: auto 1fr; gap: 16px;">
+
+    <!-- Árbol -->
+    <div class="caja" style="grid-row: 1 / span 2; display: flex; flex-direction: column;">
+      <div class="titulo-sec"><span class="num" style="background: var(--c1);">1</span>Ejemplo de estructura</div>
+      <div class="arbol">
+        <div>🗜️ <span class="carp">OCTUBRE 2026.zip</span><span class="nota">← el mes da nombre a la hoja</span></div>
+        <div>&nbsp;└─ 📁 <span class="carp">OCTUBRE 2026</span><span class="nota">(carpeta principal: opcional)</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ 📁 <span class="carp" style="color: #E4002B;">Aprobados</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├─ 📄 Solicitud_10000001.pdf</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├─ 📄 Amortizacion_10000001.pdf<span class="nota">← mismo folio = mismo cliente</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├─ 📄 solicitud cliente nuevo.pdf<span class="nota">← nombre libre si dice "solicitud"</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└─ 📄 amortizacion cliente nuevo.pdf</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ 📁 <span class="carp" style="color: #191970;">Contrapropuestas</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├─ 📄 Solicitud_10000002.pdf</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└─ 📄 Amortizacion_10000002.pdf</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ 📁 <span class="carp" style="color: #4B5563;">Rechazados</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├─ 📄 Solicitud_10000003.pdf</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├─ 📄 Amortizacion_10000003.pdf</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└─ 📄 <span class="mal">Contrato_10000003.pdf</span><span class="nota" style="color: #E4002B;">← se ignora (no es solicitud ni amortización)</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ 📁 <span class="carp" style="color: #2F6F8F;">En revisión</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ …</div>
+      </div>
+      <div style="margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: #FDECEF; border: 1px solid #F5C2CC; font-size: 9.8px; line-height: 1.45;">
+        <b style="color: #B4001F;">No funciona:</b> PDFs sueltos en la raíz del ZIP (sin carpetas de estatus), o la solicitud en una carpeta y su amortización en otra.
+      </div>
+
+      <div class="titulo-sec" style="margin-top: 16px;"><span class="num" style="background: var(--c2);">2</span>Los 14 nombres de carpeta que reconoce</div>
+      <div class="estatus">
+        <span class="chip"><span class="punto" style="background:#7A0019"></span>Financiados</span>
+        <span class="chip"><span class="punto" style="background:#E4002B"></span>Aprobados</span>
+        <span class="chip"><span class="punto" style="background:#191970"></span>Contrapropuestas</span>
+        <span class="chip"><span class="punto" style="background:#5B7FD6"></span>Excepciones</span>
+        <span class="chip"><span class="punto" style="background:#B8C7EE"></span>Validación interna</span>
+        <span class="chip"><span class="punto" style="background:#C9A227"></span>En proceso</span>
+        <span class="chip"><span class="punto" style="background:#2F6F8F"></span>En revisión</span>
+        <span class="chip"><span class="punto" style="background:#E6CF8A"></span>Análisis</span>
+        <span class="chip"><span class="punto" style="background:#6B6FA8"></span>Documentación adicional</span>
+        <span class="chip"><span class="punto" style="background:#8FB3C9"></span>Pendientes</span>
+        <span class="chip"><span class="punto" style="background:#8C6D1F"></span>Sondeo</span>
+        <span class="chip"><span class="punto" style="background:#9CA3AF"></span>No financiables</span>
+        <span class="chip"><span class="punto" style="background:#4B5563"></span>Rechazados</span>
+        <span class="chip"><span class="punto" style="background:#D1D5DB"></span>Cancelados</span>
+      </div>
+      <div style="margin-top: 8px; font-size: 9.4px; line-height: 1.45; color: var(--suave);">También acepta variantes como <span class="mono">Autorizados</span>, <span class="mono">Declinados</span> o <span class="mono">En trámite</span>. El color es el que tendrá ese estatus en las gráficas de los reportes.</div>
+      <div style="margin-top: auto; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: #EEF0FA; border: 1px solid #D5D9F0; font-size: 9.8px; line-height: 1.45;">
+        <span style="font-size: 14px;">💡</span>
+        <span><b style="color: var(--navy);">Consejo:</b> deja los PDFs con el nombre con el que los descarga el sistema; solo revisa que digan «solicitud» o «amortización». Si un cliente cambia de estatus a mitad de mes, mueve sus dos PDFs a la carpeta nueva.</span>
+      </div>
+    </div>
+
+    <!-- Qué sale -->
+    <div class="caja">
+      <div class="titulo-sec"><span class="num" style="background: var(--c5);">3</span>Qué saca de cada PDF (las 24 columnas)</div>
+      <div class="tabla-campos">
+        <div class="col">
+          <div class="col-cab" style="background: var(--c2);">📄 Solicitud</div>
+          <ul>
+            <li>Tipo de persona (física, PFAE o moral)</li>
+            <li>Nombre completo o razón social</li>
+            <li>Fecha de nacimiento (o de constitución)</li>
+            <li>Teléfono móvil y correo</li>
+            <li>Nombre del vendedor</li>
+          </ul>
+        </div>
+        <div class="col">
+          <div class="col-cab" style="background: var(--c1);">📄 Amortización</div>
+          <ul>
+            <li>Marca, vehículo, año y accesorios</li>
+            <li>Tipo de seguro y aseguradora</li>
+            <li>Precio, enganche, GAP y garantía</li>
+            <li>Plazo, tasa y monto a financiar</li>
+            <li>Mensualidad mínima y máxima</li>
+          </ul>
+        </div>
+      </div>
+      <div style="margin-top: 8px; font-size: 9.4px; color: var(--suave);">Además: <b style="color: var(--texto);">Folio CCK</b> y <b style="color: var(--texto);">STATUS</b> (el nombre de la carpeta). Con cotitular, se toman los datos del solicitante.</div>
+    </div>
+
+    <!-- Avisos y soluciones -->
+    <div class="caja" style="display: flex; flex-direction: column;">
+      <div class="titulo-sec"><span class="num" style="background: var(--c6);">4</span>Si algo sale mal</div>
+      <div class="fila-problema"><span class="que">"No se encontraron subcarpetas de estatus"</span><span class="flecha">→</span><span class="sol">Los PDFs están sueltos. Mételos en carpetas por estatus y vuelve a comprimir.</span></div>
+      <div class="fila-problema"><span class="que">⚠ SIN AMORTIZACIÓN / SIN SOLICITUD</span><span class="flecha">→</span><span class="sol">Falta uno de los dos PDFs o está en otra carpeta. Agrégalo junto al otro.</span></div>
+      <div class="fila-problema"><span class="que">⚠ PDFs ignorados</span><span class="flecha">→</span><span class="sol">Su nombre no dice Solicitud ni Amortización. Renómbralo si es uno de esos dos.</span></div>
+      <div class="fila-problema"><span class="que">⚠ No se encontró Folio CCK</span><span class="flecha">→</span><span class="sol">Es un escaneo, una foto o un formato en blanco. Descárgalo de nuevo del sistema.</span></div>
+      <div class="fila-problema"><span class="que">Un cliente salió con otro estatus</span><span class="flecha">→</span><span class="sol">Sus PDFs están en otra carpeta. Muévelos a la carpeta correcta.</span></div>
+      <div class="fila-problema"><span class="que">La hoja salió con otro mes</span><span class="flecha">→</span><span class="sol">El nombre del ZIP no traía el mes. Renómbralo, p. ej. <span class="mono">OCTUBRE 2026.zip</span>.</span></div>
+
+      <div style="margin-top: auto; padding-top: 10px; border-top: 1px dashed var(--linea);">
+        <div style="font-size: 10.5px; font-weight: 700; color: var(--navy); margin-bottom: 7px;">Antes de subir, revisa:</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px;">
+          <div class="check"><span class="cuadro"></span>Una carpeta por estatus</div>
+          <div class="check"><span class="cuadro"></span>Cada cliente con sus 2 PDFs</div>
+          <div class="check"><span class="cuadro"></span>Solicitud y amortización juntas</div>
+          <div class="check"><span class="cuadro"></span>El mes en el nombre del ZIP</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pie"><span>Los folios y nombres de archivo de esta guía son ejemplos.</span><span>2 / 2</span></div>
+</section>
+
+</body>
+</html>

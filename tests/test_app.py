@@ -41,7 +41,8 @@ def _excel(hojas):
 
 
 def _descargas(at):
-    return at.get("download_button")
+    """Botones de descarga del RESULTADO (sin el de la guía de uso)."""
+    return [b for b in at.get("download_button") if not (b.key or "").startswith("guia_")]
 
 
 def test_cambiar_de_archivo_borra_el_resultado_anterior(app):
@@ -85,6 +86,22 @@ def test_vista_previa_avisa_si_hay_varias_hojas(app):
 
     avisos = " ".join(i.value for i in app.info)
     assert "varias hojas" in avisos and "OCTUBRE 2026" in avisos
+
+
+@pytest.mark.parametrize("herramienta", REGISTRO, ids=[h.id for h in REGISTRO])
+def test_guia_de_uso_solo_donde_la_hay(app, herramienta):
+    """Relación de clientes trae el desplegable "¿Cómo armo el ZIP?" con la
+    imagen del mapa y el botón para bajar el PDF; las demás, no."""
+    _elegir(app, herramienta.id)
+    # Un expander con icono le llega a AppTest como "status".
+    titulos = [e.label for e in list(app.expander) + list(app.status)]
+    guia = [b for b in app.get("download_button") if b.key == f"guia_{herramienta.id}"]
+    if herramienta.guia:
+        assert herramienta.guia_titulo in titulos
+        assert len(guia) == 1 and guia[0].label == "Descargar guía completa (PDF)"
+        assert app.get("image"), "falta la imagen del mapa"
+    else:
+        assert not guia and herramienta.guia_titulo not in titulos
 
 
 @pytest.mark.parametrize("herramienta", REGISTRO, ids=[h.id for h in REGISTRO])

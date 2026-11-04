@@ -42,6 +42,13 @@ class Herramienta:
     pide_vendedores: bool = False      # vendedores_incluir (lista)
     pide_etiquetas_mes: bool = False   # nombres_meses (lista)
 
+    # --- Guía de uso (opcional) -------------------------------------------
+    # Rutas desde la raíz del repo. Si hay guía, la página muestra un
+    # desplegable con la imagen (guia_vista) y el botón para bajar el PDF.
+    guia: Optional[str] = None          # PDF, ej. "guias/Guia_ZIP_Relacion_de_clientes.pdf"
+    guia_vista: Optional[str] = None    # imagen de la primera página
+    guia_titulo: str = "¿Cómo se usa?"
+
     @property
     def tiene_opciones(self):
         return (self.pide_pdv_e_implant or self.pide_fecha_corte
