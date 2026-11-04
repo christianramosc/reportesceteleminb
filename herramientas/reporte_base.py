@@ -143,10 +143,6 @@ from . import pdf_util as _pdf_util
 ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
 COLOR_CATEGORIA = _est.COLOR_CATEGORIA
 
-NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
-SUBTITULO_EMPRESA = "MG Colima PYD"
-NOMBRE_ANALISTA = "Christian Ramos"
-
 _MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
              "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 
@@ -187,11 +183,8 @@ __all__ = [
     "MG_ROJO_OSCURO",
     "MG_ROJO_PALIDO",
     "MG_ROJO_PASTEL",
-    "NOMBRE_ANALISTA",
-    "NOMBRE_EMPRESA",
     "ORDEN_CATEGORIAS",
     "PALETA_ROJOS",
-    "SUBTITULO_EMPRESA",
     "_CMAP_ROJOS",
     "_FUENTES_DISPONIBLES",
     "_MESES_ES",

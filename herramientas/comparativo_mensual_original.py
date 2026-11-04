@@ -115,13 +115,10 @@ from . import lateral as _lateral
 from . import folios as _folios
 from . import metricas as _metricas
 from . import hallazgos as _h
+from .config import DatosReporte
 
 ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
 COLOR_CATEGORIA = _est.COLOR_CATEGORIA
-
-NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
-SUBTITULO_EMPRESA = "MG Colima PYD"
-NOMBRE_ANALISTA = "Christian Ramos"
 
 _MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
              "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
@@ -1068,7 +1065,9 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
 # =======================================================================
 def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
                                      df_combinado, nombre_archivo=None,
-                                     recolectar_elementos=None):
+                                     recolectar_elementos=None, datos=None):
+    """datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config."""
+    datos = datos or DatosReporte()
     if nombre_archivo is None:
         fecha_archivo = _fechas.ahora().strftime("%Y%m%d_%H%M")
         rango = f"{orden_meses[0].title()}" if len(orden_meses) == 1 else \
@@ -1142,7 +1141,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         """Encabezado y pie: el dibujo vive en pdf_util.pintar_encabezado_pie,
         compartido por los cuatro reportes."""
         _pdf_util.pintar_encabezado_pie(
-            canvas_obj, doc, NOMBRE_EMPRESA, f"Reporte Comparativo Mensual · {SUBTITULO_EMPRESA}", FECHA_REPORTE, NOMBRE_ANALISTA,
+            canvas_obj, doc, datos.empresa, f"Reporte Comparativo Mensual · {datos.pdv}", FECHA_REPORTE, datos.analista,
             fuente_regular=FUENTE_REGULAR, fuente_bold=FUENTE_BOLD)
 
     def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1,
@@ -1214,7 +1213,7 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     elementos.append(Paragraph("REPORTE&nbsp;&nbsp;·&nbsp;&nbsp;COMPARATIVO MENSUAL DE BITÁCORA",
                                 estilo_kicker_portada))
     elementos.append(Paragraph("Reporte Comparativo Mensual", estilo_titulo_portada))
-    elementos.append(Paragraph(f"{NOMBRE_EMPRESA} · {SUBTITULO_EMPRESA}", estilo_subtitulo_portada))
+    elementos.append(Paragraph(f"{datos.empresa} · {datos.pdv}", estilo_subtitulo_portada))
     elementos.append(Spacer(1, 0.12 * cm))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(GRIS_LINEA),
                                  spaceBefore=6, spaceAfter=10, hAlign="LEFT"))

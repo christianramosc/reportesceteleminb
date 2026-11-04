@@ -4,8 +4,6 @@ Streamlit atiende a todos los usuarios en UN solo proceso de Python, así que
 los módulos de reportes son compartidos. Y esos módulos guardan cosas a nivel
 de módulo:
 
-  · el PDV y el implant (SUBTITULO_EMPRESA, NOMBRE_ANALISTA), que cada
-    adaptador herramienta_*.py sobrescribe antes de generar;
   · la carpeta de gráficas, con nombres fijos (g01_status.png, ...);
   · los colores de estatus (estatus.COLOR_CATEGORIA) y las figuras de
     matplotlib;

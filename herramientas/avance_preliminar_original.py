@@ -15,6 +15,7 @@ from . import estatus as _est
 from . import conclusiones as _conclusiones
 from . import pdf_util as _pdf_util
 from . import lateral as _lateral
+from .config import DatosReporte
 
 from . import fechas as _fechas   # hora de México, no la del servidor
 
@@ -26,17 +27,10 @@ from reportlab.platypus import (
     Spacer, Table, TableStyle,
 )
 
-# Estos tres SÍ se redeclaran aquí (aunque estén en la base) porque los
-# adaptadores de la app los reasignan sobre ESTE módulo antes de generar,
-# y la portada los lee desde aquí.
-NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
-SUBTITULO_EMPRESA = "MG Colima PYD"
-NOMBRE_ANALISTA = "Christian Ramos"
-
 
 def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
                                 nombre_archivo=None, fecha_corte=None,
-                                recolectar_elementos=None, hoja=None):
+                                recolectar_elementos=None, hoja=None, datos=None):
     """
     Arma el reporte de AVANCE PRELIMINAR: portada con KPIs y el contexto
     del corte dentro del mes, resumen ejecutivo redactado, reporte
@@ -48,7 +42,10 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     fecha_corte: fecha a la que corresponde el avance (por defecto, hoy).
     Sirve para ubicar el corte en el calendario del mes -día X de N, %
     transcurrido- y para fechar la portada y el pie de página.
+
+    datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config.
     """
+    datos = datos or DatosReporte()
     ctx = contexto_de_corte(fecha_corte)
 
     if nombre_archivo is None:
@@ -80,8 +77,8 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     FECHA_REPORTE = ctx["fecha_corte"].strftime("%d/%m/%Y")
 
     _maq = crear_maquetadores(
-        _estilos, subtitulo=f"Avance Preliminar de Bitácora · {SUBTITULO_EMPRESA}",
-        empresa=NOMBRE_EMPRESA, analista=NOMBRE_ANALISTA, fecha=FECHA_REPORTE,
+        _estilos, subtitulo=f"Avance Preliminar de Bitácora · {datos.pdv}",
+        empresa=datos.empresa, analista=datos.analista, fecha=FECHA_REPORTE,
     )
     encabezado_pie_pagina = _maq["encabezado_pie_pagina"]
     tabla_estilo_mg = _maq["tabla_estilo_mg"]
@@ -117,7 +114,7 @@ def generar_reporte_pdf_avance(df, resumen, tabla_vendedor, tabla_categoria,
     elementos.append(Paragraph("AVANCE PRELIMINAR&nbsp;&nbsp;·&nbsp;&nbsp;BITÁCORA DE SOLICITUDES",
                                 estilo_kicker_portada))
     elementos.append(Paragraph("Reporte de Avance Mensual", estilo_titulo_portada))
-    elementos.append(Paragraph(f"{NOMBRE_EMPRESA} · {SUBTITULO_EMPRESA}", estilo_subtitulo_portada))
+    elementos.append(Paragraph(f"{datos.empresa} · {datos.pdv}", estilo_subtitulo_portada))
     elementos.append(Spacer(1, 0.12 * cm))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(GRIS_LINEA),
                                  spaceBefore=6, spaceAfter=10, hAlign="LEFT"))

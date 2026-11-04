@@ -58,6 +58,7 @@ from . import pdf_util as _pdf_util
 from . import lateral as _lateral
 from . import hallazgos as _h
 from . import estatus as _est
+from .config import DatosReporte
 
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 140)
@@ -147,10 +148,6 @@ def color_texto_categoria(clave):
         factor = 0.55 / luminancia
         r, g, b = r * factor, g * factor, b * factor
     return "#{:02X}{:02X}{:02X}".format(int(r * 255), int(g * 255), int(b * 255))
-
-NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
-SUBTITULO_EMPRESA = "MG Colima PYD"
-NOMBRE_ANALISTA = "Christian Ramos"
 
 _MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
              "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
@@ -851,7 +848,9 @@ def imagen_ajustada(ruta, ancho_cm, alto_max_cm=None):
 
 
 def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq, ctx_mes,
-                                  rutas_graficas, nombre_archivo=None):
+                                  rutas_graficas, nombre_archivo=None, datos=None):
+    """datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config."""
+    datos = datos or DatosReporte()
     df_v = resumen_v["df"]
     total_v = resumen_v["total"]
 
@@ -915,7 +914,7 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
         """Encabezado y pie: el dibujo vive en pdf_util.pintar_encabezado_pie,
         compartido por los cuatro reportes."""
         _pdf_util.pintar_encabezado_pie(
-            canvas_obj, doc, NOMBRE_EMPRESA, f"Resumen Mensual Individual · {vendedor}", MES_TITULO, NOMBRE_ANALISTA,
+            canvas_obj, doc, datos.empresa, f"Resumen Mensual Individual · {vendedor}", MES_TITULO, datos.analista,
             fuente_regular=FUENTE_REGULAR, fuente_bold=FUENTE_BOLD)
 
     def celda(texto, alineacion="left", negrita=False, color=None, tam=8.2):
@@ -1022,7 +1021,7 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     elementos.append(Paragraph("RESUMEN MENSUAL&nbsp;&nbsp;·&nbsp;&nbsp;DESEMPEÑO INDIVIDUAL", estilo_kicker_portada))
     elementos.append(Paragraph("Resumen Mensual de Desempeño", estilo_titulo_portada))
     elementos.append(Paragraph(vendedor, estilo_nombre_portada))
-    elementos.append(Paragraph(f"{NOMBRE_EMPRESA} · {SUBTITULO_EMPRESA}", estilo_subtitulo_portada))
+    elementos.append(Paragraph(f"{datos.empresa} · {datos.pdv}", estilo_subtitulo_portada))
     elementos.append(Spacer(1, 0.12 * cm))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(GRIS_LINEA),
                                  spaceBefore=6, spaceAfter=10, hAlign="LEFT"))
@@ -1307,7 +1306,7 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
         topMargin=_pdf_util.MARGEN_SUPERIOR, bottomMargin=_pdf_util.MARGEN_INFERIOR,
         leftMargin=MARGEN_IZQ, rightMargin=MARGEN_DER,
         title=f"Resumen Mensual {vendedor} — {MES_TITULO}",
-        author=NOMBRE_EMPRESA, subject="Resumen mensual de desempeño individual",
+        author=datos.empresa, subject="Resumen mensual de desempeño individual",
     )
     # Sin esto, un Spacer que no cabe al final de una página genera una
     # hoja en blanco antes del siguiente salto. Ver pdf_util.py.

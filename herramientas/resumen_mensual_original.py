@@ -15,6 +15,7 @@ from . import estatus as _est
 from . import conclusiones as _conclusiones
 from . import pdf_util as _pdf_util
 from . import lateral as _lateral
+from .config import DatosReporte
 
 from . import fechas as _fechas   # hora de México, no la del servidor
 
@@ -26,23 +27,19 @@ from reportlab.platypus import (
     Spacer, Table, TableStyle,
 )
 
-# Estos tres SÍ se redeclaran aquí (aunque estén en la base) porque los
-# adaptadores de la app los reasignan sobre ESTE módulo antes de generar,
-# y la portada los lee desde aquí.
-NOMBRE_EMPRESA = "AUTOEXPRESS INBURSA"
-SUBTITULO_EMPRESA = "MG Colima PYD"
-NOMBRE_ANALISTA = "Christian Ramos"
-
 
 def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
-                                nombre_archivo=None, recolectar_elementos=None):
+                                nombre_archivo=None, recolectar_elementos=None, datos=None):
     """
     Arma el reporte narrativo completo: portada con KPIs, resumen ejecutivo
     redactado, reporte detallado por sección (con tablas y gráficas) y
     conclusiones. Recibe los resultados ya calculados por
     resumen_general(), analisis_por_vendedor() y analisis_financiero_por_categoria()
     para no repetir esos cálculos ni duplicar la salida de consola.
+
+    datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config.
     """
+    datos = datos or DatosReporte()
     if nombre_archivo is None:
         fecha_archivo = _fechas.ahora().strftime("%Y%m%d_%H%M")
         nombre_archivo = f"Reporte_Bitacora_{fecha_archivo}.pdf"
@@ -73,7 +70,7 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
 
     _maq = crear_maquetadores(
         _estilos, subtitulo="Reporte de Bitácora de Solicitudes",
-        empresa=NOMBRE_EMPRESA, analista=NOMBRE_ANALISTA, fecha=FECHA_REPORTE,
+        empresa=datos.empresa, analista=datos.analista, fecha=FECHA_REPORTE,
     )
     encabezado_pie_pagina = _maq["encabezado_pie_pagina"]
     tabla_estilo_mg = _maq["tabla_estilo_mg"]
@@ -108,11 +105,11 @@ def generar_reporte_pdf_verbal(df, resumen, tabla_vendedor, tabla_categoria,
     elementos.append(Spacer(1, 0.2 * cm))
     elementos.append(Paragraph("RESUMEN MENSUAL&nbsp;&nbsp;·&nbsp;&nbsp;BITÁCORA DE SOLICITUDES", estilo_kicker_portada))
     elementos.append(Paragraph("Resumen Mensual", estilo_titulo_portada))
-    elementos.append(Paragraph(f"{NOMBRE_EMPRESA} · {SUBTITULO_EMPRESA}", estilo_subtitulo_portada))
+    elementos.append(Paragraph(f"{datos.empresa} · {datos.pdv}", estilo_subtitulo_portada))
     elementos.append(Spacer(1, 0.12 * cm))
     elementos.append(HRFlowable(width="100%", thickness=1, color=rl_colors.HexColor(GRIS_LINEA),
                                  spaceBefore=6, spaceAfter=10, hAlign="LEFT"))
-    elementos.append(Paragraph(f"Elaborado por <b>{NOMBRE_ANALISTA}</b> el <b>{FECHA_REPORTE}</b>", estilo_meta_portada))
+    elementos.append(Paragraph(f"Elaborado por <b>{datos.analista}</b> el <b>{FECHA_REPORTE}</b>", estilo_meta_portada))
     elementos.append(Spacer(1, 0.45 * cm))
 
     # Las categorías se enumeran a partir de las que REALMENTE trae la

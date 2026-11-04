@@ -8,25 +8,15 @@ from .docx_reportes import generar_docx_avance
 from . import conclusiones as _c
 from .ficha_resumen import fichas_ambos_formatos, ficha_mensual
 from .libros_analisis import libro_mensual
+from .config import DatosReporte
 from .registro import Herramienta
 from . import nombres_archivo as _nombres
-
-# Valores originales del script, usados como default si el usuario no
-# escribe nada en el campo de PDV / analista.
-_PDV_DEFECTO = _avance.SUBTITULO_EMPRESA
-_ANALISTA_DEFECTO = _avance.NOMBRE_ANALISTA
 
 
 def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
              nombre_pdv=None, nombre_analista=None, **_opciones):
-    nombre_pdv = (nombre_pdv or "").strip() or _PDV_DEFECTO
-    nombre_analista = (nombre_analista or "").strip() or _ANALISTA_DEFECTO
-
-    # avance_preliminar_original.py usa estas constantes de módulo
-    # directamente en la portada y el pie de página del PDF; las
-    # ajustamos aquí para no tener que tocar ese archivo.
-    _avance.SUBTITULO_EMPRESA = nombre_pdv
-    _avance.NOMBRE_ANALISTA = nombre_analista
+    datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista)
+    nombre_pdv, nombre_analista = datos.pdv, datos.analista
 
     os.makedirs(carpeta_salida, exist_ok=True)
 
@@ -59,7 +49,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
     _avance.generar_reporte_pdf_avance(
         df, resumen, tabla_vendedor, tabla_categoria,
         nombre_archivo=ruta_pdf, fecha_corte=fecha_corte,
-        recolectar_elementos=elementos_pdf, hoja=hoja,
+        recolectar_elementos=elementos_pdf, hoja=hoja, datos=datos,
     )
 
     ruta_docx = generar_docx_avance(

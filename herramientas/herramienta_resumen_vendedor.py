@@ -11,21 +11,14 @@ import zipfile
 
 from . import resumen_vendedor_original as _rv
 from .libros_analisis import libro_mensual
+from .config import DatosReporte
 from .registro import Herramienta
 from . import nombres_archivo as _nombres
-
-_PDV_DEFECTO = _rv.SUBTITULO_EMPRESA
-_ANALISTA_DEFECTO = _rv.NOMBRE_ANALISTA
 
 
 def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
              nombre_analista=None, vendedores_incluir=None, **_opciones):
-    nombre_pdv = (nombre_pdv or "").strip() or _PDV_DEFECTO
-    nombre_analista = (nombre_analista or "").strip() or _ANALISTA_DEFECTO
-
-    # El script usa estas constantes de módulo en la portada y el pie.
-    _rv.SUBTITULO_EMPRESA = nombre_pdv
-    _rv.NOMBRE_ANALISTA = nombre_analista
+    datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista)
 
     os.makedirs(carpeta_salida, exist_ok=True)
 
@@ -77,7 +70,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
         nombre_pdf = _nombres.seguro(f"{vendedor} - {mes_largo}") + ".pdf"
         ruta = _rv.generar_reporte_pdf_vendedor(
             vendedor, resumen_v, tabla_vendedor, resumen_eq, ctx_mes, graficas,
-            nombre_archivo=os.path.join(carpeta_pdfs, nombre_pdf),
+            nombre_archivo=os.path.join(carpeta_pdfs, nombre_pdf), datos=datos,
         )
         rutas_pdf.append(ruta)
         print(f"  ✓ {vendedor}")

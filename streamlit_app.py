@@ -23,10 +23,8 @@ from herramientas import REGISTRO
 from herramientas import estatus as _est
 from herramientas import fechas as _fechas
 from herramientas.ejecucion import ejecutar_aislado
-from herramientas.avance_preliminar_original import (
-    NOMBRE_ANALISTA as _ANALISTA_DEFECTO,
-    SUBTITULO_EMPRESA as _PDV_DEFECTO,
-)
+from herramientas.config import ANALISTA_DEFECTO as _ANALISTA_DEFECTO
+from herramientas.config import PDV_DEFECTO as _PDV_DEFECTO
 
 # =======================================================================
 # MANEJO DE ARCHIVOS — datos personales
