@@ -6,8 +6,11 @@
 #
 # Las reglas son las que el código cumple HOY: si alguna marca error, es
 # algo nuevo que se coló, no deuda vieja.
+#
+# Va en ruff.toml y NO en pyproject.toml a propósito: Streamlit Cloud trata
+# un pyproject.toml como posible archivo de dependencias (Poetry) y avisa
+# que hay dos. Las dependencias de la app viven solo en requirements.txt.
 
-[tool.ruff]
 target-version = "py311"
 # El Modelo de datos está oculto en la app y se queda como está por ahora.
 extend-exclude = [
@@ -16,7 +19,7 @@ extend-exclude = [
     "herramientas/herramienta_modelo_datos.py",
 ]
 
-[tool.ruff.lint]
+[lint]
 # E4/E7/E9 + F: los errores reales (imports y variables sin usar, nombres
 # indefinidos, sintaxis). B: errores típicos (variables de ciclo sin usar,
 # lambdas dentro de ciclos). W: espacios y saltos de línea.
@@ -28,7 +31,7 @@ ignore = [
     "B905",   # zip(..., strict=): agregarlo cambiaría qué pasa con listas disparejas
 ]
 
-[tool.ruff.lint.per-file-ignores]
+[lint.per-file-ignores]
 # Avance y Resumen importan con * todo lo que comparten en reporte_base.py
 # (ver su __all__): por diseño, ruff no puede saber de dónde viene cada nombre.
 "herramientas/avance_preliminar_original.py" = ["F403", "F405"]
