@@ -30,9 +30,3 @@ ignore = [
     "E741",   # nombres como l o I en comprensiones cortas
     "B905",   # zip(..., strict=): agregarlo cambiaría qué pasa con listas disparejas
 ]
-
-[lint.per-file-ignores]
-# Avance y Resumen importan con * todo lo que comparten en reporte_base.py
-# (ver su __all__): por diseño, ruff no puede saber de dónde viene cada nombre.
-"herramientas/avance_preliminar_original.py" = ["F403", "F405"]
-"herramientas/resumen_mensual_original.py" = ["F403", "F405"]

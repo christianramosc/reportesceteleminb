@@ -1,9 +1,10 @@
-"""Adaptador de avance_preliminar_original.py (Avance Preliminar Mensual) para el registro."""
+"""Adaptador del Avance Preliminar Mensual (reporte_mensual.py, modo "avance") para el registro."""
 
 import os
 import pandas as pd
 
-from . import avance_preliminar_original as _avance
+from . import reporte_base as _base
+from .reporte_mensual import generar_reporte_pdf
 from .docx_reportes import generar_docx_avance
 from . import conclusiones as _c
 from .ficha_resumen import fichas_ambos_formatos, ficha_mensual
@@ -20,12 +21,12 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
 
     os.makedirs(carpeta_salida, exist_ok=True)
 
-    df_crudo = _avance.cargar_archivo(ruta_local=rutas_archivos[0])
-    df = _avance.limpiar_datos(df_crudo)
-    resumen = _avance.resumen_general(df)
-    tabla_vendedor = _avance.analisis_por_vendedor(df)
-    tabla_categoria = _avance.analisis_financiero_por_categoria(df)
-    ctx = _avance.contexto_de_corte(fecha_corte)
+    df_crudo = _base.cargar_archivo(ruta_local=rutas_archivos[0])
+    df = _base.limpiar_datos(df_crudo)
+    resumen = _base.resumen_general(df)
+    tabla_vendedor = _base.analisis_por_vendedor(df)
+    tabla_categoria = _base.analisis_financiero_por_categoria(df)
+    ctx = _base.contexto_de_corte(fecha_corte)
 
     # El nombre de la hoja ("JULIO 2026") es la única pista del mes al que
     # pertenecen los datos. Se usa para advertir si la fecha de corte cae en
@@ -46,8 +47,8 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
     # El PDF deja aquí sus flowables y el Word se construye con ESOS mismos
     # elementos, para que ambos documentos digan exactamente lo mismo.
     elementos_pdf = []
-    _avance.generar_reporte_pdf_avance(
-        df, resumen, tabla_vendedor, tabla_categoria,
+    generar_reporte_pdf(
+        df, resumen, tabla_vendedor, tabla_categoria, "avance",
         nombre_archivo=ruta_pdf, fecha_corte=fecha_corte,
         recolectar_elementos=elementos_pdf, hoja=hoja, datos=datos,
     )

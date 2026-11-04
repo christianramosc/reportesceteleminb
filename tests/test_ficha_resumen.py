@@ -8,7 +8,7 @@ from PIL import Image
 
 from conftest import construir_bitacora
 from herramientas import ficha_resumen as F
-from herramientas import resumen_mensual_original as R
+from herramientas import reporte_base as R
 
 
 def _df(tmp_path, **kw):

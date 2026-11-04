@@ -6,7 +6,7 @@ Cómo agregar un nuevo script más adelante (sin tocar streamlit_app.py):
   1. Copia tu script .py a esta carpeta. Sus funciones deben recibir la
      ruta del archivo como parámetro (sin files.upload() ni input(): en el
      servidor no hay a quién preguntarle) y usar imports relativos
-     (`from . import estatus`), igual que avance_preliminar_original.py.
+     (`from . import estatus`), igual que reporte_mensual.py.
 
   2. Crea un archivo herramienta_tu_script.py en esta misma carpeta con:
        - una función ejecutar(rutas_archivos, carpeta_salida="salida", **opciones) -> list[str]

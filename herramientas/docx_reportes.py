@@ -11,8 +11,8 @@ Por eso el Word ahora lleva las mismas secciones, los mismos párrafos, las
 mismas tablas y las gráficas intercaladas donde van, igual que el PDF.
 
 => Si quieres cambiar un texto del reporte, cámbialo en el script del PDF
-   (avance_preliminar_original.py, comparativo_mensual_original.py o
-   resumen_mensual_original.py). El Word hereda el cambio automáticamente.
+   (reporte_mensual.py para Avance y Resumen, comparativo_mensual_original.py
+   para el Comparativo). El Word hereda el cambio automáticamente.
    NO vuelvas a escribir textos aquí, o volverán a desincronizarse.
 """
 

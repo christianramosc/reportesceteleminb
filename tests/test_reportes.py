@@ -12,7 +12,7 @@ import os
 import pytest
 
 from herramientas import REGISTRO
-from herramientas import avance_preliminar_original as avance
+from herramientas import reporte_base as base
 
 
 def _herramienta(identificador):
@@ -123,9 +123,9 @@ def test_avisa_si_no_puede_generar_ninguna_grafica(tmp_path):
     import pandas as pd
     df = pd.DataFrame({"Folio CCK": ["A", "B"], "Otro": [1, 2]})
     with contextlib.redirect_stdout(io.StringIO()):
-        limpio = avance.limpiar_datos(df)
+        limpio = base.limpiar_datos(df)
         with pytest.raises(RuntimeError, match="ninguna gráfica"):
-            avance.generar_graficas_para_pdf(limpio, str(tmp_path))
+            base.generar_graficas_para_pdf(limpio, str(tmp_path))
 
 
 @pytest.mark.parametrize("identificador", IDS_REPORTES)
