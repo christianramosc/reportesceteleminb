@@ -39,11 +39,26 @@ PALETAS = {
     "grafito": {"primario": "#23262D", "acento": "#B83280", "suave": "#F4F1F4", "texto_suave": "#C9CCD3",
                 "encabezado": "diagonal"},
 }
+# Midnight Black, Electric Blue y Cantaloupe Orange. El naranja (2.7:1
+# sobre blanco) y el azul eléctrico (3.2:1) no alcanzan para texto sobre
+# blanco: van en el encabezado oscuro, iconos y franjas; los links usan un
+# azul un poco más oscuro (5:1).
+PALETAS["medianoche"] = {"primario": "#02070A", "acento": "#0297DE", "acento2": "#FC734D",
+                         "suave": "#EAF6FC", "texto_suave": "#A9B6BF", "enlace": "#0275B0",
+                         "encabezado": "banda"}
 PALETA = "violeta"
+ENCABEZADO = None        # None = el de la paleta; o "banda", "tarjeta", "lateral", "diagonal"
 
 
 def _p(clave):
-    return PALETAS[PALETA][clave]
+    paleta = PALETAS[PALETA]
+    if clave == "encabezado" and ENCABEZADO:
+        return ENCABEZADO
+    if clave == "enlace":
+        return paleta.get("enlace", paleta["acento"])
+    if clave == "acento2":
+        return paleta.get("acento2", paleta["acento"])
+    return paleta[clave]
 
 
 TINTA = "#0F172A"
@@ -270,9 +285,21 @@ def _encabezado(cv, an, al, primera, analisis, d, fecha_texto):
         y = al - 0.45 * cm - alto
         cv.setFillColor(C(prim))
         cv.roundRect(x0, y, x1 - x0, alto, 0.3 * cm, fill=1, stroke=0)
-        cv.setFillColor(C(acento))
+        cv.setFillColor(C(_p("acento2")))
         cv.roundRect(x0 + 0.45 * cm, y + alto * 0.22, 0.12 * cm, alto * 0.56, 0.06 * cm, fill=1, stroke=0)
         izq = x0 + 0.85 * cm
+        claro, tenue = "#FFFFFF", t_suave
+    elif estilo == "banda":
+        # Banda a todo lo ancho con franja de dos colores abajo.
+        alto = 2.3 * cm if primera else 1.35 * cm
+        y = al - alto
+        cv.setFillColor(C(prim))
+        cv.rect(0, y, an, alto, fill=1, stroke=0)
+        cv.setFillColor(C(acento))
+        cv.rect(0, y - 0.12 * cm, an * 0.72, 0.12 * cm, fill=1, stroke=0)
+        cv.setFillColor(C(_p("acento2")))
+        cv.rect(an * 0.72, y - 0.12 * cm, an * 0.28, 0.12 * cm, fill=1, stroke=0)
+        izq = x0
         claro, tenue = "#FFFFFF", t_suave
     elif estilo == "lateral":
         # Fondo suave con un bloque de color a la izquierda; texto oscuro.
@@ -293,7 +320,10 @@ def _encabezado(cv, an, al, primera, analisis, d, fecha_texto):
         corte = an * 0.68
         for color, puntos in ((prim, [(0, al), (corte + alto * 0.6, al), (corte, y), (0, y)]),
                               (acento, [(corte + alto * 0.6, al), (corte + alto * 0.6 + 0.35 * cm, al),
-                                        (corte + 0.35 * cm, y), (corte, y)])):
+                                        (corte + 0.35 * cm, y), (corte, y)]),
+                              (_p("acento2"), [(corte + alto * 0.6 + 0.35 * cm, al),
+                                               (corte + alto * 0.6 + 0.47 * cm, al),
+                                               (corte + 0.47 * cm, y), (corte + 0.35 * cm, y)])):
             trazo = cv.beginPath()
             trazo.moveTo(*puntos[0])
             for punto in puntos[1:]:
@@ -314,6 +344,8 @@ def _encabezado(cv, an, al, primera, analisis, d, fecha_texto):
         # Derecha: RFC, fecha y folio (en la diagonal van sobre blanco).
         derecha = x1 - (0.5 * cm if estilo in ("tarjeta", "lateral") else 0)
         fuerte = claro if estilo != "diagonal" else prim
+        if estilo == "banda":
+            fuerte = acento
         suave_der = tenue if estilo != "diagonal" else GRIS
         cv.setFillColor(C(fuerte))
         cv.setFont("Helvetica-Bold", 9.5)
@@ -498,7 +530,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
             img = _qr_imagen(url)
             cuerpo = [Paragraph(f"<b>QR {i} · {'cédula' if i == 1 else 'sello'}</b>", est["titulo_c"]),
                       Paragraph(f"Compara: {que}.", est["chico"]), Spacer(1, 4),
-                      Paragraph(f'<a href="{_esc(url)}" color="{_p("acento")}"><u>Abrir en siat.sat.gob.mx</u></a>',
+                      Paragraph(f'<a href="{_esc(url)}" color="{_p("enlace")}"><u>Abrir en siat.sat.gob.mx</u></a>',
                                 est["base"])]
             celda = Table([[img or "", cuerpo]], colWidths=[2.9 * cm, None])
             fondo, borde = "#FFFFFF", LINEA
