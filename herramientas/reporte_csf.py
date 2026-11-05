@@ -29,8 +29,23 @@ from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Frame, Image, Ke
 from . import iconos as _iconos
 
 # --- Paleta -----------------------------------------------------------------
-AZUL = "#191970"        # azul Inbursa
-ROJO_MG = "#C8102E"     # acento MG
+# Colores de la paleta (decoración: encabezado, títulos, iconos, links).
+# Los de ESTADO y VEREDICTO, abajo, tienen significado y no se tocan.
+PALETAS = {
+    "violeta": {"primario": "#2E1A47", "acento": "#7C5CBF", "suave": "#F1ECF8", "texto_suave": "#CDBFE6",
+                "encabezado": "tarjeta"},
+    "petroleo": {"primario": "#0F3B44", "acento": "#4C9A9F", "suave": "#EAF3F3", "texto_suave": "#B9D6D8",
+                 "encabezado": "lateral"},
+    "grafito": {"primario": "#23262D", "acento": "#B83280", "suave": "#F4F1F4", "texto_suave": "#C9CCD3",
+                "encabezado": "diagonal"},
+}
+PALETA = "violeta"
+
+
+def _p(clave):
+    return PALETAS[PALETA][clave]
+
+
 TINTA = "#0F172A"
 GRIS = "#64748B"
 GRIS_CLARO = "#94A3B8"
@@ -78,7 +93,7 @@ def _estilos():
         "etq": ParagraphStyle("etq", parent=base, fontSize=7, leading=9, textColor=colors.HexColor(GRIS)),
         "valor": ParagraphStyle("valor", parent=base, fontName="Helvetica-Bold", fontSize=9.2, leading=12),
         "h2": ParagraphStyle("h2", parent=base, fontName="Helvetica-Bold", fontSize=11.5, leading=15,
-                             textColor=colors.HexColor(AZUL)),
+                             textColor=colors.HexColor(_p("primario"))),
         "cifra": ParagraphStyle("cifra", parent=base, fontName="Helvetica-Bold", fontSize=20, leading=23),
         "ver": ParagraphStyle("ver", parent=base, fontName="Helvetica-Bold", fontSize=17, leading=21),
         "titulo_c": ParagraphStyle("tc", parent=base, fontName="Helvetica-Bold", fontSize=9.5, leading=12),
@@ -160,7 +175,7 @@ def _tarjeta(contenido, fondo="#FFFFFF", borde=LINEA, ancho=ANCHO, padding=10, b
 
 
 def _titulo(texto, icono, est, ancla=None):
-    ic = _ico(icono, 13, AZUL)
+    ic = _ico(icono, 13, _p("acento"))
     p = Paragraph((f'<a name="{ancla}"/>' if ancla else "") + _esc(texto), est["h2"])
     t = Table([[ic or "", p]], colWidths=[0.6 * cm, ANCHO - 0.6 * cm])
     t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
@@ -239,6 +254,84 @@ class _Documento(BaseDocTemplate):
 # ===========================================================================
 #  Reporte
 # ===========================================================================
+def _encabezado(cv, an, al, primera, analisis, d, fecha_texto):
+    """Encabezado de cada página, según el estilo de la paleta."""
+    prim, acento, suave, t_suave = _p("primario"), _p("acento"), _p("suave"), _p("texto_suave")
+    estilo = _p("encabezado")
+    x0, x1 = 1.5 * cm, an - 1.5 * cm
+    folio = f"Folio {analisis.sha256[:10].upper()}"
+    rfc = d.get("rfc") or ""
+    titulo = "Validación de Constancia de Situación Fiscal"
+    C = colors.HexColor
+
+    if estilo == "tarjeta":
+        # Tarjeta redondeada dentro de los márgenes, con una barra de acento.
+        alto = 2.25 * cm if primera else 1.0 * cm
+        y = al - 0.45 * cm - alto
+        cv.setFillColor(C(prim))
+        cv.roundRect(x0, y, x1 - x0, alto, 0.3 * cm, fill=1, stroke=0)
+        cv.setFillColor(C(acento))
+        cv.roundRect(x0 + 0.45 * cm, y + alto * 0.22, 0.12 * cm, alto * 0.56, 0.06 * cm, fill=1, stroke=0)
+        izq = x0 + 0.85 * cm
+        claro, tenue = "#FFFFFF", t_suave
+    elif estilo == "lateral":
+        # Fondo suave con un bloque de color a la izquierda; texto oscuro.
+        alto = 2.25 * cm if primera else 1.1 * cm
+        y = al - 0.45 * cm - alto
+        cv.setFillColor(C(suave))
+        cv.rect(x0, y, x1 - x0, alto, fill=1, stroke=0)
+        cv.setFillColor(C(prim))
+        cv.rect(x0, y, 0.55 * cm, alto, fill=1, stroke=0)
+        cv.setFillColor(C(acento))
+        cv.rect(x0 + 0.55 * cm, y, x1 - x0 - 0.55 * cm, 0.07 * cm, fill=1, stroke=0)
+        izq = x0 + 1.0 * cm
+        claro, tenue = prim, GRIS
+    else:  # "diagonal"
+        # Bloque oscuro con un corte en diagonal y una cuña de acento.
+        alto = 2.3 * cm if primera else 1.35 * cm
+        y = al - alto
+        corte = an * 0.68
+        for color, puntos in ((prim, [(0, al), (corte + alto * 0.6, al), (corte, y), (0, y)]),
+                              (acento, [(corte + alto * 0.6, al), (corte + alto * 0.6 + 0.35 * cm, al),
+                                        (corte + 0.35 * cm, y), (corte, y)])):
+            trazo = cv.beginPath()
+            trazo.moveTo(*puntos[0])
+            for punto in puntos[1:]:
+                trazo.lineTo(*punto)
+            trazo.close()
+            cv.setFillColor(C(color))
+            cv.drawPath(trazo, fill=1, stroke=0)
+        izq = x0
+        claro, tenue = "#FFFFFF", t_suave
+
+    if primera:
+        cv.setFillColor(C(claro))
+        cv.setFont("Helvetica-Bold", 14.5)
+        cv.drawString(izq, y + alto - 0.82 * cm, titulo)
+        cv.setFont("Helvetica", 8.5)
+        cv.setFillColor(C(tenue))
+        cv.drawString(izq, y + 0.48 * cm, f"Archivo: {analisis.archivo[:70]}")
+        # Derecha: RFC, fecha y folio (en la diagonal van sobre blanco).
+        derecha = x1 - (0.5 * cm if estilo in ("tarjeta", "lateral") else 0)
+        fuerte = claro if estilo != "diagonal" else prim
+        suave_der = tenue if estilo != "diagonal" else GRIS
+        cv.setFillColor(C(fuerte))
+        cv.setFont("Helvetica-Bold", 9.5)
+        cv.drawRightString(derecha, y + alto - 0.82 * cm, rfc)
+        cv.setFont("Helvetica", 8)
+        cv.setFillColor(C(suave_der))
+        cv.drawRightString(derecha, y + 0.88 * cm, fecha_texto)
+        cv.drawRightString(derecha, y + 0.48 * cm, folio)
+    else:
+        cv.setFillColor(C(claro))
+        cv.setFont("Helvetica-Bold", 9.5)
+        cv.drawString(izq, y + alto / 2 - 0.12 * cm, titulo)
+        cv.setFont("Helvetica", 8)
+        derecha = x1 - (0.5 * cm if estilo in ("tarjeta", "lateral") else 0)
+        cv.setFillColor(C(tenue if estilo != "diagonal" else GRIS))
+        cv.drawRightString(derecha, y + alto / 2 - 0.12 * cm, rfc or analisis.archivo[:40])
+
+
 def generar(analisis, ruta_salida, fecha_texto=""):
     est = _estilos()
     d = analisis.datos or {}
@@ -288,7 +381,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
                 Paragraph(nota, est["chico"])]
     ancho_c = (ANCHO - 3 * 8) / 4
     celdas = [
-        cifra("Candados técnicos", f"{aprobados}/{len(tecnicos)}", AZUL, "shield-check",
+        cifra("Candados técnicos", f"{aprobados}/{len(tecnicos)}", _p("primario"), "shield-check",
               "archivo, códigos y datos"),
         cifra("Fallas", n_fallas, ESTADO["FALLA"][0] if n_fallas else GRIS_CLARO, "circle-x",
               "indicios de alteración" if n_fallas else "ninguna"),
@@ -318,7 +411,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
                                          f'<font color="{ESTADO["AVISO"][0]}">{cuenta["AVISO"]} aviso(s)</font>'
                                          if cuenta["AVISO"] else "") if x) or \
             f'<font color="{ESTADO["OK"][0]}">todo en orden</font>'
-        filas.append([_ico(icono, 12, AZUL) or "",
+        filas.append([_ico(icono, 12, _p("acento")) or "",
                       Paragraph(f'<a href="#sec{sec}" color="{TINTA}"><b>{_esc(nombre)}</b></a>', est["base"]),
                       _barra(cuenta, 6.3 * cm),
                       Paragraph(f"<b>{ok}/{len(lista)}</b>", ParagraphStyle("r", parent=est["base"],
@@ -405,7 +498,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
             img = _qr_imagen(url)
             cuerpo = [Paragraph(f"<b>QR {i} · {'cédula' if i == 1 else 'sello'}</b>", est["titulo_c"]),
                       Paragraph(f"Compara: {que}.", est["chico"]), Spacer(1, 4),
-                      Paragraph(f'<a href="{_esc(url)}" color="#1D4ED8"><u>Abrir en siat.sat.gob.mx</u></a>',
+                      Paragraph(f'<a href="{_esc(url)}" color="{_p("acento")}"><u>Abrir en siat.sat.gob.mx</u></a>',
                                 est["base"])]
             celda = Table([[img or "", cuerpo]], colWidths=[2.9 * cm, None])
             fondo, borde = "#FFFFFF", LINEA
@@ -458,31 +551,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
         cv.saveState()
         an, al = letter
         primera = doc.page == 1
-        alto_banda = 2.3 * cm if primera else 1.35 * cm
-        cv.setFillColor(colors.HexColor(AZUL))
-        cv.rect(0, al - alto_banda, an, alto_banda, fill=1, stroke=0)
-        cv.setFillColor(colors.HexColor(ROJO_MG))
-        cv.rect(0, al - alto_banda - 0.09 * cm, an, 0.09 * cm, fill=1, stroke=0)
-        cv.setFillColor(colors.white)
-        if primera:
-            cv.setFont("Helvetica-Bold", 15)
-            cv.drawString(1.5 * cm, al - 1.05 * cm, "Validación de Constancia de Situación Fiscal")
-            cv.setFont("Helvetica", 8.5)
-            cv.setFillColor(colors.HexColor("#C7D2FE"))
-            cv.drawString(1.5 * cm, al - 1.6 * cm, f"Archivo: {analisis.archivo[:80]}")
-            cv.drawString(1.5 * cm, al - 2.0 * cm, "Autoexpress Inbursa · MG Financial Services")
-            cv.setFillColor(colors.white)
-            cv.setFont("Helvetica-Bold", 9)
-            cv.drawRightString(an - 1.5 * cm, al - 1.05 * cm, d.get("rfc") or "")
-            cv.setFont("Helvetica", 8)
-            cv.setFillColor(colors.HexColor("#C7D2FE"))
-            cv.drawRightString(an - 1.5 * cm, al - 1.6 * cm, fecha_texto)
-            cv.drawRightString(an - 1.5 * cm, al - 2.0 * cm, f"Folio {analisis.sha256[:10].upper()}")
-        else:
-            cv.setFont("Helvetica-Bold", 10)
-            cv.drawString(1.5 * cm, al - 0.85 * cm, "Validación de Constancia de Situación Fiscal")
-            cv.setFont("Helvetica", 8)
-            cv.drawRightString(an - 1.5 * cm, al - 0.85 * cm, f"{d.get('rfc') or analisis.archivo[:40]}")
+        _encabezado(cv, an, al, primera, analisis, d, fecha_texto)
         cv.setStrokeColor(colors.HexColor(LINEA))
         cv.setLineWidth(0.6)
         cv.line(1.5 * cm, 1.25 * cm, an - 1.5 * cm, 1.25 * cm)
