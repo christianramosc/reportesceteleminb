@@ -16,7 +16,7 @@ lateral del lector de PDF) por sección.
 import html
 import io
 
-from reportlab.graphics.shapes import Drawing, Rect, String, Wedge
+from reportlab.graphics.shapes import Circle, Drawing, Rect, String, Wedge
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import letter
@@ -66,30 +66,36 @@ GRIS = "#64748B"
 GRIS_CLARO = "#94A3B8"
 LINEA = "#E2E8F0"
 FONDO = "#F8FAFC"
+# Estados en la familia de la paleta: OK azul, AVISO naranja, FALLA carmín.
+# Todos con contraste >= 4.5:1 sobre blanco, y AVISO y FALLA también se
+# distinguen por claridad (no solo por tono). VIVO = versión clara para
+# fondos oscuros.
 ESTADO = {  # estado -> (color fuerte, fondo suave, icono lucide, etiqueta)
-    "OK": ("#15803D", "#DCFCE7", "circle-check", "OK"),
-    "AVISO": ("#B45309", "#FEF3C7", "circle-alert", "AVISO"),
-    "FALLA": ("#B91C1C", "#FEE2E2", "circle-x", "FALLA"),
-    "INFO": ("#475569", "#E2E8F0", "info", "INFO"),
+    "OK": ("#0275B0", "#E3F3FB", "circle-check", "OK"),
+    "AVISO": ("#C2501F", "#FFEDE5", "circle-alert", "AVISO"),
+    "FALLA": ("#B3123A", "#FBE3E8", "circle-x", "FALLA"),
+    "INFO": ("#5B6876", "#ECEFF2", "info", "INFO"),
 }
+VIVO = {"#0275B0": "#0297DE", "#C2501F": "#FC734D", "#B3123A": "#FF6B7A", "#3F5466": "#9FB3C8"}
 VEREDICTO = {  # veredicto -> (color, fondo, icono, frase)
-    "SIN INDICIOS DE ALTERACIÓN": ("#15803D", "#F0FDF4", "shield-check",
+    "SIN INDICIOS DE ALTERACIÓN": ("#0275B0", "#E3F3FB", "shield-check",
                                    "Pasó los candados técnicos. Valida los QR en el SAT antes de usarla."),
-    "REVISAR MANUALMENTE": ("#B45309", "#FFFBEB", "shield-alert",
+    "REVISAR MANUALMENTE": ("#C2501F", "#FFEDE5", "shield-alert",
                             "Hay avisos con explicación legítima posible. Confírmalos en el QR del SAT."),
-    "ALTERADA / NO CONFIABLE": ("#B91C1C", "#FEF2F2", "shield-x",
+    "ALTERADA / NO CONFIABLE": ("#B3123A", "#FBE3E8", "shield-x",
                                 "Hay indicios de alteración. No la uses para el expediente."),
-    "COPIA: DATOS COINCIDEN": ("#1D4ED8", "#EFF6FF", "scan-line",
+    "COPIA: DATOS COINCIDEN": ("#3F5466", "#EDF1F5", "scan-line",
                                "Copia (escaneo o foto): los códigos y los datos legibles coinciden, pero por ser copia NO se puede comprobar que no se alteró antes de escanearse. Valida el QR en el SAT o pide el PDF original."),
-    "COPIA: REVISAR A MANO": ("#B45309", "#FFFBEB", "scan-line",
+    "COPIA: REVISAR A MANO": ("#C2501F", "#FFEDE5", "scan-line",
                               "Copia (escaneo o foto): algo no se alcanzó a leer o quedó dudoso. Revisa los avisos y valida el QR en el SAT, o pide el PDF original."),
-    "NO VERIFICABLE": ("#B91C1C", "#FEF2F2", "shield-x",
+    "NO VERIFICABLE": ("#B3123A", "#FBE3E8", "shield-x",
                        "No verificable: no se pudo leer ningún código de la copia. Pide el PDF original del SAT."),
 }
 SECCIONES = {1: ("Archivo y estructura", "file-search"), 2: ("Códigos QR y de barras", "qr-code"),
              3: ("Coherencia de datos", "fingerprint"), 4: ("Políticas de la financiera", "calendar-check")}
 
 ANCHO = letter[0] - 3.0 * cm      # ancho útil (márgenes de 1.5 cm)
+VEREDICTO_ESTILO = "mosaico"      # "solido", "mosaico" o "sello" (propuestas)
 
 
 def _esc(t):
@@ -364,6 +370,144 @@ def _encabezado(cv, an, al, primera, analisis, d, fecha_texto):
         cv.drawRightString(derecha, y + alto / 2 - 0.12 * cm, rfc or analisis.archivo[:40])
 
 
+def _mosaico_candados(candados, ancho, est, oscuro=False):
+    """Un cuadrito por candado, por sección: se ve de un golpe dónde está
+    cada falla o aviso."""
+    filas = []
+    etiqueta = 2.85 * cm
+    mas_largo = max((sum(c.seccion == s for c in candados) for s in SECCIONES), default=1) or 1
+    sep = 0.06 * cm
+    lado = min(0.3 * cm, (ancho - etiqueta - 2) / mas_largo - sep)   # que quepa la sección más larga
+    for sec, (nombre, _icono) in SECCIONES.items():
+        lista = [c for c in candados if c.seccion == sec]
+        if not lista:
+            continue
+        d = Drawing(len(lista) * (lado + sep), lado)
+        for i, c in enumerate(lista):
+            color = ESTADO[c.estado][0]
+            if oscuro:
+                color = VIVO.get(color, "#8A96A3")
+            d.add(Rect(i * (lado + sep), 0, lado, lado, rx=2, ry=2, fillColor=colors.HexColor(color),
+                       strokeColor=None))
+        etq_color = "#A9B6BF" if oscuro else GRIS
+        filas.append([Paragraph(f'<font color="{etq_color}">{_esc(nombre)}</font>',
+                                ParagraphStyle("m", parent=est["chico"], fontSize=7, leading=9)), d])
+    t = Table(filas, colWidths=[etiqueta, ancho - etiqueta])
+    t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                           ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                           ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5)]))
+    return t
+
+
+def _veredicto(analisis, ver, c_ver, f_ver, i_ver, frase, aprobados, total, nota_politicas, est):
+    """El cuadro del veredicto, en el estilo de VEREDICTO_ESTILO."""
+    estilo = VEREDICTO_ESTILO
+    aviso = ESTADO["AVISO"][0]
+
+    if estilo == "solido":
+        # Bloque de color sólido, texto claro, anillo blanco.
+        texto_color = "#FFFFFF"
+        sub = "#E6F1F8"
+        anillo = Drawing(3.0 * cm, 3.0 * cm)
+        lado = 3.0 * cm
+        r = lado / 2 - 2
+        grosor = lado * 0.12
+        anillo.add(Wedge(lado / 2, lado / 2, r, 0, 360, radius1=r - grosor,
+                         fillColor=colors.Color(1, 1, 1, alpha=0.28), strokeColor=None))
+        if total and aprobados:
+            ini = 90 - 360 * aprobados / total if aprobados < total else 0
+            fin = 90 if aprobados < total else 360
+            anillo.add(Wedge(lado / 2, lado / 2, r, ini, fin, radius1=r - grosor, fillColor=colors.white,
+                             strokeColor=None))
+        anillo.add(String(lado / 2, lado / 2 + 1, f"{aprobados}/{total}", fontName="Helvetica-Bold",
+                          fontSize=lado * 0.17, fillColor=colors.white, textAnchor="middle"))
+        anillo.add(String(lado / 2, lado / 2 - lado * 0.14, "candados", fontName="Helvetica",
+                          fontSize=lado * 0.085, fillColor=colors.white, textAnchor="middle"))
+        texto = [Paragraph(f'<font size="7.5" color="{sub}"><b>VEREDICTO DE AUTENTICIDAD</b></font>', est["base"]),
+                 Spacer(1, 3), Paragraph(f'<font color="{texto_color}">{_esc(ver)}</font>', est["ver"]),
+                 Spacer(1, 3), Paragraph(f'<font color="{texto_color}">{_esc(frase)}</font>', est["base"])]
+        if nota_politicas:
+            texto += [Spacer(1, 5), Paragraph(f'<font color="{texto_color}">{nota_politicas}</font>',
+                                              est["base"])]
+        burbuja = Drawing(1.5 * cm, 1.5 * cm)
+        burbuja.add(Circle(0.75 * cm, 0.75 * cm, 0.75 * cm, fillColor=colors.white, strokeColor=None))
+        ic = _ico(i_ver, 26, c_ver)
+        if ic is not None:
+            ic.translate((1.5 * cm - ic.width) / 2, (1.5 * cm - ic.height) / 2)
+            burbuja.add(ic)
+        interior = Table([[burbuja, texto, anillo]],
+                         colWidths=[1.9 * cm, ANCHO - 1.9 * cm - 3.3 * cm - 28, 3.3 * cm])
+        interior.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (2, 0), (2, 0), "CENTER"),
+                                      ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+        return _tarjeta(interior, fondo=c_ver, borde=c_ver, padding=14)
+
+    if estilo == "sello":
+        # Tarjeta oscura (Midnight Black) con un sello circular del color del veredicto.
+        vivo = VIVO.get(c_ver, c_ver)
+        lado = 2.5 * cm
+        sello = Drawing(lado, lado)
+        sello.add(Circle(lado / 2, lado / 2, lado / 2 - 1, fillColor=None, strokeColor=colors.HexColor(vivo),
+                         strokeWidth=2.4))
+        sello.add(Circle(lado / 2, lado / 2, lado / 2 - 6, fillColor=None, strokeColor=colors.HexColor(vivo),
+                         strokeWidth=0.6, strokeDashArray=[2, 2]))
+        ic = _ico(i_ver, 22, vivo)
+        if ic is not None:
+            ic.translate((lado - ic.width) / 2, lado * 0.42)
+            sello.add(ic)
+        sello.add(String(lado / 2, lado * 0.24, f"{aprobados}/{total}", fontName="Helvetica-Bold", fontSize=9,
+                         fillColor=colors.HexColor(vivo), textAnchor="middle"))
+        texto = [Paragraph('<font size="7.5" color="#A9B6BF"><b>VEREDICTO DE AUTENTICIDAD</b></font>', est["base"]),
+                 Spacer(1, 3), Paragraph(f'<font color="{vivo}">{_esc(ver)}</font>', est["ver"]),
+                 Spacer(1, 3), Paragraph(f'<font color="#E8EDF1">{_esc(frase)}</font>', est["base"])]
+        if nota_politicas:
+            texto += [Spacer(1, 5), Paragraph(f'<font color="{VIVO[aviso]}">{nota_politicas}</font>', est["base"])]
+        ancho_mosaico = 6.6 * cm
+        interior = Table([[sello, texto, _mosaico_candados(analisis.candados, ancho_mosaico - 10, est, oscuro=True)]],
+                         colWidths=[2.9 * cm, ANCHO - 2.9 * cm - ancho_mosaico - 28, ancho_mosaico])
+        interior.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                      ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                                      ("LEFTPADDING", (2, 0), (2, 0), 10)]))
+        return _tarjeta(interior, fondo="#02070A", borde="#02070A", padding=14)
+
+    # "mosaico": tarjeta blanca con encabezado de color y el mosaico de candados.
+    cinta = Table([[_ico(i_ver, 15, "#FFFFFF") or "",
+                    Paragraph(f'<font color="#FFFFFF"><b>{_esc(ver)}</b></font>',
+                              ParagraphStyle("c", parent=est["base"], fontName="Helvetica-Bold", fontSize=13,
+                                             leading=16)),
+                    Paragraph(f'<font color="#FFFFFF"><b>{aprobados}/{total}</b> candados técnicos OK</font>',
+                              ParagraphStyle("c2", parent=est["base"], alignment=2, fontSize=8.5))]],
+                  colWidths=[0.75 * cm, ANCHO - 0.75 * cm - 5.2 * cm - 24, 5.2 * cm])
+    cinta.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                               ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    texto = [Paragraph(f'<font size="7.5" color="{GRIS}"><b>QUÉ SIGNIFICA</b></font>', est["base"]), Spacer(1, 3),
+             Paragraph(_esc(frase), est["base"])]
+    if nota_politicas:
+        texto += [Spacer(1, 5), Paragraph(f'<font color="{aviso}">{nota_politicas}</font>', est["base"])]
+    ancho_mosaico = 7.4 * cm
+    leyenda = Drawing(ancho_mosaico, 9)
+    x = 0
+    for e in ("OK", "AVISO", "FALLA", "INFO"):
+        leyenda.add(Rect(x, 1, 7, 7, rx=1.5, ry=1.5, fillColor=colors.HexColor(ESTADO[e][0]), strokeColor=None))
+        leyenda.add(String(x + 10, 1.5, e, fontName="Helvetica", fontSize=6.8, fillColor=colors.HexColor(GRIS)))
+        x += 10 + len(e) * 4.3 + 12
+    derecha = [Paragraph(f'<font size="7.5" color="{GRIS}"><b>CADA CANDADO</b></font>', est["base"]), Spacer(1, 4),
+               _mosaico_candados(analisis.candados, ancho_mosaico, est), Spacer(1, 3),
+               leyenda]
+    cuerpo = Table([[texto, derecha]], colWidths=[ANCHO - ancho_mosaico - 24 - 14, ancho_mosaico + 14])
+    cuerpo.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("LEFTPADDING", (1, 0), (1, 0), 14),
+                                ("LINEBEFORE", (1, 0), (1, 0), 0.6, colors.HexColor(LINEA))]))
+    t = Table([[cinta], [cuerpo]], colWidths=[ANCHO])
+    t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(c_ver)),
+                           ("BACKGROUND", (0, 1), (-1, 1), colors.white),
+                           ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor(c_ver)),
+                           ("ROUNDEDCORNERS", [10, 10, 10, 10]),
+                           ("LEFTPADDING", (0, 0), (-1, -1), 12), ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                           ("TOPPADDING", (0, 0), (-1, 0), 9), ("BOTTOMPADDING", (0, 0), (-1, 0), 9),
+                           ("TOPPADDING", (0, 1), (-1, 1), 11), ("BOTTOMPADDING", (0, 1), (-1, 1), 12)]))
+    return t
+
+
 def generar(analisis, ruta_salida, fecha_texto=""):
     est = _estilos()
     d = analisis.datos or {}
@@ -387,20 +531,12 @@ def generar(analisis, ruta_salida, fecha_texto=""):
     el = []
 
     # --- 1. Veredicto -------------------------------------------------------
-    escudo = _ico(i_ver, 34, c_ver)
-    texto = [Paragraph('<font size="7.5" color="#64748B">VEREDICTO DE AUTENTICIDAD</font>', est["base"]),
-             Spacer(1, 3),
-             Paragraph(f'<font color="{c_ver}">{_esc(ver)}</font>', est["ver"]),
-             Spacer(1, 3), Paragraph(_esc(frase), est["base"])]
+    nota_politicas = None
     if ver in ("SIN INDICIOS DE ALTERACIÓN", "COPIA: DATOS COINCIDEN") and not analisis.cumple_politicas:
-        texto += [Spacer(1, 4), Paragraph(
-            '<font color="#B45309"><b>Además, no cumple políticas</b> (vigencia o estatus): '
-            'pide al cliente una constancia reciente.</font>', est["base"])]
-    interior = Table([[escudo or "", texto, _anillo(aprobados, len(tecnicos), c_ver)]],
-                     colWidths=[1.6 * cm, ANCHO - 1.6 * cm - 3.3 * cm - 0.36 * cm - 24, 3.3 * cm])
-    interior.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (2, 0), (2, 0), "CENTER"),
-                                  ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-    el += [_tarjeta(interior, fondo=f_ver, borde=c_ver, barra=c_ver, padding=12), Spacer(1, 10)]
+        nota_politicas = ("<b>Además, no cumple políticas</b> (vigencia o estatus): "
+                          "pide al cliente una constancia reciente.")
+    el += [_veredicto(analisis, ver, c_ver, f_ver, i_ver, frase, aprobados, len(tecnicos), nota_politicas, est),
+           Spacer(1, 10)]
 
     # --- 2. Cifras ------------------------------------------------------------
     def cifra(etq, valor, color, icono, nota=""):
