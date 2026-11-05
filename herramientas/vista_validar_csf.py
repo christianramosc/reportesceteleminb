@@ -87,7 +87,7 @@ def _panorama(resumenes):
         "Veredicto": r["veredicto"],
         "Candados": f"{r['tecnicos_ok']}/{r['tecnicos_total']}",
         "Fallas": r["fallas"],
-        "Vigente": "Sí" if (r["dias_emision"] is not None and r["dias_emision"] <= 30) else "No",
+        "Vigente": "Sí" if r["vigente"] else "No",
     } for r in resumenes])
     tabla = tabla.sort_values("Veredicto", key=lambda s: s.map(ORDEN), kind="stable")
     st.dataframe(tabla, hide_index=True, width="stretch")
@@ -109,9 +109,10 @@ def _tarjeta(r):
         c2.metric("Fallas", r["fallas"])
         c3.metric("Avisos", r["avisos"])
         dias = r["dias_emision"]
-        c4.metric("Emitida hace", f"{dias} días" if dias is not None else "—",
-                  delta=("Vigente" if dias is not None and dias <= 30 else "Vencida"),
-                  delta_color=("normal" if dias is not None and dias <= 30 else "inverse"),
+        c4.metric("Emitida hace",
+                  "—" if dias is None else (f"{dias} días" if dias >= 0 else "en el futuro"),
+                  delta=None if dias is None else ("Vigente" if r["vigente"] else "Vencida"),
+                  delta_color="normal" if r["vigente"] else "inverse",
                   delta_arrow="off", help="Política del boletín BMGFS: emitida en el último mes.")
 
         if r["veredicto"] in ("SIN INDICIOS DE ALTERACIÓN", "COPIA: DATOS COINCIDEN") and not r["cumple_politicas"]:

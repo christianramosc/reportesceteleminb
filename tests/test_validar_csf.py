@@ -208,6 +208,21 @@ def test_adaptador_genera_un_pdf_por_archivo(tmp_path):
     assert r["ok"] + r["avisos"] + r["fallas"] <= r["total"] == len(r["candados"])
 
 
+def test_vigencia_una_sola_regla_y_fecha_futura_no_es_vigente(tmp_path):
+    """La app, el PDF y el candado 4.1 usan la misma regla: 0 a 30 días.
+    Una emisión en el futuro (días negativos) NO cuenta como vigente."""
+    assert [v.vigente(x) for x in (None, -1, 0, v.DIAS_VIGENCIA, v.DIAS_VIGENCIA + 1)] == \
+        [False, False, True, True, False]
+    ruta = _fabricada(str(tmp_path / "c.pdf"))          # emitida el 20/10/2026
+    a = v.analizar_csf(ruta, hoy=date(2026, 10, 25))
+    r = v.resumen_dict(a, hoy=date(2026, 10, 25))
+    assert r["vigente"] and r["dias_emision"] == 5 and r["datos"]["Emisión"].endswith("hace 5 días")
+    a = v.analizar_csf(ruta, hoy=date(2026, 10, 10))
+    r = v.resumen_dict(a, hoy=date(2026, 10, 10))
+    assert not r["vigente"] and r["datos"]["Emisión"].endswith("fecha en el futuro")
+    assert next(c for c in a.candados if c.clave == "4.1").estado == v.FALLA
+
+
 def test_vista_en_la_pagina_no_truena(tmp_path):
     """Dibuja el resultado con AppTest (sin navegador) para 2 archivos."""
     from streamlit.testing.v1 import AppTest

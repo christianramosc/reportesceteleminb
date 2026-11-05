@@ -1,8 +1,13 @@
 """
 Reporte PDF de "Validar CSF" — versión visual.
 
+Paleta Midnight Black / Electric Blue / Cantaloupe Orange; cada estatus
+(OK, AVISO, FALLA, INFO) lleva su propio color e ícono, así se entiende
+también impreso en blanco y negro.
+
 Página 1 (lo esencial en 10 segundos):
-  - Veredicto grande con escudo y anillo de candados aprobados.
+  - Encabezado negro con corte en diagonal; RFC, fecha y folio a la derecha.
+  - Veredicto en un bloque sólido de su color, con el anillo de candados aprobados.
   - Cifras: candados técnicos, fallas, avisos y vigencia.
   - Barras por sección (cada una lleva al detalle con un clic).
   - Observaciones: solo lo que falló o pide revisión.
@@ -11,6 +16,9 @@ Página 1 (lo esencial en 10 segundos):
     pantalla) y links clicables. Un QR que NO va al SAT no se dibuja ni se enlaza.
 Páginas siguientes: el detalle de los 33 candados, con marcadores (índice
 lateral del lector de PDF) por sección.
+
+El PDF se arma dos veces: la primera solo cuenta las páginas para poder
+escribir "Página X de Y" en la segunda sin romper los enlaces internos.
 """
 
 import copy
@@ -26,7 +34,9 @@ from reportlab.lib.units import cm
 from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Frame, Image, KeepTogether,
                                 NextPageTemplate, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
+from . import fechas as _fechas
 from . import iconos as _iconos
+from . import validar_csf as _v
 
 # --- Paleta -----------------------------------------------------------------
 # Midnight Black, Electric Blue y Cantaloupe Orange. El azul eléctrico
@@ -304,15 +314,8 @@ def generar(analisis, ruta_salida, fecha_texto=""):
     n_fallas = sum(c.estado == "FALLA" for c in candados)
     n_avisos = sum(c.estado == "AVISO" for c in candados)
     emision = d.get("fecha_emision")
-    hoy = None
-    try:
-        from . import fechas as _f
-        hoy = _f.hoy()
-    except Exception:
-        from datetime import date
-        hoy = date.today()
-    dias = (hoy - emision).days if emision else None
-    vigente = dias is not None and 0 <= dias <= 30
+    dias = (_fechas.hoy() - emision).days if emision else None
+    vigente = _v.vigente(dias)
     el = []
 
     # --- 1. Veredicto -------------------------------------------------------
@@ -340,10 +343,10 @@ def generar(analisis, ruta_salida, fecha_texto=""):
               "indicios de alteración" if n_fallas else "ninguna"),
         cifra("Avisos", n_avisos, ESTADO["AVISO"][0] if n_avisos else GRIS_CLARO, "circle-alert",
               "revisar a mano" if n_avisos else "ninguno"),
-        cifra("Emitida hace", f"{dias} días" if dias is not None else "—",
+        cifra("Emitida hace", "—" if dias is None else (f"{dias} días" if dias >= 0 else "en el futuro"),
               ESTADO["OK"][0] if vigente else ESTADO["FALLA"][0], "calendar-check",
               (f'<font color="{ESTADO["OK"][0] if vigente else ESTADO["FALLA"][0]}"><b>'
-               f'{"Vigente" if vigente else "Vencida"}</b></font> · máximo 30 días') if dias is not None else ""),
+               f'{"Vigente" if vigente else "Vencida"}</b></font> · máximo {_v.DIAS_VIGENCIA} días') if dias is not None else ""),
     ]
     fila = Table([[_tarjeta(c, ancho=ancho_c, padding=9) for c in celdas]],
                  colWidths=[ancho_c + 8] * 3 + [ancho_c])
@@ -485,7 +488,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
             filas.append([Paragraph(f'<font color="{GRIS}">{_esc(c.clave)}</font>', est["chico"]),
                           Paragraph(f"<b>{_esc(c.titulo)}</b>", est["base"]),
                           _pastilla(c.estado, est), Paragraph(det, est["base"])])
-        t = Table(filas, colWidths=[1.05 * cm, 4.45 * cm, 1.75 * cm, None], repeatRows=0)
+        t = Table(filas, colWidths=[1.05 * cm, 4.45 * cm, 1.75 * cm, None])
         estilo = [("VALIGN", (0, 0), (-1, -1), "TOP"),
                   ("LINEBELOW", (0, 0), (-1, -2), 0.5, colors.HexColor(LINEA)),
                   ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]
