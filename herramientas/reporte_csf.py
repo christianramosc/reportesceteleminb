@@ -29,54 +29,30 @@ from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Frame, Image, Ke
 from . import iconos as _iconos
 
 # --- Paleta -----------------------------------------------------------------
-# Colores de la paleta (decoración: encabezado, títulos, iconos, links).
-# Los de ESTADO y VEREDICTO, abajo, tienen significado y no se tocan.
-PALETAS = {
-    "violeta": {"primario": "#2E1A47", "acento": "#7C5CBF", "suave": "#F1ECF8", "texto_suave": "#CDBFE6",
-                "encabezado": "tarjeta"},
-    "petroleo": {"primario": "#0F3B44", "acento": "#4C9A9F", "suave": "#EAF3F3", "texto_suave": "#B9D6D8",
-                 "encabezado": "lateral"},
-    "grafito": {"primario": "#23262D", "acento": "#B83280", "suave": "#F4F1F4", "texto_suave": "#C9CCD3",
-                "encabezado": "diagonal"},
-}
-# Midnight Black, Electric Blue y Cantaloupe Orange. El naranja (2.7:1
-# sobre blanco) y el azul eléctrico (3.2:1) no alcanzan para texto sobre
+# Midnight Black, Electric Blue y Cantaloupe Orange. El azul eléctrico
+# (3.2:1 sobre blanco) y el naranja (2.7:1) no alcanzan para texto sobre
 # blanco: van en el encabezado oscuro, iconos y franjas; los links usan un
 # azul un poco más oscuro (5:1).
-PALETAS["medianoche"] = {"primario": "#02070A", "acento": "#0297DE", "acento2": "#FC734D",
-                         "suave": "#EAF6FC", "texto_suave": "#A9B6BF", "enlace": "#0275B0",
-                         "encabezado": "banda"}
-PALETA = "violeta"
-ENCABEZADO = None        # None = el de la paleta; o "banda", "tarjeta", "lateral", "diagonal"
-
-
-def _p(clave):
-    paleta = PALETAS[PALETA]
-    if clave == "encabezado" and ENCABEZADO:
-        return ENCABEZADO
-    if clave == "enlace":
-        return paleta.get("enlace", paleta["acento"])
-    if clave == "acento2":
-        return paleta.get("acento2", paleta["acento"])
-    return paleta[clave]
-
-
+NEGRO = "#02070A"         # Midnight Black: encabezado y títulos
+AZUL = "#0297DE"          # Electric Blue: iconos y franja
+NARANJA = "#FC734D"       # Cantaloupe Orange: franja
+ENLACE = "#0275B0"
+TEXTO_SUAVE = "#A9B6BF"   # texto secundario sobre el negro (9.8:1)
 TINTA = "#0F172A"
 GRIS = "#64748B"
 GRIS_CLARO = "#94A3B8"
 LINEA = "#E2E8F0"
 FONDO = "#F8FAFC"
 # Estados en la familia de la paleta: OK azul, AVISO naranja, FALLA carmín.
-# Todos con contraste >= 4.5:1 sobre blanco, y AVISO y FALLA también se
-# distinguen por claridad (no solo por tono). VIVO = versión clara para
-# fondos oscuros.
+# Todos con contraste >= 4.5:1 sobre blanco (también con texto blanco
+# encima, en el bloque del veredicto), y AVISO y FALLA se distinguen por
+# claridad, no solo por tono.
 ESTADO = {  # estado -> (color fuerte, fondo suave, icono lucide, etiqueta)
     "OK": ("#0275B0", "#E3F3FB", "circle-check", "OK"),
     "AVISO": ("#C2501F", "#FFEDE5", "circle-alert", "AVISO"),
     "FALLA": ("#B3123A", "#FBE3E8", "circle-x", "FALLA"),
     "INFO": ("#5B6876", "#ECEFF2", "info", "INFO"),
 }
-VIVO = {"#0275B0": "#0297DE", "#C2501F": "#FC734D", "#B3123A": "#FF6B7A", "#3F5466": "#9FB3C8"}
 VEREDICTO = {  # veredicto -> (color, fondo, icono, frase)
     "SIN INDICIOS DE ALTERACIÓN": ("#0275B0", "#E3F3FB", "shield-check",
                                    "Pasó los candados técnicos. Valida los QR en el SAT antes de usarla."),
@@ -95,7 +71,6 @@ SECCIONES = {1: ("Archivo y estructura", "file-search"), 2: ("Códigos QR y de b
              3: ("Coherencia de datos", "fingerprint"), 4: ("Políticas de la financiera", "calendar-check")}
 
 ANCHO = letter[0] - 3.0 * cm      # ancho útil (márgenes de 1.5 cm)
-VEREDICTO_ESTILO = "mosaico"      # "solido", "mosaico" o "sello" (propuestas)
 
 
 def _esc(t):
@@ -114,7 +89,7 @@ def _estilos():
         "etq": ParagraphStyle("etq", parent=base, fontSize=7, leading=9, textColor=colors.HexColor(GRIS)),
         "valor": ParagraphStyle("valor", parent=base, fontName="Helvetica-Bold", fontSize=9.2, leading=12),
         "h2": ParagraphStyle("h2", parent=base, fontName="Helvetica-Bold", fontSize=11.5, leading=15,
-                             textColor=colors.HexColor(_p("primario"))),
+                             textColor=colors.HexColor(NEGRO)),
         "cifra": ParagraphStyle("cifra", parent=base, fontName="Helvetica-Bold", fontSize=20, leading=23),
         "ver": ParagraphStyle("ver", parent=base, fontName="Helvetica-Bold", fontSize=17, leading=21),
         "titulo_c": ParagraphStyle("tc", parent=base, fontName="Helvetica-Bold", fontSize=9.5, leading=12),
@@ -124,28 +99,6 @@ def _estilos():
 # ===========================================================================
 #  Piezas gráficas
 # ===========================================================================
-def _anillo(aprobados, total, color, lado=2.6 * cm):
-    """Dona de candados aprobados con la cifra al centro."""
-    d = Drawing(lado, lado)
-    cx = cy = lado / 2
-    r = lado / 2 - 2
-    grosor = lado * 0.13
-    d.add(Wedge(cx, cy, r, 0, 360, radius1=r - grosor, fillColor=colors.HexColor(LINEA), strokeColor=None))
-    if total and aprobados:
-        fin = 90
-        ini = 90 - 360 * aprobados / total
-        if aprobados >= total:
-            d.add(Wedge(cx, cy, r, 0, 360, radius1=r - grosor, fillColor=colors.HexColor(color), strokeColor=None))
-        else:
-            d.add(Wedge(cx, cy, r, ini, fin, radius1=r - grosor, fillColor=colors.HexColor(color),
-                        strokeColor=None))
-    d.add(String(cx, cy + 1, f"{aprobados}/{total}", fontName="Helvetica-Bold", fontSize=lado * 0.17,
-                 fillColor=colors.HexColor(TINTA), textAnchor="middle"))
-    d.add(String(cx, cy - lado * 0.14, "candados", fontName="Helvetica", fontSize=lado * 0.085,
-                 fillColor=colors.HexColor(GRIS), textAnchor="middle"))
-    return d
-
-
 def _barra(conteo, ancho, alto=7):
     """Barra apilada OK / INFO / AVISO / FALLA con extremos redondeados."""
     d = Drawing(ancho, alto)
@@ -196,7 +149,7 @@ def _tarjeta(contenido, fondo="#FFFFFF", borde=LINEA, ancho=ANCHO, padding=10, b
 
 
 def _titulo(texto, icono, est, ancla=None):
-    ic = _ico(icono, 13, _p("acento"))
+    ic = _ico(icono, 13, AZUL)
     p = Paragraph((f'<a name="{ancla}"/>' if ancla else "") + _esc(texto), est["h2"])
     t = Table([[ic or "", p]], colWidths=[0.6 * cm, ANCHO - 0.6 * cm])
     t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
@@ -276,236 +229,87 @@ class _Documento(BaseDocTemplate):
 #  Reporte
 # ===========================================================================
 def _encabezado(cv, an, al, primera, analisis, d, fecha_texto):
-    """Encabezado de cada página, según el estilo de la paleta."""
-    prim, acento, suave, t_suave = _p("primario"), _p("acento"), _p("suave"), _p("texto_suave")
-    estilo = _p("encabezado")
-    x0, x1 = 1.5 * cm, an - 1.5 * cm
-    folio = f"Folio {analisis.sha256[:10].upper()}"
-    rfc = d.get("rfc") or ""
-    titulo = "Validación de Constancia de Situación Fiscal"
+    """Bloque negro con un corte en diagonal y dos franjas (azul y naranja).
+    El RFC, la fecha y el folio quedan sobre blanco, a la derecha."""
     C = colors.HexColor
+    alto = 2.3 * cm if primera else 1.35 * cm
+    y = al - alto
+    corte = an * 0.68
+    arriba = corte + alto * 0.6          # dónde toca el corte el borde superior
+    for color, puntos in ((NEGRO, [(0, al), (arriba, al), (corte, y), (0, y)]),
+                          (AZUL, [(arriba, al), (arriba + 0.35 * cm, al), (corte + 0.35 * cm, y), (corte, y)]),
+                          (NARANJA, [(arriba + 0.35 * cm, al), (arriba + 0.47 * cm, al),
+                                     (corte + 0.47 * cm, y), (corte + 0.35 * cm, y)])):
+        trazo = cv.beginPath()
+        trazo.moveTo(*puntos[0])
+        for punto in puntos[1:]:
+            trazo.lineTo(*punto)
+        trazo.close()
+        cv.setFillColor(C(color))
+        cv.drawPath(trazo, fill=1, stroke=0)
 
-    if estilo == "tarjeta":
-        # Tarjeta redondeada dentro de los márgenes, con una barra de acento.
-        alto = 2.25 * cm if primera else 1.0 * cm
-        y = al - 0.45 * cm - alto
-        cv.setFillColor(C(prim))
-        cv.roundRect(x0, y, x1 - x0, alto, 0.3 * cm, fill=1, stroke=0)
-        cv.setFillColor(C(_p("acento2")))
-        cv.roundRect(x0 + 0.45 * cm, y + alto * 0.22, 0.12 * cm, alto * 0.56, 0.06 * cm, fill=1, stroke=0)
-        izq = x0 + 0.85 * cm
-        claro, tenue = "#FFFFFF", t_suave
-    elif estilo == "banda":
-        # Banda a todo lo ancho con franja de dos colores abajo.
-        alto = 2.3 * cm if primera else 1.35 * cm
-        y = al - alto
-        cv.setFillColor(C(prim))
-        cv.rect(0, y, an, alto, fill=1, stroke=0)
-        cv.setFillColor(C(acento))
-        cv.rect(0, y - 0.12 * cm, an * 0.72, 0.12 * cm, fill=1, stroke=0)
-        cv.setFillColor(C(_p("acento2")))
-        cv.rect(an * 0.72, y - 0.12 * cm, an * 0.28, 0.12 * cm, fill=1, stroke=0)
-        izq = x0
-        claro, tenue = "#FFFFFF", t_suave
-    elif estilo == "lateral":
-        # Fondo suave con un bloque de color a la izquierda; texto oscuro.
-        alto = 2.25 * cm if primera else 1.1 * cm
-        y = al - 0.45 * cm - alto
-        cv.setFillColor(C(suave))
-        cv.rect(x0, y, x1 - x0, alto, fill=1, stroke=0)
-        cv.setFillColor(C(prim))
-        cv.rect(x0, y, 0.55 * cm, alto, fill=1, stroke=0)
-        cv.setFillColor(C(acento))
-        cv.rect(x0 + 0.55 * cm, y, x1 - x0 - 0.55 * cm, 0.07 * cm, fill=1, stroke=0)
-        izq = x0 + 1.0 * cm
-        claro, tenue = prim, GRIS
-    else:  # "diagonal"
-        # Bloque oscuro con un corte en diagonal y una cuña de acento.
-        alto = 2.3 * cm if primera else 1.35 * cm
-        y = al - alto
-        corte = an * 0.68
-        for color, puntos in ((prim, [(0, al), (corte + alto * 0.6, al), (corte, y), (0, y)]),
-                              (acento, [(corte + alto * 0.6, al), (corte + alto * 0.6 + 0.35 * cm, al),
-                                        (corte + 0.35 * cm, y), (corte, y)]),
-                              (_p("acento2"), [(corte + alto * 0.6 + 0.35 * cm, al),
-                                               (corte + alto * 0.6 + 0.47 * cm, al),
-                                               (corte + 0.47 * cm, y), (corte + 0.35 * cm, y)])):
-            trazo = cv.beginPath()
-            trazo.moveTo(*puntos[0])
-            for punto in puntos[1:]:
-                trazo.lineTo(*punto)
-            trazo.close()
-            cv.setFillColor(C(color))
-            cv.drawPath(trazo, fill=1, stroke=0)
-        izq = x0
-        claro, tenue = "#FFFFFF", t_suave
-
+    x0, x1 = 1.5 * cm, an - 1.5 * cm
+    titulo = "Validación de Constancia de Situación Fiscal"
+    rfc = d.get("rfc") or ""
     if primera:
-        cv.setFillColor(C(claro))
+        cv.setFillColor(colors.white)
         cv.setFont("Helvetica-Bold", 14.5)
-        cv.drawString(izq, y + alto - 0.82 * cm, titulo)
+        cv.drawString(x0, y + alto - 0.82 * cm, titulo)
         cv.setFont("Helvetica", 8.5)
-        cv.setFillColor(C(tenue))
-        cv.drawString(izq, y + 0.48 * cm, f"Archivo: {analisis.archivo[:70]}")
-        # Derecha: RFC, fecha y folio (en la diagonal van sobre blanco).
-        derecha = x1 - (0.5 * cm if estilo in ("tarjeta", "lateral") else 0)
-        fuerte = claro if estilo != "diagonal" else prim
-        if estilo == "banda":
-            fuerte = acento
-        suave_der = tenue if estilo != "diagonal" else GRIS
-        cv.setFillColor(C(fuerte))
+        cv.setFillColor(C(TEXTO_SUAVE))
+        cv.drawString(x0, y + 0.48 * cm, f"Archivo: {analisis.archivo[:70]}")
+        cv.setFillColor(C(NEGRO))
         cv.setFont("Helvetica-Bold", 9.5)
-        cv.drawRightString(derecha, y + alto - 0.82 * cm, rfc)
+        cv.drawRightString(x1, y + alto - 0.82 * cm, rfc)
         cv.setFont("Helvetica", 8)
-        cv.setFillColor(C(suave_der))
-        cv.drawRightString(derecha, y + 0.88 * cm, fecha_texto)
-        cv.drawRightString(derecha, y + 0.48 * cm, folio)
+        cv.setFillColor(C(GRIS))
+        cv.drawRightString(x1, y + 0.88 * cm, fecha_texto)
+        cv.drawRightString(x1, y + 0.48 * cm, f"Folio {analisis.sha256[:10].upper()}")
     else:
-        cv.setFillColor(C(claro))
+        cv.setFillColor(colors.white)
         cv.setFont("Helvetica-Bold", 9.5)
-        cv.drawString(izq, y + alto / 2 - 0.12 * cm, titulo)
+        cv.drawString(x0, y + alto / 2 - 0.12 * cm, titulo)
         cv.setFont("Helvetica", 8)
-        derecha = x1 - (0.5 * cm if estilo in ("tarjeta", "lateral") else 0)
-        cv.setFillColor(C(tenue if estilo != "diagonal" else GRIS))
-        cv.drawRightString(derecha, y + alto / 2 - 0.12 * cm, rfc or analisis.archivo[:40])
+        cv.setFillColor(C(GRIS))
+        cv.drawRightString(x1, y + alto / 2 - 0.12 * cm, rfc or analisis.archivo[:40])
 
 
-def _mosaico_candados(candados, ancho, est, oscuro=False):
-    """Un cuadrito por candado, por sección: se ve de un golpe dónde está
-    cada falla o aviso."""
-    filas = []
-    etiqueta = 2.85 * cm
-    mas_largo = max((sum(c.seccion == s for c in candados) for s in SECCIONES), default=1) or 1
-    sep = 0.06 * cm
-    lado = min(0.3 * cm, (ancho - etiqueta - 2) / mas_largo - sep)   # que quepa la sección más larga
-    for sec, (nombre, _icono) in SECCIONES.items():
-        lista = [c for c in candados if c.seccion == sec]
-        if not lista:
-            continue
-        d = Drawing(len(lista) * (lado + sep), lado)
-        for i, c in enumerate(lista):
-            color = ESTADO[c.estado][0]
-            if oscuro:
-                color = VIVO.get(color, "#8A96A3")
-            d.add(Rect(i * (lado + sep), 0, lado, lado, rx=2, ry=2, fillColor=colors.HexColor(color),
-                       strokeColor=None))
-        etq_color = "#A9B6BF" if oscuro else GRIS
-        filas.append([Paragraph(f'<font color="{etq_color}">{_esc(nombre)}</font>',
-                                ParagraphStyle("m", parent=est["chico"], fontSize=7, leading=9)), d])
-    t = Table(filas, colWidths=[etiqueta, ancho - etiqueta])
-    t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                           ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                           ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5)]))
-    return t
+def _anillo_claro(aprobados, total, lado=3.0 * cm):
+    """Anillo de candados en blanco, para dibujarlo sobre el color del veredicto."""
+    d = Drawing(lado, lado)
+    r = lado / 2 - 2
+    grosor = lado * 0.12
+    d.add(Wedge(lado / 2, lado / 2, r, 0, 360, radius1=r - grosor,
+                fillColor=colors.Color(1, 1, 1, alpha=0.28), strokeColor=None))
+    if total and aprobados:
+        ini, fin = (0, 360) if aprobados >= total else (90 - 360 * aprobados / total, 90)
+        d.add(Wedge(lado / 2, lado / 2, r, ini, fin, radius1=r - grosor, fillColor=colors.white, strokeColor=None))
+    d.add(String(lado / 2, lado / 2 + 1, f"{aprobados}/{total}", fontName="Helvetica-Bold",
+                 fontSize=lado * 0.17, fillColor=colors.white, textAnchor="middle"))
+    d.add(String(lado / 2, lado / 2 - lado * 0.14, "candados", fontName="Helvetica",
+                 fontSize=lado * 0.085, fillColor=colors.white, textAnchor="middle"))
+    return d
 
 
-def _veredicto(analisis, ver, c_ver, f_ver, i_ver, frase, aprobados, total, nota_politicas, est):
-    """El cuadro del veredicto, en el estilo de VEREDICTO_ESTILO."""
-    estilo = VEREDICTO_ESTILO
-    aviso = ESTADO["AVISO"][0]
-
-    if estilo == "solido":
-        # Bloque de color sólido, texto claro, anillo blanco.
-        texto_color = "#FFFFFF"
-        sub = "#E6F1F8"
-        anillo = Drawing(3.0 * cm, 3.0 * cm)
-        lado = 3.0 * cm
-        r = lado / 2 - 2
-        grosor = lado * 0.12
-        anillo.add(Wedge(lado / 2, lado / 2, r, 0, 360, radius1=r - grosor,
-                         fillColor=colors.Color(1, 1, 1, alpha=0.28), strokeColor=None))
-        if total and aprobados:
-            ini = 90 - 360 * aprobados / total if aprobados < total else 0
-            fin = 90 if aprobados < total else 360
-            anillo.add(Wedge(lado / 2, lado / 2, r, ini, fin, radius1=r - grosor, fillColor=colors.white,
-                             strokeColor=None))
-        anillo.add(String(lado / 2, lado / 2 + 1, f"{aprobados}/{total}", fontName="Helvetica-Bold",
-                          fontSize=lado * 0.17, fillColor=colors.white, textAnchor="middle"))
-        anillo.add(String(lado / 2, lado / 2 - lado * 0.14, "candados", fontName="Helvetica",
-                          fontSize=lado * 0.085, fillColor=colors.white, textAnchor="middle"))
-        texto = [Paragraph(f'<font size="7.5" color="{sub}"><b>VEREDICTO DE AUTENTICIDAD</b></font>', est["base"]),
-                 Spacer(1, 3), Paragraph(f'<font color="{texto_color}">{_esc(ver)}</font>', est["ver"]),
-                 Spacer(1, 3), Paragraph(f'<font color="{texto_color}">{_esc(frase)}</font>', est["base"])]
-        if nota_politicas:
-            texto += [Spacer(1, 5), Paragraph(f'<font color="{texto_color}">{nota_politicas}</font>',
-                                              est["base"])]
-        burbuja = Drawing(1.5 * cm, 1.5 * cm)
-        burbuja.add(Circle(0.75 * cm, 0.75 * cm, 0.75 * cm, fillColor=colors.white, strokeColor=None))
-        ic = _ico(i_ver, 26, c_ver)
-        if ic is not None:
-            ic.translate((1.5 * cm - ic.width) / 2, (1.5 * cm - ic.height) / 2)
-            burbuja.add(ic)
-        interior = Table([[burbuja, texto, anillo]],
-                         colWidths=[1.9 * cm, ANCHO - 1.9 * cm - 3.3 * cm - 28, 3.3 * cm])
-        interior.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (2, 0), (2, 0), "CENTER"),
-                                      ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-        return _tarjeta(interior, fondo=c_ver, borde=c_ver, padding=14)
-
-    if estilo == "sello":
-        # Tarjeta oscura (Midnight Black) con un sello circular del color del veredicto.
-        vivo = VIVO.get(c_ver, c_ver)
-        lado = 2.5 * cm
-        sello = Drawing(lado, lado)
-        sello.add(Circle(lado / 2, lado / 2, lado / 2 - 1, fillColor=None, strokeColor=colors.HexColor(vivo),
-                         strokeWidth=2.4))
-        sello.add(Circle(lado / 2, lado / 2, lado / 2 - 6, fillColor=None, strokeColor=colors.HexColor(vivo),
-                         strokeWidth=0.6, strokeDashArray=[2, 2]))
-        ic = _ico(i_ver, 22, vivo)
-        if ic is not None:
-            ic.translate((lado - ic.width) / 2, lado * 0.42)
-            sello.add(ic)
-        sello.add(String(lado / 2, lado * 0.24, f"{aprobados}/{total}", fontName="Helvetica-Bold", fontSize=9,
-                         fillColor=colors.HexColor(vivo), textAnchor="middle"))
-        texto = [Paragraph('<font size="7.5" color="#A9B6BF"><b>VEREDICTO DE AUTENTICIDAD</b></font>', est["base"]),
-                 Spacer(1, 3), Paragraph(f'<font color="{vivo}">{_esc(ver)}</font>', est["ver"]),
-                 Spacer(1, 3), Paragraph(f'<font color="#E8EDF1">{_esc(frase)}</font>', est["base"])]
-        if nota_politicas:
-            texto += [Spacer(1, 5), Paragraph(f'<font color="{VIVO[aviso]}">{nota_politicas}</font>', est["base"])]
-        ancho_mosaico = 6.6 * cm
-        interior = Table([[sello, texto, _mosaico_candados(analisis.candados, ancho_mosaico - 10, est, oscuro=True)]],
-                         colWidths=[2.9 * cm, ANCHO - 2.9 * cm - ancho_mosaico - 28, ancho_mosaico])
-        interior.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                                      ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                                      ("LEFTPADDING", (2, 0), (2, 0), 10)]))
-        return _tarjeta(interior, fondo="#02070A", borde="#02070A", padding=14)
-
-    # "mosaico": tarjeta blanca con encabezado de color y el mosaico de candados.
-    cinta = Table([[_ico(i_ver, 15, "#FFFFFF") or "",
-                    Paragraph(f'<font color="#FFFFFF"><b>{_esc(ver)}</b></font>',
-                              ParagraphStyle("c", parent=est["base"], fontName="Helvetica-Bold", fontSize=13,
-                                             leading=16)),
-                    Paragraph(f'<font color="#FFFFFF"><b>{aprobados}/{total}</b> candados técnicos OK</font>',
-                              ParagraphStyle("c2", parent=est["base"], alignment=2, fontSize=8.5))]],
-                  colWidths=[0.75 * cm, ANCHO - 0.75 * cm - 5.2 * cm - 24, 5.2 * cm])
-    cinta.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                               ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-    texto = [Paragraph(f'<font size="7.5" color="{GRIS}"><b>QUÉ SIGNIFICA</b></font>', est["base"]), Spacer(1, 3),
-             Paragraph(_esc(frase), est["base"])]
+def _veredicto(ver, c_ver, i_ver, frase, aprobados, total, nota_politicas, est):
+    """Bloque sólido del color del veredicto: escudo en un círculo blanco,
+    el veredicto en blanco y el anillo de candados."""
+    texto = [Paragraph('<font size="7.5" color="#E6F1F8"><b>VEREDICTO DE AUTENTICIDAD</b></font>', est["base"]),
+             Spacer(1, 3), Paragraph(f'<font color="#FFFFFF">{_esc(ver)}</font>', est["ver"]),
+             Spacer(1, 3), Paragraph(f'<font color="#FFFFFF">{_esc(frase)}</font>', est["base"])]
     if nota_politicas:
-        texto += [Spacer(1, 5), Paragraph(f'<font color="{aviso}">{nota_politicas}</font>', est["base"])]
-    ancho_mosaico = 7.4 * cm
-    leyenda = Drawing(ancho_mosaico, 9)
-    x = 0
-    for e in ("OK", "AVISO", "FALLA", "INFO"):
-        leyenda.add(Rect(x, 1, 7, 7, rx=1.5, ry=1.5, fillColor=colors.HexColor(ESTADO[e][0]), strokeColor=None))
-        leyenda.add(String(x + 10, 1.5, e, fontName="Helvetica", fontSize=6.8, fillColor=colors.HexColor(GRIS)))
-        x += 10 + len(e) * 4.3 + 12
-    derecha = [Paragraph(f'<font size="7.5" color="{GRIS}"><b>CADA CANDADO</b></font>', est["base"]), Spacer(1, 4),
-               _mosaico_candados(analisis.candados, ancho_mosaico, est), Spacer(1, 3),
-               leyenda]
-    cuerpo = Table([[texto, derecha]], colWidths=[ANCHO - ancho_mosaico - 24 - 14, ancho_mosaico + 14])
-    cuerpo.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                                ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("LEFTPADDING", (1, 0), (1, 0), 14),
-                                ("LINEBEFORE", (1, 0), (1, 0), 0.6, colors.HexColor(LINEA))]))
-    t = Table([[cinta], [cuerpo]], colWidths=[ANCHO])
-    t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(c_ver)),
-                           ("BACKGROUND", (0, 1), (-1, 1), colors.white),
-                           ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor(c_ver)),
-                           ("ROUNDEDCORNERS", [10, 10, 10, 10]),
-                           ("LEFTPADDING", (0, 0), (-1, -1), 12), ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-                           ("TOPPADDING", (0, 0), (-1, 0), 9), ("BOTTOMPADDING", (0, 0), (-1, 0), 9),
-                           ("TOPPADDING", (0, 1), (-1, 1), 11), ("BOTTOMPADDING", (0, 1), (-1, 1), 12)]))
-    return t
+        texto += [Spacer(1, 5), Paragraph(f'<font color="#FFFFFF">{nota_politicas}</font>', est["base"])]
+    burbuja = Drawing(1.5 * cm, 1.5 * cm)
+    burbuja.add(Circle(0.75 * cm, 0.75 * cm, 0.75 * cm, fillColor=colors.white, strokeColor=None))
+    ic = _ico(i_ver, 26, c_ver)
+    if ic is not None:
+        ic.translate((1.5 * cm - ic.width) / 2, (1.5 * cm - ic.height) / 2)
+        burbuja.add(ic)
+    interior = Table([[burbuja, texto, _anillo_claro(aprobados, total)]],
+                     colWidths=[1.9 * cm, ANCHO - 1.9 * cm - 3.3 * cm - 28, 3.3 * cm])
+    interior.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (2, 0), (2, 0), "CENTER"),
+                                  ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    return _tarjeta(interior, fondo=c_ver, borde=c_ver, padding=14)
 
 
 def generar(analisis, ruta_salida, fecha_texto=""):
@@ -513,7 +317,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
     d = analisis.datos or {}
     candados = analisis.candados
     ver = analisis.veredicto
-    c_ver, f_ver, i_ver, frase = VEREDICTO.get(ver, ("#475569", FONDO, "shield-alert", ""))
+    c_ver, _fondo, i_ver, frase = VEREDICTO.get(ver, (ESTADO["INFO"][0], FONDO, "shield-alert", ""))
     tecnicos = [c for c in candados if c.seccion < 4]
     aprobados = sum(c.estado in ("OK", "INFO") for c in tecnicos)
     n_fallas = sum(c.estado == "FALLA" for c in candados)
@@ -535,7 +339,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
     if ver in ("SIN INDICIOS DE ALTERACIÓN", "COPIA: DATOS COINCIDEN") and not analisis.cumple_politicas:
         nota_politicas = ("<b>Además, no cumple políticas</b> (vigencia o estatus): "
                           "pide al cliente una constancia reciente.")
-    el += [_veredicto(analisis, ver, c_ver, f_ver, i_ver, frase, aprobados, len(tecnicos), nota_politicas, est),
+    el += [_veredicto(ver, c_ver, i_ver, frase, aprobados, len(tecnicos), nota_politicas, est),
            Spacer(1, 10)]
 
     # --- 2. Cifras ------------------------------------------------------------
@@ -549,7 +353,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
                 Paragraph(nota, est["chico"])]
     ancho_c = (ANCHO - 3 * 8) / 4
     celdas = [
-        cifra("Candados técnicos", f"{aprobados}/{len(tecnicos)}", _p("primario"), "shield-check",
+        cifra("Candados técnicos", f"{aprobados}/{len(tecnicos)}", NEGRO, "shield-check",
               "archivo, códigos y datos"),
         cifra("Fallas", n_fallas, ESTADO["FALLA"][0] if n_fallas else GRIS_CLARO, "circle-x",
               "indicios de alteración" if n_fallas else "ninguna"),
@@ -579,7 +383,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
                                          f'<font color="{ESTADO["AVISO"][0]}">{cuenta["AVISO"]} aviso(s)</font>'
                                          if cuenta["AVISO"] else "") if x) or \
             f'<font color="{ESTADO["OK"][0]}">todo en orden</font>'
-        filas.append([_ico(icono, 12, _p("acento")) or "",
+        filas.append([_ico(icono, 12, AZUL) or "",
                       Paragraph(f'<a href="#sec{sec}" color="{TINTA}"><b>{_esc(nombre)}</b></a>', est["base"]),
                       _barra(cuenta, 6.3 * cm),
                       Paragraph(f"<b>{ok}/{len(lista)}</b>", ParagraphStyle("r", parent=est["base"],
@@ -666,7 +470,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
             img = _qr_imagen(url)
             cuerpo = [Paragraph(f"<b>QR {i} · {'cédula' if i == 1 else 'sello'}</b>", est["titulo_c"]),
                       Paragraph(f"Compara: {que}.", est["chico"]), Spacer(1, 4),
-                      Paragraph(f'<a href="{_esc(url)}" color="{_p("enlace")}"><u>Abrir en siat.sat.gob.mx</u></a>',
+                      Paragraph(f'<a href="{_esc(url)}" color="{ENLACE}"><u>Abrir en siat.sat.gob.mx</u></a>',
                                 est["base"])]
             celda = Table([[img or "", cuerpo]], colWidths=[2.9 * cm, None])
             fondo, borde = "#FFFFFF", LINEA
