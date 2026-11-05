@@ -13,6 +13,7 @@ Páginas siguientes: el detalle de los 33 candados, con marcadores (índice
 lateral del lector de PDF) por sección.
 """
 
+import copy
 import html
 import io
 
@@ -22,7 +23,6 @@ from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.pdfgen import canvas as _canvas
 from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Frame, Image, KeepTogether,
                                 NextPageTemplate, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
@@ -178,28 +178,6 @@ def _qr_imagen(url, lado=2.7 * cm):
 # ===========================================================================
 #  Documento: encabezado, pie con "Página X de Y" e índice lateral
 # ===========================================================================
-class _CanvasNumerado(_canvas.Canvas):
-    """Guarda las páginas para poder escribir 'Página X de Y' al final."""
-
-    def __init__(self, *a, **k):
-        super().__init__(*a, **k)
-        self._paginas = []
-
-    def showPage(self):
-        self._paginas.append(dict(self.__dict__))
-        self._startPage()
-
-    def save(self):
-        total = len(self._paginas)
-        for estado in self._paginas:
-            self.__dict__.update(estado)
-            self.setFont("Helvetica", 7.5)
-            self.setFillColor(colors.HexColor(GRIS))
-            self.drawRightString(letter[0] - 1.5 * cm, 0.85 * cm, f"Página {self._pageNumber} de {total}")
-            super().showPage()
-        super().save()
-
-
 class _Documento(BaseDocTemplate):
     """Primera página con encabezado alto; las demás con uno delgado (y por
     eso más espacio para el detalle)."""
@@ -220,8 +198,11 @@ class _Documento(BaseDocTemplate):
         marcador = getattr(f, "_marcador", None)
         if marcador:
             texto, ancla = marcador
+            # Un título con ancla ya define su destino (<a name> en el
+            # párrafo, justo en el título); los demás marcan la página.
             clave = ancla or f"m{id(f)}"
-            self.canv.bookmarkPage(clave)
+            if not ancla:
+                self.canv.bookmarkPage(clave)
             self.canv.addOutlineEntry(texto, clave, level=0)
 
 
@@ -519,6 +500,12 @@ def generar(analisis, ruta_salida, fecha_texto=""):
            Paragraph(f'<font name="Courier" size="7">{analisis.sha256}</font>', est["chico"])]
 
     # --- Encabezado y pie ------------------------------------------------------
+    # "Página X de Y" necesita el total. Antes se guardaban las páginas y se
+    # numeraban al final (un Canvas especial), pero así todos los enlaces y
+    # el índice lateral apuntaban a la página 1. Ahora se arma dos veces: la
+    # primera, en memoria, solo para contar las páginas.
+    total = {"paginas": 0}
+
     def pagina(cv, doc):
         cv.saveState()
         an, al = letter
@@ -530,8 +517,17 @@ def generar(analisis, ruta_salida, fecha_texto=""):
         cv.setFont("Helvetica", 7.5)
         cv.setFillColor(colors.HexColor(GRIS))
         cv.drawString(1.5 * cm, 0.85 * cm, f"Validación de CSF · Folio {analisis.sha256[:10].upper()}")
+        if total["paginas"]:
+            cv.drawRightString(an - 1.5 * cm, 0.85 * cm, f"Página {doc.page} de {total['paginas']}")
         cv.restoreState()
 
-    doc = _Documento(ruta_salida, pagina, title=f"Validación CSF {d.get('rfc', '')}", subject=ver, creator="Reportes MG Colima")
-    doc.build([NextPageTemplate("resto")] + el, canvasmaker=_CanvasNumerado)
+    historia = [NextPageTemplate("resto")] + el
+    # reportlab modifica las piezas al acomodarlas: la pasada de conteo
+    # trabaja sobre una copia.
+    conteo = _Documento(io.BytesIO(), pagina)
+    conteo.build(copy.deepcopy(historia))
+    total["paginas"] = conteo.page
+    doc = _Documento(ruta_salida, pagina, title=f"Validación CSF {d.get('rfc', '')}", subject=ver,
+                     creator="Reportes y Herramientas")
+    doc.build(historia)
     return ruta_salida

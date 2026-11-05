@@ -496,3 +496,26 @@ def test_reporte_sin_casillas_ni_datos_de_quien_valida(tmp_path):
     assert not r.get_fields()
     texto = " ".join(p.extract_text() for p in r.pages)
     assert "Validó" not in texto and "Dirección de Riesgos" not in texto and "analista" not in texto.lower()
+
+
+def test_reporte_los_enlaces_llevan_a_su_seccion(tmp_path):
+    """Los renglones de "Candados por sección" y el índice lateral del PDF
+    llevan a la página de su sección. Antes todos apuntaban a la página 1
+    (por cómo se numeraba "Página X de Y")."""
+    import pypdf
+    res = ejecutar([_fabricada(str(tmp_path / "0_x.pdf"))], carpeta_salida=str(tmp_path / "s"))
+    r = pypdf.PdfReader(res["archivos"][0])
+    assert len(r.pages) > 2
+    paginas = {p.indirect_reference.idnum: i + 1 for i, p in enumerate(r.pages)}
+    indice = {o.title: r.get_destination_page_number(o) + 1 for o in r.outline}
+    secciones = {t: n for t, n in indice.items() if t[:2] in ("1.", "2.", "3.", "4.")}
+    assert len(secciones) == 4 and min(secciones.values()) > 1
+    destinos = []
+    for anot in r.pages[0].get("/Annots") or []:
+        destino = anot.get_object().get("/Dest")
+        if destino is not None:
+            destinos.append(paginas[destino[0].idnum] if not isinstance(destino, str)
+                            else r.get_destination_page_number(r.named_destinations[destino]) + 1)
+    assert sorted(destinos) == sorted(secciones.values())
+    textos = [p.extract_text() or "" for p in r.pages]
+    assert all(f"Página {i} de {len(r.pages)}" in t for i, t in enumerate(textos, 1))
