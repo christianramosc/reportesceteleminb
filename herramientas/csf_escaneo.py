@@ -34,6 +34,7 @@ legítima por una mancha del escáner.
 """
 
 import re
+from collections import Counter
 from datetime import date
 
 from . import validar_csf as v
@@ -440,7 +441,6 @@ def analizar(ruta, analisis, add, hoy, consultar_sat, es_pdf, motivo=""):
     if barras:
         rfcs_codigos["código de barras"] = barras[0]
     # Si no coinciden, el de referencia es el que repite la mayoría.
-    from collections import Counter
     rfc_codigos = Counter(rfcs_codigos.values()).most_common(1)[0][0] if rfcs_codigos else ""
     if len(rfcs_codigos) >= 2:
         iguales = len(set(rfcs_codigos.values())) == 1

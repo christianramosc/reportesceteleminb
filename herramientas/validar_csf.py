@@ -115,6 +115,12 @@ CERTIFICADO_SAT = "200001088888800000041"
 # 4.1 — Política del boletín: "emitida recientemente (último mes)".
 DIAS_VIGENCIA = 30
 
+
+def vigente(dias):
+    """La regla de vigencia en un solo lugar (candado 4.1, PDF y app): emitida
+    hace 0 a DIAS_VIGENCIA días. Una fecha futura (días negativos) no es vigente."""
+    return dias is not None and 0 <= dias <= DIAS_VIGENCIA
+
 MESES = {"ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6,
          "JULIO": 7, "AGOSTO": 8, "SEPTIEMBRE": 9, "SETIEMBRE": 9, "OCTUBRE": 10,
          "NOVIEMBRE": 11, "DICIEMBRE": 12}
@@ -1910,20 +1916,13 @@ def analizar_lote(rutas, hoy=None, consultar_sat=False, nombres=None):
                     "3.12", "Sello, cadena e idCIF irrepetibles en el lote", FALLA,
                     detalle + ". Dos archivos distintos no pueden compartirlos: uno es copia alterada.",
                     "Constancias clonadas a partir de otra."))
-                a.candados.sort(key=lambda c: tuple(int(x) for x in c.clave.split(".")))
+                _ordenar(a)
     return resultados
 
 
 # ===========================================================================
 #  REPORTE PDF
 # ===========================================================================
-_COLOR_ESTADO = {OK: "#15803D", AVISO: "#B45309", FALLA: "#B91C1C", INFO: "#475569"}
-_FONDO_ESTADO = {OK: "#DCFCE7", AVISO: "#FEF3C7", FALLA: "#FEE2E2", INFO: "#E2E8F0"}
-_COLOR_VEREDICTO = {"SIN INDICIOS DE ALTERACIÓN": "#15803D", "REVISAR MANUALMENTE": "#B45309",
-                    "ALTERADA / NO CONFIABLE": "#B91C1C", "NO VERIFICABLE": "#B91C1C"}
-AZUL = "#191970"
-
-
 def generar_pdf(analisis, ruta_salida):
     """Reporte visual en PDF (reporte_csf.py)."""
     from . import reporte_csf   # local: reporte_csf importa este módulo
@@ -1952,6 +1951,7 @@ def resumen_dict(analisis, reporte=None, hoy=None):
     n = analisis.conteo()
     tecnicos = [c for c in analisis.candados if c.seccion < 4]
     emision = d.get("fecha_emision")
+    dias = (hoy - emision).days if emision else None
     return {
         "archivo": analisis.archivo,
         "reporte": reporte,
@@ -1968,7 +1968,8 @@ def resumen_dict(analisis, reporte=None, hoy=None):
             "Tipo": {"moral": "Persona moral", "fisica": "Persona física"}.get(d.get("tipo"), "—"),
             "CURP": d.get("curp") or ("No aplica" if d.get("tipo") == "moral" else "—"),
             "idCIF": d.get("idcif") or "—",
-            "Emisión": (f"{_fmt(emision)} · hace {(hoy - emision).days} días" if emision else "—"),
+            "Emisión": ("—" if dias is None else f"{_fmt(emision)} · "
+                        + (f"hace {dias} días" if dias >= 0 else "fecha en el futuro")),
             "Lugar de emisión": (d.get("lugar_emision") or "—").title(),
             "Estatus en el padrón": d.get("estatus") or "—",
             "Inicio de operaciones": d.get("inicio_operaciones") or "—",
@@ -1977,7 +1978,8 @@ def resumen_dict(analisis, reporte=None, hoy=None):
                                                f"CP {d.get('cp')}" if d.get("cp") else "",
                                                d.get("municipio"), d.get("entidad")) if x) or "—",
         },
-        "dias_emision": (hoy - emision).days if emision else None,
+        "dias_emision": dias,
+        "vigente": vigente(dias),
         "candados": [{"clave": c.clave, "seccion": c.seccion, "titulo": c.titulo, "estado": c.estado,
                       "detalle": c.detalle, "previene": c.previene} for c in analisis.candados],
         "urls_qr": list(analisis.urls_qr),

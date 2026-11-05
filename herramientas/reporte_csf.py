@@ -1,8 +1,13 @@
 """
 Reporte PDF de "Validar CSF" — versión visual.
 
+Paleta Midnight Black / Electric Blue / Cantaloupe Orange; cada estatus
+(OK, AVISO, FALLA, INFO) lleva su propio color e ícono, así se entiende
+también impreso en blanco y negro.
+
 Página 1 (lo esencial en 10 segundos):
-  - Veredicto grande con escudo y anillo de candados aprobados.
+  - Encabezado negro con corte en diagonal; RFC, fecha y folio a la derecha.
+  - Veredicto en un bloque sólido de su color, con el anillo de candados aprobados.
   - Cifras: candados técnicos, fallas, avisos y vigencia.
   - Barras por sección (cada una lleva al detalle con un clic).
   - Observaciones: solo lo que falló o pide revisión.
@@ -11,49 +16,65 @@ Página 1 (lo esencial en 10 segundos):
     pantalla) y links clicables. Un QR que NO va al SAT no se dibuja ni se enlaza.
 Páginas siguientes: el detalle de los 33 candados, con marcadores (índice
 lateral del lector de PDF) por sección.
+
+El PDF se arma dos veces: la primera solo cuenta las páginas para poder
+escribir "Página X de Y" en la segunda sin romper los enlaces internos.
 """
 
+import copy
 import html
 import io
 
-from reportlab.graphics.shapes import Drawing, Rect, String, Wedge
+from reportlab.graphics.shapes import Circle, Drawing, Rect, String, Wedge
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.pdfgen import canvas as _canvas
 from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Frame, Image, KeepTogether,
                                 NextPageTemplate, PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
+from . import fechas as _fechas
 from . import iconos as _iconos
+from . import validar_csf as _v
 
 # --- Paleta -----------------------------------------------------------------
-AZUL = "#191970"        # azul Inbursa
-ROJO_MG = "#C8102E"     # acento MG
+# Midnight Black, Electric Blue y Cantaloupe Orange. El azul eléctrico
+# (3.2:1 sobre blanco) y el naranja (2.7:1) no alcanzan para texto sobre
+# blanco: van en el encabezado oscuro, iconos y franjas; los links usan un
+# azul un poco más oscuro (5:1).
+NEGRO = "#02070A"         # Midnight Black: encabezado y títulos
+AZUL = "#0297DE"          # Electric Blue: iconos y franja
+NARANJA = "#FC734D"       # Cantaloupe Orange: franja
+ENLACE = "#0275B0"
+TEXTO_SUAVE = "#A9B6BF"   # texto secundario sobre el negro (9.8:1)
 TINTA = "#0F172A"
 GRIS = "#64748B"
 GRIS_CLARO = "#94A3B8"
 LINEA = "#E2E8F0"
 FONDO = "#F8FAFC"
+# Estados en la familia de la paleta: OK azul, AVISO naranja, FALLA carmín.
+# Todos con contraste >= 4.5:1 sobre blanco (también con texto blanco
+# encima, en el bloque del veredicto), y AVISO y FALLA se distinguen por
+# claridad, no solo por tono.
 ESTADO = {  # estado -> (color fuerte, fondo suave, icono lucide, etiqueta)
-    "OK": ("#15803D", "#DCFCE7", "circle-check", "OK"),
-    "AVISO": ("#B45309", "#FEF3C7", "circle-alert", "AVISO"),
-    "FALLA": ("#B91C1C", "#FEE2E2", "circle-x", "FALLA"),
-    "INFO": ("#475569", "#E2E8F0", "info", "INFO"),
+    "OK": ("#0275B0", "#E3F3FB", "circle-check", "OK"),
+    "AVISO": ("#C2501F", "#FFEDE5", "circle-alert", "AVISO"),
+    "FALLA": ("#B3123A", "#FBE3E8", "circle-x", "FALLA"),
+    "INFO": ("#5B6876", "#ECEFF2", "info", "INFO"),
 }
 VEREDICTO = {  # veredicto -> (color, fondo, icono, frase)
-    "SIN INDICIOS DE ALTERACIÓN": ("#15803D", "#F0FDF4", "shield-check",
+    "SIN INDICIOS DE ALTERACIÓN": ("#0275B0", "#E3F3FB", "shield-check",
                                    "Pasó los candados técnicos. Valida los QR en el SAT antes de usarla."),
-    "REVISAR MANUALMENTE": ("#B45309", "#FFFBEB", "shield-alert",
+    "REVISAR MANUALMENTE": ("#C2501F", "#FFEDE5", "shield-alert",
                             "Hay avisos con explicación legítima posible. Confírmalos en el QR del SAT."),
-    "ALTERADA / NO CONFIABLE": ("#B91C1C", "#FEF2F2", "shield-x",
+    "ALTERADA / NO CONFIABLE": ("#B3123A", "#FBE3E8", "shield-x",
                                 "Hay indicios de alteración. No la uses para el expediente."),
-    "COPIA: DATOS COINCIDEN": ("#1D4ED8", "#EFF6FF", "scan-line",
+    "COPIA: DATOS COINCIDEN": ("#3F5466", "#EDF1F5", "scan-line",
                                "Copia (escaneo o foto): los códigos y los datos legibles coinciden, pero por ser copia NO se puede comprobar que no se alteró antes de escanearse. Valida el QR en el SAT o pide el PDF original."),
-    "COPIA: REVISAR A MANO": ("#B45309", "#FFFBEB", "scan-line",
+    "COPIA: REVISAR A MANO": ("#C2501F", "#FFEDE5", "scan-line",
                               "Copia (escaneo o foto): algo no se alcanzó a leer o quedó dudoso. Revisa los avisos y valida el QR en el SAT, o pide el PDF original."),
-    "NO VERIFICABLE": ("#B91C1C", "#FEF2F2", "shield-x",
+    "NO VERIFICABLE": ("#B3123A", "#FBE3E8", "shield-x",
                        "No verificable: no se pudo leer ningún código de la copia. Pide el PDF original del SAT."),
 }
 SECCIONES = {1: ("Archivo y estructura", "file-search"), 2: ("Códigos QR y de barras", "qr-code"),
@@ -78,7 +99,7 @@ def _estilos():
         "etq": ParagraphStyle("etq", parent=base, fontSize=7, leading=9, textColor=colors.HexColor(GRIS)),
         "valor": ParagraphStyle("valor", parent=base, fontName="Helvetica-Bold", fontSize=9.2, leading=12),
         "h2": ParagraphStyle("h2", parent=base, fontName="Helvetica-Bold", fontSize=11.5, leading=15,
-                             textColor=colors.HexColor(AZUL)),
+                             textColor=colors.HexColor(NEGRO)),
         "cifra": ParagraphStyle("cifra", parent=base, fontName="Helvetica-Bold", fontSize=20, leading=23),
         "ver": ParagraphStyle("ver", parent=base, fontName="Helvetica-Bold", fontSize=17, leading=21),
         "titulo_c": ParagraphStyle("tc", parent=base, fontName="Helvetica-Bold", fontSize=9.5, leading=12),
@@ -88,28 +109,6 @@ def _estilos():
 # ===========================================================================
 #  Piezas gráficas
 # ===========================================================================
-def _anillo(aprobados, total, color, lado=2.6 * cm):
-    """Dona de candados aprobados con la cifra al centro."""
-    d = Drawing(lado, lado)
-    cx = cy = lado / 2
-    r = lado / 2 - 2
-    grosor = lado * 0.13
-    d.add(Wedge(cx, cy, r, 0, 360, radius1=r - grosor, fillColor=colors.HexColor(LINEA), strokeColor=None))
-    if total and aprobados:
-        fin = 90
-        ini = 90 - 360 * aprobados / total
-        if aprobados >= total:
-            d.add(Wedge(cx, cy, r, 0, 360, radius1=r - grosor, fillColor=colors.HexColor(color), strokeColor=None))
-        else:
-            d.add(Wedge(cx, cy, r, ini, fin, radius1=r - grosor, fillColor=colors.HexColor(color),
-                        strokeColor=None))
-    d.add(String(cx, cy + 1, f"{aprobados}/{total}", fontName="Helvetica-Bold", fontSize=lado * 0.17,
-                 fillColor=colors.HexColor(TINTA), textAnchor="middle"))
-    d.add(String(cx, cy - lado * 0.14, "candados", fontName="Helvetica", fontSize=lado * 0.085,
-                 fillColor=colors.HexColor(GRIS), textAnchor="middle"))
-    return d
-
-
 def _barra(conteo, ancho, alto=7):
     """Barra apilada OK / INFO / AVISO / FALLA con extremos redondeados."""
     d = Drawing(ancho, alto)
@@ -189,28 +188,6 @@ def _qr_imagen(url, lado=2.7 * cm):
 # ===========================================================================
 #  Documento: encabezado, pie con "Página X de Y" e índice lateral
 # ===========================================================================
-class _CanvasNumerado(_canvas.Canvas):
-    """Guarda las páginas para poder escribir 'Página X de Y' al final."""
-
-    def __init__(self, *a, **k):
-        super().__init__(*a, **k)
-        self._paginas = []
-
-    def showPage(self):
-        self._paginas.append(dict(self.__dict__))
-        self._startPage()
-
-    def save(self):
-        total = len(self._paginas)
-        for estado in self._paginas:
-            self.__dict__.update(estado)
-            self.setFont("Helvetica", 7.5)
-            self.setFillColor(colors.HexColor(GRIS))
-            self.drawRightString(letter[0] - 1.5 * cm, 0.85 * cm, f"Página {self._pageNumber} de {total}")
-            super().showPage()
-        super().save()
-
-
 class _Documento(BaseDocTemplate):
     """Primera página con encabezado alto; las demás con uno delgado (y por
     eso más espacio para el detalle)."""
@@ -231,51 +208,123 @@ class _Documento(BaseDocTemplate):
         marcador = getattr(f, "_marcador", None)
         if marcador:
             texto, ancla = marcador
+            # Un título con ancla ya define su destino (<a name> en el
+            # párrafo, justo en el título); los demás marcan la página.
             clave = ancla or f"m{id(f)}"
-            self.canv.bookmarkPage(clave)
+            if not ancla:
+                self.canv.bookmarkPage(clave)
             self.canv.addOutlineEntry(texto, clave, level=0)
 
 
 # ===========================================================================
 #  Reporte
 # ===========================================================================
+def _encabezado(cv, an, al, primera, analisis, d, fecha_texto):
+    """Bloque negro con un corte en diagonal y dos franjas (azul y naranja).
+    El RFC, la fecha y el folio quedan sobre blanco, a la derecha."""
+    C = colors.HexColor
+    alto = 2.3 * cm if primera else 1.35 * cm
+    y = al - alto
+    corte = an * 0.68
+    arriba = corte + alto * 0.6          # dónde toca el corte el borde superior
+    for color, puntos in ((NEGRO, [(0, al), (arriba, al), (corte, y), (0, y)]),
+                          (AZUL, [(arriba, al), (arriba + 0.35 * cm, al), (corte + 0.35 * cm, y), (corte, y)]),
+                          (NARANJA, [(arriba + 0.35 * cm, al), (arriba + 0.47 * cm, al),
+                                     (corte + 0.47 * cm, y), (corte + 0.35 * cm, y)])):
+        trazo = cv.beginPath()
+        trazo.moveTo(*puntos[0])
+        for punto in puntos[1:]:
+            trazo.lineTo(*punto)
+        trazo.close()
+        cv.setFillColor(C(color))
+        cv.drawPath(trazo, fill=1, stroke=0)
+
+    x0, x1 = 1.5 * cm, an - 1.5 * cm
+    titulo = "Validación de Constancia de Situación Fiscal"
+    rfc = d.get("rfc") or ""
+    if primera:
+        cv.setFillColor(colors.white)
+        cv.setFont("Helvetica-Bold", 14.5)
+        cv.drawString(x0, y + alto - 0.82 * cm, titulo)
+        cv.setFont("Helvetica", 8.5)
+        cv.setFillColor(C(TEXTO_SUAVE))
+        cv.drawString(x0, y + 0.48 * cm, f"Archivo: {analisis.archivo[:70]}")
+        cv.setFillColor(C(NEGRO))
+        cv.setFont("Helvetica-Bold", 9.5)
+        cv.drawRightString(x1, y + alto - 0.82 * cm, rfc)
+        cv.setFont("Helvetica", 8)
+        cv.setFillColor(C(GRIS))
+        cv.drawRightString(x1, y + 0.88 * cm, fecha_texto)
+        cv.drawRightString(x1, y + 0.48 * cm, f"Folio {analisis.sha256[:10].upper()}")
+    else:
+        cv.setFillColor(colors.white)
+        cv.setFont("Helvetica-Bold", 9.5)
+        cv.drawString(x0, y + alto / 2 - 0.12 * cm, titulo)
+        cv.setFont("Helvetica", 8)
+        cv.setFillColor(C(GRIS))
+        cv.drawRightString(x1, y + alto / 2 - 0.12 * cm, rfc or analisis.archivo[:40])
+
+
+def _anillo_claro(aprobados, total, lado=3.0 * cm):
+    """Anillo de candados en blanco, para dibujarlo sobre el color del veredicto."""
+    d = Drawing(lado, lado)
+    r = lado / 2 - 2
+    grosor = lado * 0.12
+    d.add(Wedge(lado / 2, lado / 2, r, 0, 360, radius1=r - grosor,
+                fillColor=colors.Color(1, 1, 1, alpha=0.28), strokeColor=None))
+    if total and aprobados:
+        ini, fin = (0, 360) if aprobados >= total else (90 - 360 * aprobados / total, 90)
+        d.add(Wedge(lado / 2, lado / 2, r, ini, fin, radius1=r - grosor, fillColor=colors.white, strokeColor=None))
+    d.add(String(lado / 2, lado / 2 + 1, f"{aprobados}/{total}", fontName="Helvetica-Bold",
+                 fontSize=lado * 0.17, fillColor=colors.white, textAnchor="middle"))
+    d.add(String(lado / 2, lado / 2 - lado * 0.14, "candados", fontName="Helvetica",
+                 fontSize=lado * 0.085, fillColor=colors.white, textAnchor="middle"))
+    return d
+
+
+def _veredicto(ver, c_ver, i_ver, frase, aprobados, total, nota_politicas, est):
+    """Bloque sólido del color del veredicto: escudo en un círculo blanco,
+    el veredicto en blanco y el anillo de candados."""
+    texto = [Paragraph('<font size="7.5" color="#E6F1F8"><b>VEREDICTO DE AUTENTICIDAD</b></font>', est["base"]),
+             Spacer(1, 3), Paragraph(f'<font color="#FFFFFF">{_esc(ver)}</font>', est["ver"]),
+             Spacer(1, 3), Paragraph(f'<font color="#FFFFFF">{_esc(frase)}</font>', est["base"])]
+    if nota_politicas:
+        texto += [Spacer(1, 5), Paragraph(f'<font color="#FFFFFF">{nota_politicas}</font>', est["base"])]
+    burbuja = Drawing(1.5 * cm, 1.5 * cm)
+    burbuja.add(Circle(0.75 * cm, 0.75 * cm, 0.75 * cm, fillColor=colors.white, strokeColor=None))
+    ic = _ico(i_ver, 26, c_ver)
+    if ic is not None:
+        ic.translate((1.5 * cm - ic.width) / 2, (1.5 * cm - ic.height) / 2)
+        burbuja.add(ic)
+    interior = Table([[burbuja, texto, _anillo_claro(aprobados, total)]],
+                     colWidths=[1.9 * cm, ANCHO - 1.9 * cm - 3.3 * cm - 28, 3.3 * cm])
+    interior.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (2, 0), (2, 0), "CENTER"),
+                                  ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    return _tarjeta(interior, fondo=c_ver, borde=c_ver, padding=14)
+
+
 def generar(analisis, ruta_salida, fecha_texto=""):
     est = _estilos()
     d = analisis.datos or {}
     candados = analisis.candados
     ver = analisis.veredicto
-    c_ver, f_ver, i_ver, frase = VEREDICTO.get(ver, ("#475569", FONDO, "shield-alert", ""))
+    c_ver, _fondo, i_ver, frase = VEREDICTO.get(ver, (ESTADO["INFO"][0], FONDO, "shield-alert", ""))
     tecnicos = [c for c in candados if c.seccion < 4]
     aprobados = sum(c.estado in ("OK", "INFO") for c in tecnicos)
     n_fallas = sum(c.estado == "FALLA" for c in candados)
     n_avisos = sum(c.estado == "AVISO" for c in candados)
     emision = d.get("fecha_emision")
-    hoy = None
-    try:
-        from . import fechas as _f
-        hoy = _f.hoy()
-    except Exception:
-        from datetime import date
-        hoy = date.today()
-    dias = (hoy - emision).days if emision else None
-    vigente = dias is not None and 0 <= dias <= 30
+    dias = (_fechas.hoy() - emision).days if emision else None
+    vigente = _v.vigente(dias)
     el = []
 
     # --- 1. Veredicto -------------------------------------------------------
-    escudo = _ico(i_ver, 34, c_ver)
-    texto = [Paragraph('<font size="7.5" color="#64748B">VEREDICTO DE AUTENTICIDAD</font>', est["base"]),
-             Spacer(1, 3),
-             Paragraph(f'<font color="{c_ver}">{_esc(ver)}</font>', est["ver"]),
-             Spacer(1, 3), Paragraph(_esc(frase), est["base"])]
+    nota_politicas = None
     if ver in ("SIN INDICIOS DE ALTERACIÓN", "COPIA: DATOS COINCIDEN") and not analisis.cumple_politicas:
-        texto += [Spacer(1, 4), Paragraph(
-            '<font color="#B45309"><b>Además, no cumple políticas</b> (vigencia o estatus): '
-            'pide al cliente una constancia reciente.</font>', est["base"])]
-    interior = Table([[escudo or "", texto, _anillo(aprobados, len(tecnicos), c_ver)]],
-                     colWidths=[1.6 * cm, ANCHO - 1.6 * cm - 3.3 * cm - 0.36 * cm - 24, 3.3 * cm])
-    interior.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (2, 0), (2, 0), "CENTER"),
-                                  ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-    el += [_tarjeta(interior, fondo=f_ver, borde=c_ver, barra=c_ver, padding=12), Spacer(1, 10)]
+        nota_politicas = ("<b>Además, no cumple políticas</b> (vigencia o estatus): "
+                          "pide al cliente una constancia reciente.")
+    el += [_veredicto(ver, c_ver, i_ver, frase, aprobados, len(tecnicos), nota_politicas, est),
+           Spacer(1, 10)]
 
     # --- 2. Cifras ------------------------------------------------------------
     def cifra(etq, valor, color, icono, nota=""):
@@ -288,16 +337,16 @@ def generar(analisis, ruta_salida, fecha_texto=""):
                 Paragraph(nota, est["chico"])]
     ancho_c = (ANCHO - 3 * 8) / 4
     celdas = [
-        cifra("Candados técnicos", f"{aprobados}/{len(tecnicos)}", AZUL, "shield-check",
+        cifra("Candados técnicos", f"{aprobados}/{len(tecnicos)}", NEGRO, "shield-check",
               "archivo, códigos y datos"),
         cifra("Fallas", n_fallas, ESTADO["FALLA"][0] if n_fallas else GRIS_CLARO, "circle-x",
               "indicios de alteración" if n_fallas else "ninguna"),
         cifra("Avisos", n_avisos, ESTADO["AVISO"][0] if n_avisos else GRIS_CLARO, "circle-alert",
               "revisar a mano" if n_avisos else "ninguno"),
-        cifra("Emitida hace", f"{dias} días" if dias is not None else "—",
+        cifra("Emitida hace", "—" if dias is None else (f"{dias} días" if dias >= 0 else "en el futuro"),
               ESTADO["OK"][0] if vigente else ESTADO["FALLA"][0], "calendar-check",
               (f'<font color="{ESTADO["OK"][0] if vigente else ESTADO["FALLA"][0]}"><b>'
-               f'{"Vigente" if vigente else "Vencida"}</b></font> · máximo 30 días') if dias is not None else ""),
+               f'{"Vigente" if vigente else "Vencida"}</b></font> · máximo {_v.DIAS_VIGENCIA} días') if dias is not None else ""),
     ]
     fila = Table([[_tarjeta(c, ancho=ancho_c, padding=9) for c in celdas]],
                  colWidths=[ancho_c + 8] * 3 + [ancho_c])
@@ -405,7 +454,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
             img = _qr_imagen(url)
             cuerpo = [Paragraph(f"<b>QR {i} · {'cédula' if i == 1 else 'sello'}</b>", est["titulo_c"]),
                       Paragraph(f"Compara: {que}.", est["chico"]), Spacer(1, 4),
-                      Paragraph(f'<a href="{_esc(url)}" color="#1D4ED8"><u>Abrir en siat.sat.gob.mx</u></a>',
+                      Paragraph(f'<a href="{_esc(url)}" color="{ENLACE}"><u>Abrir en siat.sat.gob.mx</u></a>',
                                 est["base"])]
             celda = Table([[img or "", cuerpo]], colWidths=[2.9 * cm, None])
             fondo, borde = "#FFFFFF", LINEA
@@ -439,7 +488,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
             filas.append([Paragraph(f'<font color="{GRIS}">{_esc(c.clave)}</font>', est["chico"]),
                           Paragraph(f"<b>{_esc(c.titulo)}</b>", est["base"]),
                           _pastilla(c.estado, est), Paragraph(det, est["base"])])
-        t = Table(filas, colWidths=[1.05 * cm, 4.45 * cm, 1.75 * cm, None], repeatRows=0)
+        t = Table(filas, colWidths=[1.05 * cm, 4.45 * cm, 1.75 * cm, None])
         estilo = [("VALIGN", (0, 0), (-1, -1), "TOP"),
                   ("LINEBELOW", (0, 0), (-1, -2), 0.5, colors.HexColor(LINEA)),
                   ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]
@@ -454,43 +503,34 @@ def generar(analisis, ruta_salida, fecha_texto=""):
            Paragraph(f'<font name="Courier" size="7">{analisis.sha256}</font>', est["chico"])]
 
     # --- Encabezado y pie ------------------------------------------------------
+    # "Página X de Y" necesita el total. Antes se guardaban las páginas y se
+    # numeraban al final (un Canvas especial), pero así todos los enlaces y
+    # el índice lateral apuntaban a la página 1. Ahora se arma dos veces: la
+    # primera, en memoria, solo para contar las páginas.
+    total = {"paginas": 0}
+
     def pagina(cv, doc):
         cv.saveState()
         an, al = letter
         primera = doc.page == 1
-        alto_banda = 2.3 * cm if primera else 1.35 * cm
-        cv.setFillColor(colors.HexColor(AZUL))
-        cv.rect(0, al - alto_banda, an, alto_banda, fill=1, stroke=0)
-        cv.setFillColor(colors.HexColor(ROJO_MG))
-        cv.rect(0, al - alto_banda - 0.09 * cm, an, 0.09 * cm, fill=1, stroke=0)
-        cv.setFillColor(colors.white)
-        if primera:
-            cv.setFont("Helvetica-Bold", 15)
-            cv.drawString(1.5 * cm, al - 1.05 * cm, "Validación de Constancia de Situación Fiscal")
-            cv.setFont("Helvetica", 8.5)
-            cv.setFillColor(colors.HexColor("#C7D2FE"))
-            cv.drawString(1.5 * cm, al - 1.6 * cm, f"Archivo: {analisis.archivo[:80]}")
-            cv.drawString(1.5 * cm, al - 2.0 * cm, "Autoexpress Inbursa · MG Financial Services")
-            cv.setFillColor(colors.white)
-            cv.setFont("Helvetica-Bold", 9)
-            cv.drawRightString(an - 1.5 * cm, al - 1.05 * cm, d.get("rfc") or "")
-            cv.setFont("Helvetica", 8)
-            cv.setFillColor(colors.HexColor("#C7D2FE"))
-            cv.drawRightString(an - 1.5 * cm, al - 1.6 * cm, fecha_texto)
-            cv.drawRightString(an - 1.5 * cm, al - 2.0 * cm, f"Folio {analisis.sha256[:10].upper()}")
-        else:
-            cv.setFont("Helvetica-Bold", 10)
-            cv.drawString(1.5 * cm, al - 0.85 * cm, "Validación de Constancia de Situación Fiscal")
-            cv.setFont("Helvetica", 8)
-            cv.drawRightString(an - 1.5 * cm, al - 0.85 * cm, f"{d.get('rfc') or analisis.archivo[:40]}")
+        _encabezado(cv, an, al, primera, analisis, d, fecha_texto)
         cv.setStrokeColor(colors.HexColor(LINEA))
         cv.setLineWidth(0.6)
         cv.line(1.5 * cm, 1.25 * cm, an - 1.5 * cm, 1.25 * cm)
         cv.setFont("Helvetica", 7.5)
         cv.setFillColor(colors.HexColor(GRIS))
         cv.drawString(1.5 * cm, 0.85 * cm, f"Validación de CSF · Folio {analisis.sha256[:10].upper()}")
+        if total["paginas"]:
+            cv.drawRightString(an - 1.5 * cm, 0.85 * cm, f"Página {doc.page} de {total['paginas']}")
         cv.restoreState()
 
-    doc = _Documento(ruta_salida, pagina, title=f"Validación CSF {d.get('rfc', '')}", subject=ver, creator="Reportes MG Colima")
-    doc.build([NextPageTemplate("resto")] + el, canvasmaker=_CanvasNumerado)
+    historia = [NextPageTemplate("resto")] + el
+    # reportlab modifica las piezas al acomodarlas: la pasada de conteo
+    # trabaja sobre una copia.
+    conteo = _Documento(io.BytesIO(), pagina)
+    conteo.build(copy.deepcopy(historia))
+    total["paginas"] = conteo.page
+    doc = _Documento(ruta_salida, pagina, title=f"Validación CSF {d.get('rfc', '')}", subject=ver,
+                     creator="Reportes y Herramientas")
+    doc.build(historia)
     return ruta_salida

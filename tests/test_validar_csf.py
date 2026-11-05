@@ -208,6 +208,21 @@ def test_adaptador_genera_un_pdf_por_archivo(tmp_path):
     assert r["ok"] + r["avisos"] + r["fallas"] <= r["total"] == len(r["candados"])
 
 
+def test_vigencia_una_sola_regla_y_fecha_futura_no_es_vigente(tmp_path):
+    """La app, el PDF y el candado 4.1 usan la misma regla: 0 a 30 días.
+    Una emisión en el futuro (días negativos) NO cuenta como vigente."""
+    assert [v.vigente(x) for x in (None, -1, 0, v.DIAS_VIGENCIA, v.DIAS_VIGENCIA + 1)] == \
+        [False, False, True, True, False]
+    ruta = _fabricada(str(tmp_path / "c.pdf"))          # emitida el 20/10/2026
+    a = v.analizar_csf(ruta, hoy=date(2026, 10, 25))
+    r = v.resumen_dict(a, hoy=date(2026, 10, 25))
+    assert r["vigente"] and r["dias_emision"] == 5 and r["datos"]["Emisión"].endswith("hace 5 días")
+    a = v.analizar_csf(ruta, hoy=date(2026, 10, 10))
+    r = v.resumen_dict(a, hoy=date(2026, 10, 10))
+    assert not r["vigente"] and r["datos"]["Emisión"].endswith("fecha en el futuro")
+    assert next(c for c in a.candados if c.clave == "4.1").estado == v.FALLA
+
+
 def test_vista_en_la_pagina_no_truena(tmp_path):
     """Dibuja el resultado con AppTest (sin navegador) para 2 archivos."""
     from streamlit.testing.v1 import AppTest
@@ -496,3 +511,26 @@ def test_reporte_sin_casillas_ni_datos_de_quien_valida(tmp_path):
     assert not r.get_fields()
     texto = " ".join(p.extract_text() for p in r.pages)
     assert "Validó" not in texto and "Dirección de Riesgos" not in texto and "analista" not in texto.lower()
+
+
+def test_reporte_los_enlaces_llevan_a_su_seccion(tmp_path):
+    """Los renglones de "Candados por sección" y el índice lateral del PDF
+    llevan a la página de su sección. Antes todos apuntaban a la página 1
+    (por cómo se numeraba "Página X de Y")."""
+    import pypdf
+    res = ejecutar([_fabricada(str(tmp_path / "0_x.pdf"))], carpeta_salida=str(tmp_path / "s"))
+    r = pypdf.PdfReader(res["archivos"][0])
+    assert len(r.pages) > 2
+    paginas = {p.indirect_reference.idnum: i + 1 for i, p in enumerate(r.pages)}
+    indice = {o.title: r.get_destination_page_number(o) + 1 for o in r.outline}
+    secciones = {t: n for t, n in indice.items() if t[:2] in ("1.", "2.", "3.", "4.")}
+    assert len(secciones) == 4 and min(secciones.values()) > 1
+    destinos = []
+    for anot in r.pages[0].get("/Annots") or []:
+        destino = anot.get_object().get("/Dest")
+        if destino is not None:
+            destinos.append(paginas[destino[0].idnum] if not isinstance(destino, str)
+                            else r.get_destination_page_number(r.named_destinations[destino]) + 1)
+    assert sorted(destinos) == sorted(secciones.values())
+    textos = [p.extract_text() or "" for p in r.pages]
+    assert all(f"Página {i} de {len(r.pages)}" in t for i, t in enumerate(textos, 1))
