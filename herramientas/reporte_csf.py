@@ -29,13 +29,24 @@ from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Frame, Image, Ke
 from . import iconos as _iconos
 
 # --- Paleta -----------------------------------------------------------------
-AZUL = "#191970"        # azul Inbursa
-ROJO_MG = "#C8102E"     # acento MG
-TINTA = "#0F172A"
-GRIS = "#64748B"
-GRIS_CLARO = "#94A3B8"
-LINEA = "#E2E8F0"
-FONDO = "#F8FAFC"
+# Dos grupos de colores:
+#  - Los de ESTADO y VEREDICTO (verde, ámbar, rojo...) dicen algo: no se
+#    tocan por estética.
+#  - Los del documento (encabezado, títulos, iconos, líneas, texto): blanco
+#    y negro con grises neutros, para que se vea formal al imprimir.
+TINTA = "#111111"        # texto principal
+GRIS = "#5F5F5F"         # texto secundario (6.5:1 sobre blanco)
+GRIS_CLARO = "#9A9A9A"   # notas pequeñas y barras sin datos
+LINEA = "#D9D9D9"        # líneas y bordes
+FONDO = "#F5F5F5"        # fondos de tarjetas neutras
+TITULO = TINTA           # títulos de sección
+ICONO = "#333333"        # iconos de títulos y secciones
+ENLACE = TINTA           # links (subrayados)
+# Encabezado: BANDA = color de fondo (None = sin banda, texto negro y filete).
+BANDA = "#111111"
+BANDA_TEXTO = "#FFFFFF"
+BANDA_TEXTO_SUAVE = "#C9C9C9"
+FILETE = None            # línea bajo el encabezado (None = sin línea)
 ESTADO = {  # estado -> (color fuerte, fondo suave, icono lucide, etiqueta)
     "OK": ("#15803D", "#DCFCE7", "circle-check", "OK"),
     "AVISO": ("#B45309", "#FEF3C7", "circle-alert", "AVISO"),
@@ -78,7 +89,7 @@ def _estilos():
         "etq": ParagraphStyle("etq", parent=base, fontSize=7, leading=9, textColor=colors.HexColor(GRIS)),
         "valor": ParagraphStyle("valor", parent=base, fontName="Helvetica-Bold", fontSize=9.2, leading=12),
         "h2": ParagraphStyle("h2", parent=base, fontName="Helvetica-Bold", fontSize=11.5, leading=15,
-                             textColor=colors.HexColor(AZUL)),
+                             textColor=colors.HexColor(TITULO)),
         "cifra": ParagraphStyle("cifra", parent=base, fontName="Helvetica-Bold", fontSize=20, leading=23),
         "ver": ParagraphStyle("ver", parent=base, fontName="Helvetica-Bold", fontSize=17, leading=21),
         "titulo_c": ParagraphStyle("tc", parent=base, fontName="Helvetica-Bold", fontSize=9.5, leading=12),
@@ -160,7 +171,7 @@ def _tarjeta(contenido, fondo="#FFFFFF", borde=LINEA, ancho=ANCHO, padding=10, b
 
 
 def _titulo(texto, icono, est, ancla=None):
-    ic = _ico(icono, 13, AZUL)
+    ic = _ico(icono, 13, ICONO)
     p = Paragraph((f'<a name="{ancla}"/>' if ancla else "") + _esc(texto), est["h2"])
     t = Table([[ic or "", p]], colWidths=[0.6 * cm, ANCHO - 0.6 * cm])
     t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
@@ -263,7 +274,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
 
     # --- 1. Veredicto -------------------------------------------------------
     escudo = _ico(i_ver, 34, c_ver)
-    texto = [Paragraph('<font size="7.5" color="#64748B">VEREDICTO DE AUTENTICIDAD</font>', est["base"]),
+    texto = [Paragraph(f'<font size="7.5" color="{GRIS}">VEREDICTO DE AUTENTICIDAD</font>', est["base"]),
              Spacer(1, 3),
              Paragraph(f'<font color="{c_ver}">{_esc(ver)}</font>', est["ver"]),
              Spacer(1, 3), Paragraph(_esc(frase), est["base"])]
@@ -288,7 +299,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
                 Paragraph(nota, est["chico"])]
     ancho_c = (ANCHO - 3 * 8) / 4
     celdas = [
-        cifra("Candados técnicos", f"{aprobados}/{len(tecnicos)}", AZUL, "shield-check",
+        cifra("Candados técnicos", f"{aprobados}/{len(tecnicos)}", TINTA, "shield-check",
               "archivo, códigos y datos"),
         cifra("Fallas", n_fallas, ESTADO["FALLA"][0] if n_fallas else GRIS_CLARO, "circle-x",
               "indicios de alteración" if n_fallas else "ninguna"),
@@ -318,7 +329,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
                                          f'<font color="{ESTADO["AVISO"][0]}">{cuenta["AVISO"]} aviso(s)</font>'
                                          if cuenta["AVISO"] else "") if x) or \
             f'<font color="{ESTADO["OK"][0]}">todo en orden</font>'
-        filas.append([_ico(icono, 12, AZUL) or "",
+        filas.append([_ico(icono, 12, ICONO) or "",
                       Paragraph(f'<a href="#sec{sec}" color="{TINTA}"><b>{_esc(nombre)}</b></a>', est["base"]),
                       _barra(cuenta, 6.3 * cm),
                       Paragraph(f"<b>{ok}/{len(lista)}</b>", ParagraphStyle("r", parent=est["base"],
@@ -405,7 +416,7 @@ def generar(analisis, ruta_salida, fecha_texto=""):
             img = _qr_imagen(url)
             cuerpo = [Paragraph(f"<b>QR {i} · {'cédula' if i == 1 else 'sello'}</b>", est["titulo_c"]),
                       Paragraph(f"Compara: {que}.", est["chico"]), Spacer(1, 4),
-                      Paragraph(f'<a href="{_esc(url)}" color="#1D4ED8"><u>Abrir en siat.sat.gob.mx</u></a>',
+                      Paragraph(f'<a href="{_esc(url)}" color="{ENLACE}"><u>Abrir en siat.sat.gob.mx</u></a>',
                                 est["base"])]
             celda = Table([[img or "", cuerpo]], colWidths=[2.9 * cm, None])
             fondo, borde = "#FFFFFF", LINEA
@@ -459,23 +470,33 @@ def generar(analisis, ruta_salida, fecha_texto=""):
         an, al = letter
         primera = doc.page == 1
         alto_banda = 2.3 * cm if primera else 1.35 * cm
-        cv.setFillColor(colors.HexColor(AZUL))
-        cv.rect(0, al - alto_banda, an, alto_banda, fill=1, stroke=0)
-        cv.setFillColor(colors.HexColor(ROJO_MG))
-        cv.rect(0, al - alto_banda - 0.09 * cm, an, 0.09 * cm, fill=1, stroke=0)
-        cv.setFillColor(colors.white)
+        if BANDA:
+            cv.setFillColor(colors.HexColor(BANDA))
+            cv.rect(0, al - alto_banda, an, alto_banda, fill=1, stroke=0)
+            fuerte, suave = BANDA_TEXTO, BANDA_TEXTO_SUAVE
+        else:
+            fuerte, suave = TINTA, GRIS
+        if FILETE:
+            # Sin banda: filete grueso + uno delgado, como membrete de oficio.
+            y = al - alto_banda
+            cv.setStrokeColor(colors.HexColor(FILETE))
+            cv.setLineWidth(1.6)
+            cv.line(1.5 * cm, y, an - 1.5 * cm, y)
+            cv.setLineWidth(0.5)
+            cv.line(1.5 * cm, y - 0.09 * cm, an - 1.5 * cm, y - 0.09 * cm)
+        cv.setFillColor(colors.HexColor(fuerte))
         if primera:
             cv.setFont("Helvetica-Bold", 15)
             cv.drawString(1.5 * cm, al - 1.05 * cm, "Validación de Constancia de Situación Fiscal")
             cv.setFont("Helvetica", 8.5)
-            cv.setFillColor(colors.HexColor("#C7D2FE"))
+            cv.setFillColor(colors.HexColor(suave))
             cv.drawString(1.5 * cm, al - 1.6 * cm, f"Archivo: {analisis.archivo[:80]}")
             cv.drawString(1.5 * cm, al - 2.0 * cm, "Autoexpress Inbursa · MG Financial Services")
-            cv.setFillColor(colors.white)
+            cv.setFillColor(colors.HexColor(fuerte))
             cv.setFont("Helvetica-Bold", 9)
             cv.drawRightString(an - 1.5 * cm, al - 1.05 * cm, d.get("rfc") or "")
             cv.setFont("Helvetica", 8)
-            cv.setFillColor(colors.HexColor("#C7D2FE"))
+            cv.setFillColor(colors.HexColor(suave))
             cv.drawRightString(an - 1.5 * cm, al - 1.6 * cm, fecha_texto)
             cv.drawRightString(an - 1.5 * cm, al - 2.0 * cm, f"Folio {analisis.sha256[:10].upper()}")
         else:
