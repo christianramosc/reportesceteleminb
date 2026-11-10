@@ -38,7 +38,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
     generar_reporte_pdf(
         df, resumen, tabla_vendedor, tabla_categoria, "cierre",
         nombre_archivo=ruta_pdf,
-        recolectar_elementos=elementos_pdf, datos=datos,
+        recolectar_elementos=elementos_pdf, hoja=hoja, datos=datos,
     )
 
     ruta_docx = generar_docx_resumen(

@@ -22,10 +22,10 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
 from reportlab.lib import colors as rl_colors
 from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable, KeepTogether, CondPageBreak
+    SimpleDocTemplate, Table, TableStyle, Spacer, HRFlowable, KeepTogether, CondPageBreak
 )
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_LEFT, TA_CENTER
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
 from xml.sax.saxutils import escape as _xml_escape
 
 
@@ -44,28 +44,25 @@ from . import lateral as _lateral
 from . import folios as _folios
 from . import hallazgos as _h
 from .config import DatosReporte
+# Paragraph que tolera "&" y "<" en los nombres de la bitácora.
+from .pdf_util import Parrafo as Paragraph
+from .reporte_base import limpiar_datos as _limpiar_datos_base
 from .reporte_base import (  # paleta, fuentes, limpieza y gráficas compartidas
     COLOR_CATEGORIA,
-    COLUMNAS_ESPERADAS,
-    COLUMNAS_MONEDA,
-    COLUMNAS_PORCENTAJE,
     FUENTE_BOLD,
-    FUENTE_ITALICA,
     FUENTE_REGULAR,
     GRIS_LINEA,
-    GRIS_TEXTO_SEC,
     INBURSA_AZUL,
     MG_GRIS_CLARO,
     MG_GRIS_OSCURO,
-    MG_ROJO,
     MG_ROJO_OSCURO,
     ORDEN_CATEGORIAS,
     _MESES_ES,
     _color_texto_legible,
     _guardar_si_procede,
-    _limpiar_moneda,
-    _limpiar_porcentaje,
-    clasificar_status,
+    SIN_VENDEDOR,
+    crear_estilos,
+    exigir_solicitudes,
     grafica_gap_financiado_por_vendedor,
     grafica_gap_por_vendedor_total,
     grafica_modelos,
@@ -118,6 +115,7 @@ def cargar_multiples_archivos(rutas_locales, nombres_meses=None):
             if len(xls.sheet_names) > 1:
                 print(f"'{ruta}' tiene varias hojas: {xls.sheet_names}. Se usará '{hoja}'.")
             df_crudo = xls.parse(hoja)
+        exigir_solicitudes(df_crudo, ruta, hoja)
         mes = (nombres_meses[i].strip().upper() if nombres_meses
                else str(hoja).strip().upper())
         print(f"Archivo cargado: {ruta}  |  Mes: {mes}  |  Hoja: {hoja}  |  {len(df_crudo)} solicitudes")
@@ -132,43 +130,11 @@ def cargar_multiples_archivos(rutas_locales, nombres_meses=None):
 
 
 def limpiar_datos(df_original, mes=None):
-    df = df_original.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-
-    faltantes = [c for c in COLUMNAS_ESPERADAS if c not in df.columns]
-    if faltantes:
-        print(f"Aviso ({mes}): no se encontraron estas columnas esperadas: {faltantes}")
-
-    for col in COLUMNAS_MONEDA:
-        if col in df.columns:
-            df[col] = _limpiar_moneda(df[col])
-
-    for col in COLUMNAS_PORCENTAJE:
-        if col in df.columns:
-            df[col] = _limpiar_porcentaje(df[col])
-
-    if "STATUS" in df.columns:
-        df["STATUS"] = df["STATUS"].astype(str).str.strip().str.upper()
-        df["Categoria"] = df["STATUS"].apply(clasificar_status)
-        # Da de alta (con color y lugar en el orden) cualquier estatus de la
-        # bitácora que no esté en el catálogo.
-        _est.registrar_categorias(df["Categoria"].unique())
-
-    if "Nombre del Vendedor" in df.columns:
-        df["Nombre del Vendedor"] = df["Nombre del Vendedor"].astype(str).str.strip().str.title()
-
-    if "Marca" in df.columns:
-        df["Marca"] = df["Marca"].astype(str).str.strip().str.upper().replace("NAN", np.nan)
-
-    if "Vehículo" in df.columns:
-        df["Vehículo"] = df["Vehículo"].astype(str).str.strip().replace("None", np.nan)
-
-    if "¿Tiene GAP?" in df.columns:
-        df["¿Tiene GAP?"] = df["¿Tiene GAP?"].astype(str).str.strip().str.upper()
-
+    """La limpieza es la de reporte_base (la misma de los demás reportes);
+    aquí solo se agrega a qué mes pertenece cada fila."""
+    df = _limpiar_datos_base(df_original, aviso=mes or "")
     if mes is not None:
         df["Mes"] = mes
-
     return df
 
 
@@ -757,48 +723,22 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         tabla_comp, orden_meses, df_combinado)
 
     # --- Estilos (idénticos al avance preliminar) ---
-    styles = getSampleStyleSheet()
-    estilo_kicker_portada = ParagraphStyle(
-        "KickerPortada", parent=styles["Normal"], fontName=FUENTE_BOLD, fontSize=9.5,
-        textColor=rl_colors.HexColor(MG_ROJO), alignment=TA_LEFT, spaceAfter=6, leading=12)
-    estilo_titulo_portada = ParagraphStyle(
-        "TituloPortada", parent=styles["Title"], fontName=FUENTE_BOLD, fontSize=25,
-        textColor=rl_colors.HexColor(INBURSA_AZUL), alignment=TA_LEFT, spaceAfter=4, leading=29)
-    estilo_subtitulo_portada = ParagraphStyle(
-        "SubtituloPortada", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=12,
-        textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), alignment=TA_LEFT, spaceAfter=4)
-    estilo_meta_portada = ParagraphStyle(
-        "MetaPortada", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=9.5,
-        textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), alignment=TA_LEFT, leading=13)
-    estilo_h1 = ParagraphStyle(
-        "H1MG", parent=styles["Heading1"], fontName=FUENTE_BOLD, fontSize=15.5,
-        textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=16, spaceAfter=8)
-    estilo_h2 = ParagraphStyle(
-        "H2MG", parent=styles["Heading2"], fontName=FUENTE_BOLD, fontSize=12.5,
-        textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=18, spaceAfter=6)
-    estilo_cuerpo = ParagraphStyle(
-        "CuerpoMG", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=10,
-        textColor=rl_colors.HexColor(MG_GRIS_OSCURO), leading=15, alignment=TA_LEFT, spaceAfter=8)
+    _estilos = crear_estilos()
+    styles = _estilos["styles"]
+    estilo_kicker_portada = _estilos["kicker_portada"]
+    estilo_titulo_portada = _estilos["titulo_portada"]
+    estilo_subtitulo_portada = _estilos["subtitulo_portada"]
+    estilo_meta_portada = _estilos["meta_portada"]
+    estilo_h1 = _estilos["h1"]
+    estilo_h2 = _estilos["h2"]
+    estilo_cuerpo = _estilos["cuerpo"]
+    estilo_nota = _estilos["nota"]
+    estilo_encabezado_tabla = _estilos["encabezado_tabla"]
     # Tercer nivel: la sección de vendedores llegó a tener varias
     # subsecciones y con solo dos niveles se leían todas como iguales.
     estilo_h3 = ParagraphStyle(
         "H3MG", parent=styles["Heading3"], fontName=FUENTE_BOLD, fontSize=10.5,
         textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=8, spaceAfter=4)
-    estilo_nota = ParagraphStyle(
-        "NotaMG", parent=styles["Normal"], fontSize=8.5,
-        textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), leading=11, alignment=TA_LEFT,
-        spaceAfter=4, fontName=FUENTE_ITALICA)
-    estilo_kpi_valor = ParagraphStyle(
-        "KPIValor", parent=styles["Normal"], fontSize=20,
-        textColor=rl_colors.HexColor(MG_GRIS_OSCURO), alignment=TA_CENTER,
-        fontName=FUENTE_BOLD, leading=23)
-    estilo_kpi_label = ParagraphStyle(
-        "KPILabel", parent=styles["Normal"], fontName=FUENTE_BOLD, fontSize=7.8,
-        textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), alignment=TA_CENTER, leading=9.5)
-    estilo_encabezado_tabla = ParagraphStyle(
-        "EncabezadoTabla", parent=styles["Normal"], fontSize=8.3, leading=10,
-        textColor=rl_colors.HexColor(INBURSA_AZUL), fontName=FUENTE_BOLD, alignment=TA_CENTER)
-
     # Celda de tabla con texto que puede partirse en dos renglones. Las
     # celdas de texto plano nunca se parten: si no caben, se encimen con la
     # columna vecina (pasaba en "Folios que cruzaron de mes" al comparar
@@ -848,24 +788,6 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         tabla.setStyle(TableStyle(estilo))
         return tabla
 
-    def tarjeta_kpi(valor, etiqueta, color_acento):
-        estilo_valor_acento = estilo_kpi_valor.clone("KPIValorAcento" + etiqueta[:6], textColor=rl_colors.HexColor(INBURSA_AZUL))
-        t = Table(
-            [[""], [Paragraph(str(valor), estilo_valor_acento)], [Paragraph(str(etiqueta).upper(), estilo_kpi_label)]],
-            colWidths=[_pdf_util.ANCHO_KPI], rowHeights=[0.11 * cm, None, None]
-        )
-        t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.white),
-            ("BACKGROUND", (0, 1), (-1, -1), rl_colors.white),
-            ("TOPPADDING", (0, 1), (-1, 1), 10),
-            ("BOTTOMPADDING", (0, 1), (-1, 1), 1),
-            ("TOPPADDING", (0, 2), (-1, 2), 0),
-            ("BOTTOMPADDING", (0, 2), (-1, 2), 10),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ]))
-        return t
-
     # --- Folios que cruzan de mes ---
     # De aquí en adelante df_combinado tiene una fila por folio (su último
     # estatus, en su mes de captura). Todo lo "del periodo" y "por vendedor"
@@ -878,7 +800,10 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     # promedio simple de las tasas mensuales, sin ponderar por volumen.
     total_periodo = len(df_combinado)
     n_meses = len(orden_meses)
-    n_vendedores = int(df_combinado["Nombre del Vendedor"].nunique()) if "Nombre del Vendedor" in df_combinado.columns else 0
+    # Sin contar "Sin vendedor asignado", que no es una persona.
+    n_vendedores = (int(df_combinado.loc[df_combinado["Nombre del Vendedor"] != SIN_VENDEDOR,
+                                         "Nombre del Vendedor"].nunique())
+                    if "Nombre del Vendedor" in df_combinado.columns else 0)
 
     elementos = []
 
@@ -1359,7 +1284,11 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     # -------------------------------------------------------------
     doc = SimpleDocTemplate(
         nombre_archivo, pagesize=letter,
-        topMargin=_pdf_util.MARGEN_SUPERIOR, bottomMargin=_pdf_util.MARGEN_INFERIOR, leftMargin=_pdf_util.MARGEN, rightMargin=_pdf_util.MARGEN
+        topMargin=_pdf_util.MARGEN_SUPERIOR, bottomMargin=_pdf_util.MARGEN_INFERIOR, leftMargin=_pdf_util.MARGEN, rightMargin=_pdf_util.MARGEN,
+        # Lo que muestra el lector de PDF en la pestaña y en "Propiedades".
+        title=f"Reporte Comparativo Mensual — {datos.pdv} — {PERIODO_TXT}",
+        author=datos.analista,
+        subject=f"{datos.empresa} · Bitácora de solicitudes",
     )
     # `recolectar_elementos`: si el llamador pasa una lista, aquí se le
     # deja una copia de todos los flowables del PDF. Es lo que usa

@@ -1,6 +1,43 @@
 """Utilidades de maquetación compartidas por los cuatro reportes."""
 
-from reportlab.platypus import PageBreak, Spacer
+import re as _re
+
+from reportlab.platypus import CondPageBreak as _CondPageBreak, PageBreak, Paragraph as _ParrafoRL, Spacer
+
+# ===========================================================================
+#  Texto de la bitácora dentro de un párrafo
+# ===========================================================================
+# Un Paragraph de ReportLab lee su texto como marcado (<b>, <font>, &nbsp;).
+# Si un nombre de la bitácora trae "&" o "<" ("M&M Autos <Flotillas>"), lo
+# toma por marcado: salía "M&M; Autos" y se perdía lo que iba entre < >.
+# Escapar en cada lugar donde se arma una frase es fácil de olvidar, así que
+# se hace UNA vez, al crear el párrafo: se respetan las etiquetas que sí usa
+# el proyecto y se escapa todo lo demás.
+_ETIQUETA = (r"</?(?:b|i|u|br|font|a|super|sup|sub|strike|span|para|nobr)"
+             r"(?:\s[^<>]*)?/?>")
+_PAT_ETIQUETA = _re.compile(f"({_ETIQUETA})", _re.IGNORECASE)
+_PAT_AMP_SUELTO = _re.compile(r"&(?!(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);)")
+
+
+def marcado_seguro(texto):
+    """Escapa "&", "<" y ">" que NO son marcado, sin tocar las etiquetas ni
+    las entidades (&nbsp;, &amp;). Es idempotente."""
+    if not isinstance(texto, str) or not _re.search(r"[&<>]", texto):
+        return texto
+    partes = _PAT_ETIQUETA.split(texto)
+    for i in range(0, len(partes), 2):      # las impares son etiquetas
+        partes[i] = (_PAT_AMP_SUELTO.sub("&amp;", partes[i])
+                     .replace("<", "&lt;").replace(">", "&gt;"))
+    return "".join(partes)
+
+
+class Parrafo(_ParrafoRL):
+    """Paragraph que tolera "&", "<" y ">" en el texto. Los reportes lo
+    importan con el nombre Paragraph."""
+
+    def __init__(self, text, *args, **kwargs):
+        super().__init__(marcado_seguro(text), *args, **kwargs)
+
 
 
 def quitar_espacios_antes_de_salto(elementos):
@@ -25,13 +62,12 @@ def quitar_espacios_antes_de_salto(elementos):
     return limpio
 
 
-import re as _re
-
 from . import iconos as _iconos
 
 from reportlab.lib import colors as _col
 from reportlab.lib.pagesizes import letter as _letter
 from reportlab.lib.units import cm as _cm
+from reportlab.pdfgen.canvas import Canvas as _Lienzo
 
 # ===========================================================================
 #  Resaltado de cifras y estatus en el texto corrido
@@ -124,27 +160,6 @@ def repartir(primera, n_resto):
     """
     resto = (ANCHO_UTIL - primera) / max(n_resto, 1)
     return [primera] + [resto] * n_resto
-
-
-_HUECO_KPI = 0.3 * _cm
-ANCHO_KPI = (ANCHO_UTIL - 3 * _HUECO_KPI) / 4
-ANCHOS_KPIS = [ANCHO_KPI, _HUECO_KPI, ANCHO_KPI, _HUECO_KPI,
-               ANCHO_KPI, _HUECO_KPI, ANCHO_KPI]
-
-
-def estilo_fila_kpis():
-    """Franja de KPI: línea fina arriba, abajo y entre indicadores, en vez
-    de cuatro tarjetas con borde y barra de color."""
-    linea = _col.HexColor(LINEA)
-    return [
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LINEABOVE", (0, 0), (-1, 0), 0.6, linea),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, linea),
-        ("LINEBEFORE", (2, 0), (2, 0), 0.6, linea),
-        ("LINEBEFORE", (4, 0), (4, 0), 0.6, linea),
-        ("LINEBEFORE", (6, 0), (6, 0), 0.6, linea),
-    ]
 
 
 def estilo_tabla(n_filas, alinear_desde=1, compacta=False, fila_total=False,
@@ -264,8 +279,46 @@ def pintar_encabezado_pie(canvas, doc, empresa, subtitulo, fecha, analista,
     canvas.setFont(fuente_regular, 8)
     if analista:
         canvas.drawString(x_pie, 0.95 * _cm, f"Elaborado por {analista}")
-    canvas.drawRightString(ancho - MARGEN, 0.95 * _cm, f"Página {doc.page}")
+    if isinstance(canvas, LienzoNumerado):
+        # El total de páginas no se sabe todavía: el lienzo escribe
+        # "Página X de Y" al guardar, con esta misma letra.
+        canvas.fuente_pie = fuente_regular
+    else:
+        canvas.drawRightString(ancho - MARGEN, 0.95 * _cm, f"Página {doc.page}")
     canvas.restoreState()
+
+
+class LienzoNumerado(_Lienzo):
+    """Lienzo que escribe "Página X de Y" en el pie.
+
+    El total solo se conoce al terminar de maquetar, así que cada página se
+    guarda sin cerrar y el número se escribe al final, en save(). Estos
+    reportes no llevan enlaces internos ni marcadores, que son lo que esta
+    técnica rompe (por eso el de Validar CSF se arma en dos pasadas).
+    """
+
+    fuente_pie = "Helvetica"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._paginas = []
+
+    def showPage(self):
+        self._paginas.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        total = len(self._paginas)
+        for estado in self._paginas:
+            self.__dict__.update(estado)
+            self.saveState()
+            self.setFont(self.fuente_pie, 8)
+            self.setFillColor(_col.HexColor(GRIS_SEC))
+            self.drawRightString(_letter[0] - MARGEN, 0.95 * _cm,
+                                 f"Página {self._pageNumber} de {total}")
+            self.restoreState()
+            super().showPage()
+        super().save()
 
 
 def como_entrada(tabla_intro):
@@ -332,8 +385,10 @@ def _es_portada(doc):
 
 def _flowables_lateral(cifras, alto, ancho=ANCHO_LATERAL - 1.9 * _cm):
     """Las cifras clave, repartidas en todo el alto de la columna."""
-    from reportlab.platypus import Paragraph as _P, Spacer as _S
+    from reportlab.platypus import Spacer as _S
     from reportlab.lib.styles import ParagraphStyle as _PS
+    from reportlab.pdfbase.pdfmetrics import stringWidth as _ancho_de
+    _P = Parrafo
     titulo = _PS("LatTit", fontName="Helvetica-Bold", fontSize=8.5,
                  textColor=_col.HexColor("#E4002B"), leading=11)
     etiqueta = _PS("LatEtq", fontName="Helvetica-Bold", fontSize=7, leading=9,
@@ -341,6 +396,17 @@ def _flowables_lateral(cifras, alto, ancho=ANCHO_LATERAL - 1.9 * _cm):
     numero = _PS("LatNum", fontName="Times-Bold", fontSize=30, leading=33,
                  textColor=_col.HexColor(AZUL))
     alerta = numero.clone("LatNumAlerta", textColor=_col.HexColor("#E4002B"))
+
+    def _a_la_medida(valor, estilo):
+        """Encoge la letra de la cifra hasta que quepa en un renglón. A 30 pt
+        caben unos 7 caracteres: "$2.43 M" entraba, pero "$16.49 M" se partía
+        en dos renglones ("$16.49" / "M")."""
+        plano = _PAT_TAG.sub("", str(valor))
+        medida = _ancho_de(plano, estilo.fontName, estilo.fontSize)
+        if medida <= ancho:
+            return estilo
+        tam = max(16, estilo.fontSize * ancho / medida * 0.98)
+        return estilo.clone(f"{estilo.name}_{tam:.1f}", fontSize=tam, leading=tam * 1.1)
     nota = _PS("LatNota", fontName="Helvetica", fontSize=8, leading=10.5,
                textColor=_col.HexColor(GRIS_SEC))
     bloques = []
@@ -360,7 +426,8 @@ def _flowables_lateral(cifras, alto, ancho=ANCHO_LATERAL - 1.9 * _cm):
             encabezado = fila
         else:
             encabezado = _P(c["etiqueta"], etiqueta)
-        bloques.append([encabezado, _P(c["valor"], alerta if en_alerta else numero),
+        bloques.append([encabezado,
+                        _P(c["valor"], _a_la_medida(c["valor"], alerta if en_alerta else numero)),
                         _P(c.get("nota", ""), nota)])
 
     # El espacio entre cifras se calcula MIDIENDO la altura real de cada una.
@@ -429,6 +496,7 @@ def barra_seccion(texto, numero):
                    + estilo_t))
     # Nunca al pie de una página sin su contenido.
     t.keepWithNext = True
+    t._es_barra = True
     _recalcular_al_cambiar_ancho(t)
     return t
 
@@ -441,10 +509,11 @@ def _para_pdf(elementos):
     - Anchos de tabla fijos -> porcentajes: en la portada la columna
       principal es más angosta y la tabla debe caber igual.
     - Imágenes: se encogen si no caben en el espacio disponible.
+    - Títulos: ninguno queda solo al pie de una página (ver más abajo).
     """
     import re as _r
     from reportlab.platypus import (Paragraph as _P, Table as _T, KeepTogether as _K,
-                                    Image as _I, Spacer as _S)
+                                    Image as _I, Spacer as _S, HRFlowable as _HR)
     contador = [0]
 
     def _tabla(t):
@@ -468,7 +537,9 @@ def _para_pdf(elementos):
         if isinstance(f, _P) and f.style.name == "H2MG":
             contador[0] += 1
             texto = _r.sub(r"^\s*\d+\.\s*", "", f.text)
-            return [_S(1, 10), barra_seccion(texto, contador[0])]
+            aire = _S(1, 10)
+            aire.keepWithNext = True      # el espacio viaja con su barra
+            return [aire, barra_seccion(texto, contador[0])]
         if isinstance(f, _K):
             f._content = [x for y in f._content for x in _lista(_uno(y))]
         elif isinstance(f, _T):
@@ -481,14 +552,100 @@ def _para_pdf(elementos):
         return x if isinstance(x, list) else [x]
 
     salida = [x for f in elementos for x in _lista(_uno(f))]
-    # Si tras una barra viene un párrafo corto y luego una tabla o gráfica,
-    # el párrafo también se amarra: así no queda "04 Vendedores" + una línea
-    # al pie de la página con la tabla en la siguiente.
+
+    def _es_h1(f):
+        return isinstance(f, _P) and f.style.name == "H1MG"
+
+    def _tabla_alta(f):
+        """La tabla (suelta o sola dentro de un KeepTogether) si tiene tantos
+        renglones que conviene dejarla partirse entre páginas."""
+        if isinstance(f, _K) and len(f._content) == 1:
+            f = f._content[0]
+        if isinstance(f, _T) and len(f._cellvalues) > _RENGLONES_TABLA_ALTA:
+            return f
+        return None
+
+    # Títulos de capítulo (H1MG) y su raya: viajan con lo que sigue. Antes
+    # "Resumen Ejecutivo" se quedaba solo al pie de la portada, con media
+    # hoja en blanco, y "Reporte Detallado" a media página del Comparativo.
+    for i, f in enumerate(salida[:-1]):
+        if _es_h1(f):
+            f.keepWithNext = True
+            if isinstance(salida[i + 1], _HR):
+                salida[i + 1].keepWithNext = True
+
+    # Tras una barra, párrafo corto y luego tabla o gráfica: el párrafo
+    # también se amarra, para que no quede "04 Vendedores" + una línea al
+    # pie de la página con la tabla en la siguiente.
+    # Excepción: una tabla ALTA. Amarrada, no cabía en lo que quedaba de la
+    # hoja y se iba entera a la siguiente (con su barra y su párrafo),
+    # dejando el hueco. Ahora la tabla se parte y repite su encabezado, el
+    # párrafo puede continuar en la página siguiente, y solo se exige que
+    # bajo la barra quepan unos renglones de texto.
+    saltos = []
     for i in range(len(salida) - 2):
-        if getattr(salida[i], "keepWithNext", False) and isinstance(salida[i + 1], _P) \
-                and isinstance(salida[i + 2], (_T, _K, _I)):
-            salida[i + 1].keepWithNext = True
+        if not getattr(salida[i], "_es_barra", False) or not isinstance(salida[i + 1], _P):
+            continue
+        # Entre el párrafo y la tabla puede haber un espacio: se salta para
+        # ver qué viene (con él en medio, el párrafo no se amarraba y la
+        # tabla de vendedores se iba sola a la página siguiente).
+        k = i + 2
+        while k < len(salida) - 1 and type(salida[k]) is _S:
+            k += 1
+        siguiente = salida[k]
+        alta = _tabla_alta(siguiente)
+        if alta is not None:
+            salida[k] = alta              # fuera del KeepTogether: que se parta
+            salida[i].keepWithNext = False    # el párrafo ya no va amarrado entero
+            inicio = i - 1 if i >= 1 and isinstance(salida[i - 1], _S) else i
+            if inicio >= 2 and isinstance(salida[inicio - 1], _HR) and _es_h1(salida[inicio - 2]):
+                inicio -= 2
+            elif inicio >= 1 and _es_h1(salida[inicio - 1]):
+                inicio -= 1
+            saltos.append((inicio, _SaltoSiNoCabe(salida[inicio:i + 1], _ALTO_PRIMEROS_RENGLONES)))
+        elif isinstance(siguiente, (_T, _K, _I)):
+            for f in salida[i + 1:k]:     # el párrafo y los espacios intermedios
+                f.keepWithNext = True
+    for inicio, salto in reversed(saltos):
+        salida.insert(inicio, salto)
+
+    # Barra seguida directamente de una gráfica: la imagen (con fondo blanco)
+    # le mordía el borde inferior a la barra. Se separan unos puntos.
+    for i in range(len(salida) - 1, 0, -1):
+        if isinstance(salida[i], _I) and getattr(salida[i - 1], "_es_barra", False):
+            aire = _S(1, 5)
+            aire.keepWithNext = True
+            salida.insert(i, aire)
     return salida
+
+
+# Más renglones que estos y la tabla se deja partir entre páginas.
+_RENGLONES_TABLA_ALTA = 12
+# Lo mínimo que debe caber bajo una barra de sección: cuatro renglones de
+# texto de cuerpo (15 pt cada uno).
+_ALTO_PRIMEROS_RENGLONES = 60
+
+
+class _SaltoSiNoCabe(_CondPageBreak):
+    """Pasa a la página siguiente si en lo que queda de esta no caben las
+    piezas dadas más un espacio extra. Es un CondPageBreak cuya altura se
+    mide al maquetar (depende del ancho de la columna: la de la portada es
+    más angosta). Al inicio de una página no hace nada."""
+
+    def __init__(self, piezas, extra):
+        super().__init__(0)
+        self._piezas, self._extra = list(piezas), extra
+
+    def wrap(self, availWidth, availHeight):
+        marco = self._doctemplateAttr("frame")
+        if marco is None or getattr(marco, "_atTop", False):
+            return 0, 0
+        alto = self._extra
+        for f in self._piezas:
+            alto += f.wrapOn(getattr(self, "canv", None), availWidth, availHeight)[1]
+            alto += f.getSpaceBefore() + f.getSpaceAfter()
+        self.height = alto
+        return super().wrap(availWidth, availHeight)
 
 
 def construir_con_lateral(doc_simple, elementos, al_dibujar):
@@ -522,7 +679,8 @@ def construir_con_lateral(doc_simple, elementos, al_dibujar):
 
     doc = BaseDocTemplate(doc_simple.filename, pagesize=_letter,
                           title=getattr(doc_simple, "title", None) or "",
-                          author=getattr(doc_simple, "author", None) or "")
+                          author=getattr(doc_simple, "author", None) or "",
+                          subject=getattr(doc_simple, "subject", None) or "")
     doc.con_lateral = True
     doc.addPageTemplates([
         PageTemplate("portada", [lateral, principal], onPage=al_dibujar),
@@ -538,5 +696,5 @@ def construir_con_lateral(doc_simple, elementos, al_dibujar):
                  FrameBreak()]
                 if cifras else [FrameBreak()])
     historia += [NextPageTemplate("interior")] + _para_pdf(resto)
-    doc.build(historia)
+    doc.build(historia, canvasmaker=LienzoNumerado)
     return doc

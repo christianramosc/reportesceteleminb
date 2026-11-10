@@ -7,7 +7,7 @@ from herramientas import pdf_util
 TITULOS_ACTUALES = [
     "Comparativo Financiero por Categoría", "Comparativo con el Equipo", "Desempeño por Vendedor",
     "Distribución de Solicitudes por Estatus", "Distribución de tus Solicitudes por Estatus",
-    "Focos de atención", "Lectura del periodo", "Modelo más solicitado", "Modelos + Solicitados",
+    "Focos de atención", "Lectura del periodo", "Modelo más solicitado", "Modelos Más Solicitados",
     "Modelos de Vehículo Más Solicitados (Periodo)", "Monto Colocado por Vendedor",
     "Panorama Financiero por Mes", "Panorama del mes", "Panorama financiero", "Panorama general",
     "Seguro GAP", "Tasa de Conversión por Mes", "Tu posición en el equipo", "Tus Solicitudes del Mes",

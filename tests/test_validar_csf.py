@@ -534,3 +534,13 @@ def test_reporte_los_enlaces_llevan_a_su_seccion(tmp_path):
     assert sorted(destinos) == sorted(secciones.values())
     textos = [p.extract_text() or "" for p in r.pages]
     assert all(f"Página {i} de {len(r.pages)}" in t for i, t in enumerate(textos, 1))
+
+
+def test_reporte_sin_qr_dice_que_hacer(tmp_path):
+    """Sin QR leídos, "Valida en el portal del SAT" salía como una sección
+    vacía bajo la instrucción de escanear los QR."""
+    import pypdf
+    res = ejecutar([_fabricada(str(tmp_path / "0_x.pdf"))], carpeta_salida=str(tmp_path / "s"))
+    texto = " ".join(p.extract_text() for p in pypdf.PdfReader(res["archivos"][0]).pages)
+    assert "No se leyó ningún QR" in texto
+    assert "Escanea cada QR" not in texto

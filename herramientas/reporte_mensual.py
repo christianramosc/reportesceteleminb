@@ -18,11 +18,12 @@ las secciones.
 
 import os
 
+import pandas as pd
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    HRFlowable, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate,
+    HRFlowable, KeepTogether, PageBreak, SimpleDocTemplate,
     Spacer, Table, TableStyle,
 )
 
@@ -32,10 +33,13 @@ from . import fechas as _fechas   # hora de México, no la del servidor
 from . import lateral as _lateral
 from . import pdf_util as _pdf_util
 from .config import DatosReporte
+# Paragraph que tolera "&" y "<" en los nombres de la bitácora.
+from .pdf_util import Parrafo as Paragraph
 from .reporte_base import (
     GRIS_LINEA,
     MG_ROJO,
     clasificar_status,
+    contar_vendedores,
     contexto_de_corte,
     crear_estilos,
     crear_maquetadores,
@@ -123,7 +127,8 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
     financiados = resumen.get("financiados", 0)
     tiene_categoria = "financiados" in resumen
 
-    n_vendedores = int(tabla_vendedor.shape[0]) if tabla_vendedor is not None else 0
+    # Sin contar el renglón "Sin vendedor asignado", que no es una persona.
+    n_vendedores = contar_vendedores(tabla_vendedor)
 
     modelo_top = None
     modelo_top_val = 0
@@ -277,7 +282,7 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
             # Si un mismo estatus se capturó con varias palabras distintas,
             # se avisa: es señal de captura inconsistente en la bitácora.
             variantes = {}
-            for texto_crudo in resumen.get("desglose_status", {}).index:
+            for texto_crudo in resumen.get("desglose_status", pd.Series(dtype=int)).index:
                 variantes.setdefault(clasificar_status(texto_crudo), set()).add(texto_crudo)
             mezclados = {c: v for c, v in variantes.items() if len(v) > 1}
             if mezclados:
@@ -310,7 +315,15 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
         partes_financiero.append(
             f"El monto total a financiar de todas las solicitudes asciende a <b>${resumen['monto_total']:,.2f}</b>."
         )
-    if "monto_financiado" in resumen:
+    if "monto_financiado" in resumen and not financiados:
+        # Sin créditos financiados no hay monto ni ticket que reportar: antes
+        # decía "De ese total, $0.00 ya corresponden a crédito FINANCIADO".
+        partes_financiero.append(
+            "Todavía no hay ningún crédito <b>FINANCIADO</b> (dispersado) a la fecha de corte."
+            if es_avance else
+            "Ningún crédito quedó <b>FINANCIADO</b> (dispersado) en el periodo."
+        )
+    elif "monto_financiado" in resumen:
         # El avance resalta en negritas el monto y el ticket; el cierre no.
         if es_avance:
             monto_fin = f"<b> ${resumen['monto_financiado']:,.2f} </b> "
@@ -326,7 +339,7 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
             + (f", con un ticket promedio de {ticket_fin}por crédito"
                if "ticket_financiado" in resumen else "") + "."
         )
-    if "monto_aprobado" in resumen:
+    if resumen.get("monto_aprobado"):   # sin aprobados no se escribe "$0.00 están APROBADOS"
         partes_financiero.append(
             f"${resumen['monto_aprobado']:,.2f} están <b>APROBADOS</b> y en espera de dispersarse"
             + (f", con un ticket promedio de ${resumen['ticket_aprobado']:,.2f}"
@@ -385,7 +398,8 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
         # Antes este párrafo nombraba a los líderes en solicitudes, créditos,
         # monto y GAP: exactamente lo que la tabla de abajo muestra completo.
         # Además decía que alguien "destaca" con un solo GAP.
-        texto_vend = (f"Participan {n_vendedores} vendedores. La tabla muestra "
+        texto_vend = (f"{'Participa' if n_vendedores == 1 else 'Participan'} {n_vendedores} "
+                      f"{'vendedor' if n_vendedores == 1 else 'vendedores'}. La tabla muestra "
                       f"el detalle de cada uno.")
         elementos.append(Paragraph(_pdf_util.resaltar(texto_vend), estilo_cuerpo))
 
@@ -445,7 +459,8 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
             "estatus": "La primera gráfica cuenta las solicitudes de cada estatus; la dona muestra "
                        "esos mismos estatus como proporción del total e indica qué vendedores "
                        "aportan a cada uno.",
-            "vendedores": f"Se registran {n_vendedores} vendedores con solicitudes "
+            "vendedores": f"{'Se registra' if n_vendedores == 1 else 'Se registran'} {n_vendedores} "
+                          f"{'vendedor' if n_vendedores == 1 else 'vendedores'} con solicitudes "
                           f"{'a la fecha de corte' if es_avance else 'en el periodo'}. "
                           f"La tabla desglosa, para cada uno, cuántas solicitudes generó, en qué estatus "
                           f"{'quedaron' if es_avance else 'cerraron'} y su porcentaje de conversión a "
@@ -474,6 +489,13 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
         nombre_archivo, pagesize=letter,
         topMargin=_pdf_util.MARGEN_SUPERIOR, bottomMargin=_pdf_util.MARGEN_INFERIOR,
         leftMargin=_pdf_util.MARGEN, rightMargin=_pdf_util.MARGEN,
+        # Lo que muestra el lector de PDF en la pestaña y en "Propiedades".
+        # Vacíos, el archivo decía "untitled" y "anonymous".
+        title=(f"Avance Preliminar de Bitácora — {datos.pdv} — corte {FECHA_REPORTE}" if es_avance
+               else f"Resumen Mensual de Bitácora — {datos.pdv}"
+                    + (f" — {str(hoja).strip().title()}" if hoja else "")),
+        author=datos.analista,
+        subject=f"{datos.empresa} · Bitácora de solicitudes",
     )
     # Sin esto, un Spacer que no cabe al final de una página genera una
     # hoja en blanco antes del siguiente salto. Ver pdf_util.py.
