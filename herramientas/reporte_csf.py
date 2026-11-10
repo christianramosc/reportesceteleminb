@@ -443,11 +443,25 @@ def generar(analisis, ruta_salida, fecha_texto=""):
                              _tarjeta(t, fondo=FONDO, padding=10)]), Spacer(1, 12)]
 
     # --- 6. Validación en el SAT --------------------------------------------
-    sat = [CondPageBreak(7 * cm), _titulo("Valida en el portal del SAT", "qr-code", est), Spacer(1, 2),
-           Paragraph("Escanea cada QR con el celular o haz clic en el link y compara lo que muestra el "
-                     "SAT contra el documento.", est["chico"]), Spacer(1, 6)]
+    # Sin QR leídos no hay nada que escanear: la instrucción de "escanea cada
+    # QR" quedaba sobre una sección vacía. Se dice qué hacer en su lugar.
+    urls_qr = analisis.urls_qr[:2]
+    sat = [CondPageBreak(7 * cm if urls_qr else 3.5 * cm),
+           _titulo("Valida en el portal del SAT", "qr-code", est), Spacer(1, 2)]
+    if urls_qr:
+        sat += [Paragraph("Escanea cada QR con el celular o haz clic en el link y compara lo que muestra el "
+                          "SAT contra el documento.", est["chico"]), Spacer(1, 6)]
+    else:
+        sat += [Spacer(1, 4),
+                _tarjeta(Paragraph(f'<font color="{ESTADO["AVISO"][0]}"><b>No se leyó ningún QR en el '
+                                   'documento:</b></font> no hay enlace oficial con el que validarlo. '
+                                   'Pide al cliente el PDF original descargado del portal del SAT.',
+                                   est["base"]),
+                         fondo=ESTADO["AVISO"][1], borde=ESTADO["AVISO"][1], barra=ESTADO["AVISO"][0],
+                         padding=8),
+                Spacer(1, 8)]
     celdas = []
-    for i, url in enumerate(analisis.urls_qr[:2], 1):
+    for i, url in enumerate(urls_qr, 1):
         oficial = url.startswith("https://siat.sat.gob.mx/")
         que = ("nombre, RFC, CURP, situación, régimen y domicilio" if i == 1 else "fecha y RFC de la cadena original")
         if oficial:

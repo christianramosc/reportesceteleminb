@@ -109,11 +109,19 @@ def _moneda(valor):
     return f"${valor:,.0f}"
 
 
+# Nombre que reciben las solicitudes capturadas SIN vendedor. Antes esas
+# filas desaparecían de las tablas por vendedor sin avisar: la portada decía
+# 60 solicitudes y "TOTAL EQUIPO" sumaba 54. Ahora tienen su propio renglón
+# (lo pone reporte_base.limpiar_datos) y los totales cuadran.
+SIN_VENDEDOR = "Sin vendedor asignado"
+
+
 def _es_nombre_de_persona(nombre):
     """Un asesor se registra con nombre y apellido. Una sola palabra
     ("Casa", "Piso", "Gerencia") suele ser una captura que no corresponde a
-    una persona y distorsiona las comparaciones individuales."""
-    return len(str(nombre).split()) >= 2
+    una persona y distorsiona las comparaciones individuales. Las
+    solicitudes sin vendedor tampoco son una persona."""
+    return nombre != SIN_VENDEDOR and len(str(nombre).split()) >= 2
 
 
 def _detalle_abiertas(conteo, abiertas):
@@ -249,6 +257,14 @@ def _foco_datos(df, resumen=None):
         raros = df[COL_VEND].dropna()
         raros = raros[~raros.map(_es_nombre_de_persona)].value_counts()
         for nombre, n in raros.items():
+            if nombre == SIN_VENDEDOR:
+                focos.append(
+                    f"<b>Sin vendedor:</b> {_n(n, 'solicitud')} no "
+                    f"{'trae' if n == 1 else 'traen'} vendedor capturado en la "
+                    f"bitácora. {'Aparece' if n == 1 else 'Aparecen'} en las tablas "
+                    f"como “{SIN_VENDEDOR}” para que los totales cuadren; conviene "
+                    f"completar el dato.")
+                continue
             focos.append(
                 f"<b>Vendedor por revisar:</b> “{nombre}” aparece como vendedor "
                 f"({_n(n, 'solicitud')}) y no parece el nombre de un asesor. Si es "

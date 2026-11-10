@@ -63,39 +63,36 @@ from .config import DatosReporte
 # de montos y porcentajes: compartidos con los demás reportes.
 from .reporte_base import (
     COLOR_CATEGORIA,
-    COLUMNAS_ESPERADAS,
-    COLUMNAS_MONEDA,
-    COLUMNAS_PORCENTAJE,
     FUENTE_BOLD,
-    FUENTE_ITALICA,
     FUENTE_REGULAR,
     GRIS_LINEA,
-    GRIS_TEXTO_SEC,
-    INBURSA_AZUL,
     MG_GRIS_CLARO,
     MG_GRIS_OSCURO,
-    MG_ROJO,
     MG_ROJO_OSCURO,
     ORDEN_CATEGORIAS,
     _MESES_ES,
     _color_texto_legible,
     _gradiente,
     _guardar_si_procede,
-    _limpiar_moneda,
-    _limpiar_porcentaje,
+    SIN_VENDEDOR,
     _nombres_y,
-    clasificar_status,
+    crear_estilos,
+    exigir_solicitudes,
     imagen_ajustada,
+    limpiar_texto,
 )
+from .reporte_base import limpiar_datos as _limpiar_datos_base
+# Paragraph que tolera "&" y "<" en los nombres de la bitácora.
+from .pdf_util import Parrafo as Paragraph
 
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
 from reportlab.lib import colors as rl_colors
 from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, HRFlowable, KeepTogether, Flowable
+    SimpleDocTemplate, Table, TableStyle, Spacer, PageBreak, HRFlowable, KeepTogether, Flowable
 )
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
@@ -199,6 +196,7 @@ def cargar_archivo(ruta_local):
         if len(xls.sheet_names) > 1:
             print(f"El archivo tiene varias hojas: {xls.sheet_names}. Se usa la primera: '{hoja}'.")
         df = xls.parse(hoja)
+    exigir_solicitudes(df, ruta_local, hoja)
     print(f"Archivo cargado: {ruta_local}  |  Hoja: {hoja}  |  {len(df)} solicitudes\n")
     return df, ruta_local, hoja
 
@@ -209,76 +207,28 @@ def cargar_archivo(ruta_local):
 
 
 
-def _limpiar_texto(serie, modo=None):
-    """Normaliza una columna de texto: quita espacios repetidos y convierte
-    los 'nan'/'None'/'' que deja astype(str) en NaN reales (antes salían
-    impresos como 'Nan' dentro de las tablas del PDF)."""
-    limpia = (
-        serie.astype(str)
-             .str.replace(r"\s+", " ", regex=True)
-             .str.strip()
-    )
-    limpia = limpia.replace(
-        {"nan": np.nan, "NaN": np.nan, "NAN": np.nan, "None": np.nan,
-         "none": np.nan, "": np.nan, "-": np.nan, "NaT": np.nan}
-    )
-    if modo == "titulo":
-        limpia = limpia.str.title()
-    elif modo == "mayusculas":
-        limpia = limpia.str.upper()
-    return limpia
-
-
 def limpiar_datos(df_original):
-    df = df_original.copy()
-    df.columns = [str(c).strip() for c in df.columns]
+    """La limpieza es la de reporte_base (la misma de los demás reportes).
+    Aquí solo se agrega lo propio de un reporte individual: nombres de
+    cliente y folios listos para imprimirse, colores repartidos con todo el
+    equipo y fuera las filas sin vendedor (no hay a quién hacerle el PDF)."""
+    df = _limpiar_datos_base(df_original)
 
-    faltantes = [c for c in COLUMNAS_ESPERADAS if c not in df.columns]
-    if faltantes:
-        print(f"Aviso: no se encontraron estas columnas esperadas: {faltantes}")
-        print("El script seguirá, pero los análisis que dependan de ellas se omitirán.\n")
-
-    for col in COLUMNAS_MONEDA:
-        if col in df.columns:
-            df[col] = _limpiar_moneda(df[col])
-
-    for col in COLUMNAS_PORCENTAJE:
-        if col in df.columns:
-            df[col] = _limpiar_porcentaje(df[col])
-
-    if "STATUS" in df.columns:
-        df["STATUS"] = df["STATUS"].astype(str).str.strip().str.upper()
-        df["Categoria"] = df["STATUS"].apply(clasificar_status)
-        _est.registrar_categorias(df["Categoria"].unique())
+    if "Categoria" in df.columns:
         # Los colores se reparten con TODO el equipo, no por vendedor: así
         # un estatus tiene el mismo color en los PDFs de todos los asesores.
         _est.asignar_colores(df["Categoria"])
 
-    if "Nombre del Vendedor" in df.columns:
-        df["Nombre del Vendedor"] = _limpiar_texto(df["Nombre del Vendedor"], modo="titulo")
-
     if "Nombre Completo" in df.columns:
-        df["Nombre Completo"] = _limpiar_texto(df["Nombre Completo"], modo="titulo")
-
-    if "Marca" in df.columns:
-        df["Marca"] = _limpiar_texto(df["Marca"], modo="mayusculas")
-
-    if "Vehículo" in df.columns:
-        df["Vehículo"] = _limpiar_texto(df["Vehículo"])
+        df["Nombre Completo"] = limpiar_texto(df["Nombre Completo"], modo="titulo")
 
     if "Folio CCK" in df.columns:
-        df["Folio CCK"] = _limpiar_texto(df["Folio CCK"])
-
-    if "¿Tiene GAP?" in df.columns:
-        df["¿Tiene GAP?"] = (
-            _limpiar_texto(df["¿Tiene GAP?"], modo="mayusculas")
-            .replace({"SÍ": "SI", "S": "SI", "TRUE": "SI", "X": "SI", "N": "NO", "FALSE": "NO"})
-        )
+        df["Folio CCK"] = limpiar_texto(df["Folio CCK"])
 
     # Filas completamente vacías (renglones sueltos al final de la bitácora)
     df = df.dropna(how="all")
     if "Nombre del Vendedor" in df.columns:
-        df = df[df["Nombre del Vendedor"].notna()]
+        df = df[df["Nombre del Vendedor"] != SIN_VENDEDOR]
 
     return df.reset_index(drop=True)
 
@@ -702,45 +652,23 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     # -------------------------------------------------------------
     # Estilos (misma identidad visual que el Avance Preliminar)
     # -------------------------------------------------------------
-    styles = getSampleStyleSheet()
-    estilo_kicker_portada = ParagraphStyle(
-        "KickerPortada", parent=styles["Normal"], fontName=FUENTE_BOLD, fontSize=9.5,
-        textColor=rl_colors.HexColor(MG_ROJO), alignment=TA_LEFT, spaceAfter=6, leading=12)
-    estilo_titulo_portada = ParagraphStyle(
-        "TituloPortada", parent=styles["Title"], fontName=FUENTE_BOLD, fontSize=22,
-        textColor=rl_colors.HexColor(INBURSA_AZUL), alignment=TA_LEFT, spaceAfter=2, leading=26)
+    _estilos = crear_estilos()
+    styles = _estilos["styles"]
+    estilo_kicker_portada = _estilos["kicker_portada"]
+    # El título es más largo que el de los otros reportes y lleva debajo el
+    # nombre del asesor: va un poco más chico.
+    estilo_titulo_portada = _estilos["titulo_portada"].clone(
+        "TituloPortada", fontSize=22, leading=26, spaceAfter=2)
     estilo_nombre_portada = ParagraphStyle(
         "NombrePortada", parent=styles["Title"], fontName=FUENTE_BOLD, fontSize=16,
         textColor=rl_colors.HexColor(MG_GRIS_OSCURO), alignment=TA_LEFT, spaceAfter=4, leading=20)
-    estilo_subtitulo_portada = ParagraphStyle(
-        "SubtituloPortada", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=12,
-        textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), alignment=TA_LEFT, spaceAfter=4)
-    estilo_meta_portada = ParagraphStyle(
-        "MetaPortada", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=9.5,
-        textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), alignment=TA_LEFT, leading=13)
-    estilo_h1 = ParagraphStyle(
-        "H1MG", parent=styles["Heading1"], fontName=FUENTE_BOLD, fontSize=15.5,
-        textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=16, spaceAfter=8)
-    estilo_h2 = ParagraphStyle(
-        "H2MG", parent=styles["Heading2"], fontName=FUENTE_BOLD, fontSize=12.5,
-        textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=18, spaceAfter=6)
-    estilo_cuerpo = ParagraphStyle(
-        "CuerpoMG", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=10,
-        textColor=rl_colors.HexColor(MG_GRIS_OSCURO), leading=15, alignment=TA_LEFT, spaceAfter=8)
-    estilo_nota = ParagraphStyle(
-        "NotaMG", parent=styles["Normal"], fontSize=8.5,
-        textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), leading=11, alignment=TA_LEFT,
-        spaceAfter=4, fontName=FUENTE_ITALICA)
-    estilo_kpi_valor = ParagraphStyle(
-        "KPIValor", parent=styles["Normal"], fontSize=20,
-        textColor=rl_colors.HexColor(MG_GRIS_OSCURO), alignment=TA_CENTER,
-        fontName=FUENTE_BOLD, leading=23)
-    estilo_kpi_label = ParagraphStyle(
-        "KPILabel", parent=styles["Normal"], fontName=FUENTE_BOLD, fontSize=7.8,
-        textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), alignment=TA_CENTER, leading=9.5)
-    estilo_encabezado_tabla = ParagraphStyle(
-        "EncabezadoTabla", parent=styles["Normal"], fontSize=8.3, leading=10,
-        textColor=rl_colors.HexColor(INBURSA_AZUL), fontName=FUENTE_BOLD, alignment=TA_CENTER)
+    estilo_subtitulo_portada = _estilos["subtitulo_portada"]
+    estilo_meta_portada = _estilos["meta_portada"]
+    estilo_h1 = _estilos["h1"]
+    estilo_h2 = _estilos["h2"]
+    estilo_cuerpo = _estilos["cuerpo"]
+    estilo_nota = _estilos["nota"]
+    estilo_encabezado_tabla = _estilos["encabezado_tabla"]
     # Estilo base de las celdas del cuerpo: `splitLongWords` + `hyphenationLang`
     # apagado evita cortes raros, y el Paragraph garantiza el salto de línea.
     estilo_celda_base = ParagraphStyle(
@@ -776,9 +704,8 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1,
                         alineaciones=None, tam_fuente=8.2, fila_total=False,
                         ajustar_al_contenido=True, ancho_total=None):
-        """Tabla 'corporativa moderna': encabezado azul Inbursa, sin líneas
-        verticales (solo reglas horizontales finas), zebrado casi blanco y
-        un filete rojo MG bajo el encabezado como acento.
+        """Tabla de datos: encabezado claro con texto azul Inbursa, sin
+        líneas verticales ni zebrado (formato de pdf_util.estilo_tabla).
 
         TODAS las celdas se envuelven en Paragraph, de modo que el texto
         largo se acomoda en varias líneas dentro de su propia columna en
@@ -814,26 +741,6 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
             fuente_bold=FUENTE_BOLD, color_texto=MG_GRIS_OSCURO)
         tabla.setStyle(TableStyle(estilo))
         return tabla
-
-    def tarjeta_kpi(valor, etiqueta, color_acento):
-        """Tarjeta KPI 'plana' corporativa: fondo blanco, barra de acento
-        delgada arriba y el número protagonizando en el color de acento."""
-        estilo_valor_acento = estilo_kpi_valor.clone("KPIValorAcento", textColor=rl_colors.HexColor(INBURSA_AZUL))
-        t = Table(
-            [[""], [Paragraph(str(valor), estilo_valor_acento)], [Paragraph(str(etiqueta).upper(), estilo_kpi_label)]],
-            colWidths=[_pdf_util.ANCHO_KPI], rowHeights=[0.11 * cm, None, None]
-        )
-        t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.white),
-            ("BACKGROUND", (0, 1), (-1, -1), rl_colors.white),
-            ("TOPPADDING", (0, 1), (-1, 1), 10),
-            ("BOTTOMPADDING", (0, 1), (-1, 1), 1),
-            ("TOPPADDING", (0, 2), (-1, 2), 0),
-            ("BOTTOMPADDING", (0, 2), (-1, 2), 10),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ]))
-        return t
 
     def pct_de(n):
         return (n / total_v * 100) if total_v else 0
@@ -967,7 +874,7 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     elementos.append(Spacer(1, 0.3 * cm))
 
     if resumen_v.get("modelo_top"):
-        elementos.append(Paragraph("Modelo + Solicitado", estilo_h2))
+        elementos.append(Paragraph("Modelo más solicitado", estilo_h2))
         elementos.append(Paragraph(
             f"Tu modelo con más solicitudes en el mes fue <b>{resumen_v['modelo_top']}</b>, "
             f"con {resumen_v['modelo_top_val']} solicitud{'es' if resumen_v['modelo_top_val'] != 1 else ''}.",
@@ -1113,9 +1020,9 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     )))
     elementos.append(Spacer(1, 0.4 * cm))
 
-    # --- 4. Modelos + Solicitados ---
+    # --- 4. Modelos más solicitados ---
     if "modelos" in rutas_graficas:
-        elementos.append(Paragraph("4. Modelos + Solicitados", estilo_h2))
+        elementos.append(Paragraph("4. Modelos Más Solicitados", estilo_h2))
         elementos.append(imagen_ajustada(rutas_graficas["modelos"], ancho_cm=15, alto_max_cm=10))
         elementos.append(Spacer(1, 0.4 * cm))
 

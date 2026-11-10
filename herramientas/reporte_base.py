@@ -56,7 +56,7 @@ from reportlab.lib.units import cm
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
-    Table, TableStyle, Paragraph, Spacer, Image,
+    Table, TableStyle, Spacer, Image,
     HRFlowable
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -139,6 +139,10 @@ from . import estatus as _est
 from . import metricas as _metricas
 from . import hallazgos as _h
 from . import pdf_util as _pdf_util
+from . import nombres_archivo as _nombres
+from .conclusiones import SIN_VENDEDOR
+# Paragraph que tolera "&" y "<" en los nombres de la bitácora.
+from .pdf_util import Parrafo as Paragraph
 
 ORDEN_CATEGORIAS = _est.ORDEN_CATEGORIAS
 COLOR_CATEGORIA = _est.COLOR_CATEGORIA
@@ -148,6 +152,8 @@ _MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
 
 
 __all__ = [
+    "SIN_VENDEDOR", "contar_vendedores", "exigir_solicitudes",
+    "limpiar_texto", "normalizar_gap",
     "filas_tabla_vendedor", "recortar_nombre",
     "secciones_detalladas",
     "crear_estilos",
@@ -370,8 +376,24 @@ def cargar_archivo(ruta_local):
         if len(xls.sheet_names) > 1:
             print(f"El archivo tiene varias hojas: {xls.sheet_names}. Se usa la primera: '{hoja}'.")
         df = xls.parse(hoja)
+    exigir_solicitudes(df, ruta_local, hoja)
     print(f"Archivo cargado: {ruta_local}  |  Hoja: {hoja}  |  {len(df)} solicitudes\n")
     return df
+
+
+def exigir_solicitudes(df, ruta, hoja):
+    """Detiene el reporte con un mensaje claro si la hoja no trae renglones.
+
+    Sin esto el error salía mucho más adelante, al dibujar la primera
+    gráfica, y decía "max() iterable argument is empty": nada que le sirva
+    a quien subió el archivo.
+    """
+    if df.dropna(how="all").empty:
+        raise ValueError(
+            f"El archivo '{_nombres.subido(ruta)}' no trae ninguna solicitud "
+            f"en su primera hoja ('{hoja}'). Revisa que sea la bitácora del mes y "
+            f"que los datos estén en la primera hoja."
+        )
 
 
 # =======================================================================
@@ -409,13 +431,69 @@ def clasificar_status(status):
     """
     return _est.clasificar_status(status)
 
-def limpiar_datos(df_original):
+def limpiar_texto(serie, modo=None):
+    """Normaliza una columna de texto: quita espacios repetidos y convierte
+    en NaN reales los 'nan', 'None', '' y '-' que deja astype(str) (si no,
+    salían impresos como 'Nan' en las tablas del PDF).
+
+    modo: "titulo" (Ana Ruiz) o "mayusculas" (MG).
+    """
+    limpia = (
+        serie.astype(str)
+             .str.replace(r"\s+", " ", regex=True)
+             .str.strip()
+    )
+    limpia = limpia.replace(
+        {"nan": np.nan, "NaN": np.nan, "NAN": np.nan, "None": np.nan,
+         "none": np.nan, "": np.nan, "-": np.nan, "NaT": np.nan}
+    )
+    if modo == "titulo":
+        limpia = limpia.str.title()
+    elif modo == "mayusculas":
+        limpia = limpia.str.upper()
+    return limpia
+
+
+_GAP_EQUIVALENTES = {"SÍ": "SI", "S": "SI", "TRUE": "SI", "X": "SI", "1": "SI",
+                     "N": "NO", "FALSE": "NO", "0": "NO"}
+
+
+def normalizar_gap(serie):
+    """Deja la columna '¿Tiene GAP?' en SI / NO.
+
+    Todo el proyecto cuenta el GAP comparando contra "SI". Una bitácora
+    capturada como "Sí" (con acento) se contaba como SIN GAP en el Avance,
+    el Resumen y el Comparativo: la portada marcaba 0% de GAP en rojo. Solo
+    el Resumen por Vendedor lo corregía, con su propia copia de la limpieza.
+    """
+    return limpiar_texto(serie, modo="mayusculas").replace(_GAP_EQUIVALENTES)
+
+
+def contar_vendedores(tabla_vendedor):
+    """Cuántos vendedores hay en la tabla, sin contar el renglón de las
+    solicitudes que no traen vendedor."""
+    if tabla_vendedor is None:
+        return 0
+    return int(sum(1 for v in tabla_vendedor.index if v != SIN_VENDEDOR))
+
+
+def limpiar_datos(df_original, aviso=""):
+    """Limpieza de la bitácora, compartida por TODOS los reportes.
+
+    El Comparativo y el Resumen por Vendedor tenían cada uno su copia, y se
+    fueron separando (ver normalizar_gap). Ahora llaman a esta y solo
+    agregan lo que les es propio.
+
+    aviso: texto que identifica el archivo en los avisos (el Comparativo
+        pasa el mes).
+    """
     df = df_original.copy()
     df.columns = [str(c).strip() for c in df.columns]
+    etiqueta_aviso = f"Aviso ({aviso})" if aviso else "Aviso"
 
     faltantes = [c for c in COLUMNAS_ESPERADAS if c not in df.columns]
     if faltantes:
-        print(f"Aviso: no se encontraron estas columnas esperadas: {faltantes}")
+        print(f"{etiqueta_aviso}: no se encontraron estas columnas esperadas: {faltantes}")
         print("El script seguirá, pero los análisis que dependan de ellas se omitirán.\n")
 
     for col in COLUMNAS_MONEDA:
@@ -431,7 +509,8 @@ def limpiar_datos(df_original):
             # de texto "14.99%". El script ya las corrige automáticamente,
             # pero conviene saber cuáles filas venían así en el archivo fuente.
             es_formato_distinto = crudo.apply(
-                lambda v: not isinstance(v, str) and pd.notna(v) and float(v) <= 1
+                lambda v: isinstance(v, (int, float, np.number))
+                and not isinstance(v, bool) and pd.notna(v) and float(v) <= 1
             )
             if es_formato_distinto.any():
                 idx = crudo[es_formato_distinto].index
@@ -439,7 +518,7 @@ def limpiar_datos(df_original):
                     df.loc[idx, "Folio CCK"].tolist() if "Folio CCK" in df.columns else list(idx)
                 )
                 print(
-                    f"Aviso: {len(folios)} fila(s) en '{col}' tenían formato de celda "
+                    f"{etiqueta_aviso}: {len(folios)} fila(s) en '{col}' tenían formato de celda "
                     f"distinto (número en vez de texto, ej. 0.1499 en vez de \"14.99%\") "
                     f"y se corrigieron automáticamente. Folios: {folios}"
                 )
@@ -453,15 +532,17 @@ def limpiar_datos(df_original):
         _est.registrar_categorias(df["Categoria"].unique())
 
     if "Nombre del Vendedor" in df.columns:
+        # Las solicitudes sin vendedor conservan un renglón propio en vez de
+        # desaparecer de las tablas (ver conclusiones.SIN_VENDEDOR).
         df["Nombre del Vendedor"] = (
-            df["Nombre del Vendedor"].astype(str).str.strip().str.title()
+            limpiar_texto(df["Nombre del Vendedor"], modo="titulo").fillna(SIN_VENDEDOR)
         )
 
     if "Marca" in df.columns:
-        df["Marca"] = df["Marca"].astype(str).str.strip().str.upper().replace("NAN", np.nan)
+        df["Marca"] = limpiar_texto(df["Marca"], modo="mayusculas")
 
     if "Vehículo" in df.columns:
-        df["Vehículo"] = df["Vehículo"].astype(str).str.strip().replace("None", np.nan)
+        df["Vehículo"] = limpiar_texto(df["Vehículo"])
 
     if "Fecha de Nacimiento" in df.columns:
         df["Fecha de Nacimiento"] = pd.to_datetime(
@@ -471,7 +552,7 @@ def limpiar_datos(df_original):
         df["Edad"] = ((hoy - df["Fecha de Nacimiento"]).dt.days // 365.25)
 
     if "¿Tiene GAP?" in df.columns:
-        df["¿Tiene GAP?"] = df["¿Tiene GAP?"].astype(str).str.strip().str.upper()
+        df["¿Tiene GAP?"] = normalizar_gap(df["¿Tiene GAP?"])
 
     return df
 
@@ -1012,8 +1093,10 @@ def grafica_monto_por_vendedor(df, guardar_como=None):
     _h.titular(ax, _h.monto_top_vendedor(pd.Series(valores_financiado, index=vendedores)),
                "Monto aprobado y financiado de cada vendedor" + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Monto a financiar ($ MXN)")
-    ax.legend(loc="lower right", frameon=False)
     plt.tight_layout()
+    # Debajo del eje, no en la esquina inferior derecha: ahí caía encima de
+    # la etiqueta de la barra más baja ("15 de 15 (100%)" quedaba tapada).
+    _h.leyenda_bajo_eje(ax, ncol=2)
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
     return guardar_como
@@ -1029,7 +1112,6 @@ def grafica_modelos(df, guardar_como=None, sufijo=""):
         return None
 
     TOP_N = 10
-    recortado = len(conteo_completo) > TOP_N
     conteo = conteo_completo.head(TOP_N).sort_values(ascending=True)
 
     fig, ax = plt.subplots(figsize=(8, max(4, len(conteo) * 0.4)))
@@ -1039,9 +1121,6 @@ def grafica_modelos(df, guardar_como=None, sufijo=""):
     for i, valor in enumerate(conteo.values):
         ax.text(valor + max(conteo.values) * 0.02, i, str(valor), va="center", fontsize=9)
 
-    titulo = "Modelos más solicitados"
-    if recortado:
-        titulo += f" (top {TOP_N})"
     _h.titular(ax, _h.modelo_lider(conteo_completo),
                f"Modelos con más solicitudes{sufijo} (top {min(TOP_N, len(conteo_completo))})")
     ax.set_xlabel("Número de solicitudes")
@@ -1133,8 +1212,10 @@ def grafica_gap_por_vendedor_total(df, guardar_como=None):
 
     _h.titular(ax, _h.cobertura_gap(total_equipo, gap_equipo), "Solicitudes con GAP frente al total de cada vendedor" + (" · sin capturas genéricas" if excluidos else ""))
     ax.set_xlabel("Número de solicitudes")
-    ax.legend(loc="lower right", frameon=False)
     plt.tight_layout()
+    # Debajo del eje, no en la esquina inferior derecha: ahí caía encima de
+    # la etiqueta de la barra más baja ("15 de 15 (100%)" quedaba tapada).
+    _h.leyenda_bajo_eje(ax, ncol=2)
     _guardar_si_procede(fig, guardar_como)
     plt.close(fig)
     return guardar_como
@@ -1324,7 +1405,10 @@ def crear_estilos():
         textColor=rl_colors.HexColor(INBURSA_AZUL), spaceBefore=18, spaceAfter=6)
     estilo_cuerpo = ParagraphStyle(
         "CuerpoMG", parent=styles["Normal"], fontName=FUENTE_REGULAR, fontSize=10,
-        textColor=rl_colors.HexColor(MG_GRIS_OSCURO), leading=15, alignment=TA_LEFT, spaceAfter=8)
+        textColor=rl_colors.HexColor(MG_GRIS_OSCURO), leading=15, alignment=TA_LEFT, spaceAfter=8,
+        # Ningún párrafo deja su último renglón solo en la página siguiente
+        # (llegó a salir una hoja con un "(10)." y nada más).
+        allowWidows=0, allowOrphans=0)
     estilo_nota = ParagraphStyle(
         "NotaMG", parent=styles["Normal"], fontSize=8.5,
         textColor=rl_colors.HexColor(GRIS_TEXTO_SEC), leading=11, alignment=TA_LEFT,
@@ -1363,8 +1447,8 @@ def crear_estilos():
 
 
 def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
-    """Encabezado/pie, tablas y tarjetas KPI, ya atados a los estilos y a
-    los datos del PDV.
+    """Encabezado/pie y tablas, ya atados a los estilos y a los datos
+    del PDV.
 
     `subtitulo`, `empresa` y `analista` van por parámetro (no como
     constantes del módulo) porque la app los cambia por punto de venta
@@ -1379,10 +1463,9 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
 
     def tabla_estilo_mg(data, col_widths=None, alinear_derecha_desde=1,
                         compacta=False, fila_total=False):
-        """Tabla 'corporativa moderna': encabezado azul Inbursa, sin líneas
-        verticales (solo reglas horizontales finas entre filas), zebrado en
-        gris casi blanco y un filete rojo MG bajo el encabezado como único
-        acento de color fuerte.
+        """Tabla de datos del reporte: encabezado claro con texto azul
+        Inbursa, sin líneas verticales ni zebrado, solo reglas horizontales
+        finas entre filas (el formato vive en pdf_util.estilo_tabla).
 
         compacta=True baja el tamaño de letra y los márgenes internos: se usa
         cuando la tabla tiene muchas columnas (por ejemplo, cuando el mes trae
@@ -1390,9 +1473,8 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
         media palabra.
 
         fila_total=True trata el último renglón como el resumen de la tabla:
-        lo separa con un filete rojo, le pone fondo propio, negritas y algo
-        más de aire. Es el renglón que más se consulta y con el zebrado
-        normal se perdía entre los demás.
+        lo separa con un filete azul, le pone fondo propio, negritas y algo
+        más de aire. Es el renglón que más se consulta.
         """
         # Entre más columnas, más chico el encabezado, para que etiquetas
         # como "Financiado" o "Rechazado" quepan en una sola línea.
@@ -1422,31 +1504,9 @@ def crear_maquetadores(e, subtitulo, empresa, analista, fecha):
         tabla.setStyle(TableStyle(estilo))
         return tabla
 
-    def tarjeta_kpi(valor, etiqueta, color_acento):
-        """Tarjeta KPI 'plana' corporativa: fondo blanco, barra de acento
-        delgada arriba (en vez del bloque de color sólido anterior) y el
-        número protagonizando en el color de acento, con borde muy sutil."""
-        estilo_valor_acento = e["kpi_valor"].clone("KPIValorAcento", textColor=rl_colors.HexColor(INBURSA_AZUL))
-        t = Table(
-            [[""], [Paragraph(str(valor), estilo_valor_acento)], [Paragraph(str(etiqueta).upper(), e["kpi_label"])]],
-            colWidths=[_pdf_util.ANCHO_KPI], rowHeights=[0.11 * cm, None, None]
-        )
-        t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.white),
-            ("BACKGROUND", (0, 1), (-1, -1), rl_colors.white),
-            ("TOPPADDING", (0, 1), (-1, 1), 10),
-            ("BOTTOMPADDING", (0, 1), (-1, 1), 1),
-            ("TOPPADDING", (0, 2), (-1, 2), 0),
-            ("BOTTOMPADDING", (0, 2), (-1, 2), 10),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ]))
-        return t
-
     return {
         "encabezado_pie_pagina": encabezado_pie_pagina,
         "tabla_estilo_mg": tabla_estilo_mg,
-        "tarjeta_kpi": tarjeta_kpi,
     }
 
 
