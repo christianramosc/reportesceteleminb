@@ -13,12 +13,28 @@ from .registro import Herramienta
 from . import nombres_archivo as _nombres
 
 
+def _mes_anterior(rutas_anteriores):
+    """(bitácora limpia, nombre del mes) del archivo opcional del mes
+    anterior, o (None, "") si no se subió."""
+    if not rutas_anteriores:
+        return None, ""
+    ruta = rutas_anteriores[0]
+    with pd.ExcelFile(ruta) as xls:
+        hoja = xls.sheet_names[0]
+    print(f"Mes anterior para comparar: {_nombres.subido(ruta)} (hoja '{hoja}')")
+    return _base.limpiar_datos(_base.cargar_archivo(ruta_local=ruta)), str(hoja).strip().title()
+
+
 def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
-             nombre_analista=None, **_opciones):
+             nombre_analista=None, rutas_anteriores=None, **_opciones):
     datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista)
     nombre_pdv, nombre_analista = datos.pdv, datos.analista
 
     os.makedirs(carpeta_salida, exist_ok=True)
+
+    # El mes anterior se limpia ANTES que el actual: la limpieza reparte los
+    # colores de estatus, y deben quedar los de la bitácora del reporte.
+    df_anterior, mes_anterior = _mes_anterior(rutas_anteriores)
 
     df_crudo = _base.cargar_archivo(ruta_local=rutas_archivos[0])
     df = _base.limpiar_datos(df_crudo)
@@ -39,6 +55,7 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
         df, resumen, tabla_vendedor, tabla_categoria, "cierre",
         nombre_archivo=ruta_pdf,
         recolectar_elementos=elementos_pdf, hoja=hoja, datos=datos,
+        df_anterior=df_anterior, mes_anterior=mes_anterior,
     )
 
     ruta_docx = generar_docx_resumen(
@@ -70,7 +87,9 @@ HERRAMIENTA = Herramienta(
     descripcion=(
         "Sube el Excel de la bitácora del mes ya cerrado y obtén el PDF de "
         "resumen mensual (cierre de mes), un Word editable con el mismo "
-        "contenido y una ficha de una página (imagen) para compartir por WhatsApp."
+        "contenido y una ficha de una página (imagen) para compartir por WhatsApp. "
+        "Si además subes la bitácora del mes anterior, el reporte muestra cuánto "
+        "cambió cada indicador."
     ),
     multiple_archivos=False,
     tipos_permitidos=["xlsx"],
@@ -80,4 +99,10 @@ HERRAMIENTA = Herramienta(
     nombre_corto="Resumen mensual",
     vista_previa_bitacora=True,
     pide_pdv_e_implant=True,
+    meses_anteriores="uno",
+    ayuda_meses_anteriores=(
+        "Sube la bitácora del mes anterior y el reporte mostrará, en la portada "
+        "y en el resumen ejecutivo, cuánto subieron o bajaron las solicitudes, la "
+        "conversión, el monto financiado y el GAP."
+    ),
 )

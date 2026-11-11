@@ -93,8 +93,91 @@ def _conversion(df):
     return fin, total, (fin / total * 100 if total else 0.0)
 
 
+# ------------------------------------------------ contra el mes anterior
+def indicadores(df):
+    """Los indicadores que se comparan de un mes a otro. Los que no se
+    pueden calcular (falta la columna, o no hay créditos) quedan en None."""
+    fin_n, total, pct = _conversion(df)
+    fin = _financiados(df)
+    monto = (float(fin[COL_MONTO].fillna(0).sum())
+             if COL_MONTO in df.columns and COL_CAT in df.columns else None)
+    gap = (float((fin[COL_GAP] == "SI").sum()) / len(fin) * 100
+           if COL_GAP in df.columns and len(fin) else None)
+    return {
+        "solicitudes": total,
+        "financiados": fin_n if COL_CAT in df.columns else None,
+        "conversion": pct if COL_CAT in df.columns else None,
+        "monto": monto,
+        "ticket": monto / fin_n if monto is not None and fin_n else None,
+        "gap": gap,
+    }
+
+
+# clave, nombre en la tabla, tipo de dato
+_INDICADORES = [
+    ("solicitudes", "Solicitudes", "conteo"),
+    ("financiados", "Créditos financiados", "conteo"),
+    ("conversion", "Conversión a financiado", "pct"),
+    ("monto", "Monto financiado", "monto"),
+    ("ticket", "Ticket promedio", "monto"),
+    ("gap", "GAP en financiados", "pct"),
+]
+
+
+def _texto_valor(valor, tipo):
+    if valor is None:
+        return "—"
+    if tipo == "conteo":
+        return f"{int(valor)}"
+    if tipo == "pct":
+        return f"{valor:.1f}%"
+    return f"${valor:,.0f}"
+
+
+def _texto_cambio(anterior, actual, tipo):
+    """"+8 (+15%)", "+3.3 pts", "-12%", "sin cambio"."""
+    if anterior is None or actual is None:
+        return "—"
+    delta = actual - anterior
+    if tipo == "pct":
+        return "sin cambio" if abs(delta) < 0.05 else f"{delta:+.1f} pts"
+    if abs(delta) < 0.5:
+        return "sin cambio"
+    relativo = f"{delta / anterior * 100:+.0f}%" if anterior else None
+    if tipo == "conteo":
+        return f"{int(delta):+d}" + (f" ({relativo})" if relativo else "")
+    return relativo or f"{'+' if delta > 0 else '-'}${abs(delta):,.0f}"
+
+
+def comparar_meses(df, df_anterior):
+    """Compara los indicadores de un mes contra los del anterior.
+
+    Devuelve una lista de dicts, uno por indicador que exista en ambos:
+    {"clave", "nombre", "anterior", "actual", "cambio", "mejora"} con los
+    valores ya como texto. "mejora" es True/False/None (None = sin cambio).
+    En todos estos indicadores, más es mejor.
+    """
+    return comparar_indicadores(indicadores(df_anterior), indicadores(df))
+
+
+def comparar_indicadores(antes, ahora):
+    """Lo mismo que comparar_meses, a partir de indicadores() ya calculados."""
+    filas = []
+    for clave, nombre, tipo in _INDICADORES:
+        a, b = antes[clave], ahora[clave]
+        if a is None and b is None:
+            continue
+        cambio = _texto_cambio(a, b, tipo)
+        mejora = None if cambio in ("—", "sin cambio") else b > a
+        filas.append({"clave": clave, "nombre": nombre, "anterior": _texto_valor(a, tipo),
+                      "actual": _texto_valor(b, tipo), "cambio": cambio, "mejora": mejora})
+    return filas
+
+
 # ---------------------------------------------------------------- reportes
-def cifras_resumen(df):
+def cifras_resumen(df, comparacion=None, mes_anterior=""):
+    """comparacion: lo que devuelve comparar_meses() si se subió la bitácora
+    del mes anterior; cada cifra lleva entonces su cambio contra ese mes."""
     fin, total, pct = _conversion(df)
     n_ab, monto_ab = _abiertas(df)
     cifras = [
@@ -105,7 +188,11 @@ def cifras_resumen(df):
         _cifra("SIN DISPERSAR", f"{n_ab}",
                f"{_monto_corto(monto_ab)} abiertos al cierre" if monto_ab else "abiertas al cierre"),
     ]
-    return [c for c in cifras if c]
+    cifras = [c for c in cifras if c]
+    _anotar_cambios(cifras, comparacion, mes_anterior,
+                    (("SOLICITUDES", "solicitudes"), ("CONVERSIÓN", "conversion"),
+                     ("MONTO FINANCIADO", "monto"), ("GAP EN FINANCIADOS", "gap")))
+    return cifras
 
 
 def cifras_avance(df, ctx=None, hoja=None):
@@ -146,7 +233,9 @@ def cifras_comparativo(df_unico, tabla_comp, n_meses):
     return [c for c in cifras if c]
 
 
-def cifras_vendedor(df_equipo, vendedor):
+def cifras_vendedor(df_equipo, vendedor, comparacion=None, mes_anterior=""):
+    """comparacion: comparar_indicadores() del vendedor contra su mes
+    anterior, si se subieron bitácoras anteriores."""
     mio = df_equipo[df_equipo["Nombre del Vendedor"] == vendedor]
     _, n, pct = _conversion(mio)
     _, total_eq, pct_eq = _conversion(df_equipo)
@@ -161,7 +250,23 @@ def cifras_vendedor(df_equipo, vendedor):
                              alerta=pg < _c.UMBRAL_ALERTA_GAP))
     n_ab, _ = _abiertas(mio)
     cifras.append(_cifra("PENDIENTES", f"{n_ab}", "sin dispersar"))
+    _anotar_cambios(cifras, comparacion, mes_anterior,
+                    (("TUS SOLICITUDES", "solicitudes"), ("TU CONVERSIÓN", "conversion")))
     return cifras
+
+
+def _anotar_cambios(cifras, comparacion, mes_anterior, pares):
+    """Agrega a cada cifra su cambio contra el mes anterior ("+3 vs. septiembre")."""
+    if not comparacion:
+        return
+    cambios = {f["clave"]: f for f in comparacion}
+    contra = f"vs. {str(mes_anterior).split()[0].lower()}" if mes_anterior else "vs. mes anterior"
+    for etiqueta, clave in pares:
+        cifra = next((c for c in cifras if c["etiqueta"] == etiqueta), None)
+        fila = cambios.get(clave)
+        if cifra and fila and fila["cambio"] != "—":
+            cifra["cambio"] = f"{fila['cambio']} {contra}"
+            cifra["mejora"] = fila["mejora"]
 
 
 def bloque_cifras(cifras):
@@ -172,7 +277,8 @@ def bloque_cifras(cifras):
     columna lateral de la portada. Por eso lleva las cifras como atributo.
     """
     from reportlab.platypus import Table
-    filas = [[c["etiqueta"].title(), c["valor"], c["nota"]] for c in cifras]
+    filas = [[c["etiqueta"].title(), c["valor"],
+              c["nota"] + (f" · {c['cambio']}" if c.get("cambio") else "")] for c in cifras]
     tabla = Table([["Cifra clave", "Valor", ""]] + filas)
     tabla._cifras_clave = cifras
     return tabla

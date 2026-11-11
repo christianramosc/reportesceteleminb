@@ -16,8 +16,23 @@ from .registro import Herramienta
 from . import nombres_archivo as _nombres
 
 
+def _meses_anteriores(rutas_anteriores):
+    """[((año, mes), etiqueta, df limpio)] de las bitácoras anteriores."""
+    meses = []
+    for ruta in rutas_anteriores or []:
+        df_crudo, _origen, hoja = _rv.cargar_archivo(ruta_local=ruta)
+        ctx = _rv.contexto_mensual(hoja_nombre=hoja)
+        if "Nombre del Vendedor" not in [str(c).strip() for c in df_crudo.columns]:
+            print(f"  Aviso: '{_nombres.subido(ruta)}' no trae 'Nombre del Vendedor'; se omite del historial.")
+            continue
+        meses.append(((ctx["anio"], ctx["mes_num"]),
+                      f"{ctx['nombre_mes'].title()} {ctx['anio']}", _rv.limpiar_datos(df_crudo)))
+    return meses
+
+
 def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
-             nombre_analista=None, vendedores_incluir=None, **_opciones):
+             nombre_analista=None, vendedores_incluir=None, rutas_anteriores=None,
+             **_opciones):
     datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista)
 
     os.makedirs(carpeta_salida, exist_ok=True)
@@ -30,9 +45,29 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
     os.makedirs(carpeta_pdfs, exist_ok=True)
     os.makedirs(carpeta_graficas, exist_ok=True)
 
+    # Los meses anteriores se limpian ANTES que el actual: la limpieza
+    # reparte los colores de estatus, y deben quedar los del mes del reporte.
+    anteriores = _meses_anteriores(rutas_anteriores)
+
     df_crudo, _origen, hoja = _rv.cargar_archivo(ruta_local=rutas_archivos[0])
     df = _rv.limpiar_datos(df_crudo)
     ctx_mes = _rv.contexto_mensual(hoja_nombre=hoja)
+
+    # Historial: solo meses ANTERIORES al del reporte, uno por mes y en
+    # orden. Un archivo del mismo mes o posterior no es historial.
+    clave_actual = (ctx_mes["anio"], ctx_mes["mes_num"])
+    meses = {}
+    for clave, etiqueta, df_mes in anteriores:
+        if clave >= clave_actual:
+            print(f"  Aviso: {etiqueta} no es anterior al mes del reporte; se omite del historial.")
+        elif clave in meses:
+            print(f"  Aviso: hay más de un archivo de {etiqueta}; se usa el primero.")
+        else:
+            meses[clave] = (etiqueta, df_mes)
+    meses_historial = [meses[c] for c in sorted(meses)]
+    if meses_historial:
+        meses_historial.append((f"{ctx_mes['nombre_mes'].title()} {ctx_mes['anio']}", df))
+        print(f"  Historial: {', '.join(e for e, _ in meses_historial)}")
 
     if "Nombre del Vendedor" not in df.columns:
         raise ValueError(
@@ -63,12 +98,16 @@ def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
     rutas_pdf = []
     for vendedor in vendedores:
         resumen_v = _rv.analisis_individual(df, vendedor, tabla_vendedor, resumen_eq)
-        graficas = _rv.generar_graficas_vendedor(df, resumen_v["df"], vendedor, carpeta_graficas)
+        historial = (_rv.historial_vendedor(meses_historial, vendedor)
+                     if meses_historial else None)
+        graficas = _rv.generar_graficas_vendedor(df, resumen_v["df"], vendedor, carpeta_graficas,
+                                                 historial=historial)
         # Dentro del ZIP: "Jessica Elizabeth Machuca Roque - Septiembre 2026.pdf"
         nombre_pdf = _nombres.seguro(f"{vendedor} - {mes_largo}") + ".pdf"
         ruta = _rv.generar_reporte_pdf_vendedor(
             vendedor, resumen_v, tabla_vendedor, resumen_eq, ctx_mes, graficas,
             nombre_archivo=os.path.join(carpeta_pdfs, nombre_pdf), datos=datos,
+            historial=historial,
         )
         rutas_pdf.append(ruta)
         print(f"  ✓ {vendedor}")
@@ -104,7 +143,8 @@ HERRAMIENTA = Herramienta(
         "Sube el Excel de la bitácora del mes y obtén un PDF individual de "
         "desempeño para cada asesor, con sus KPIs, sus gráficas y su "
         "posición frente al promedio del equipo. Todos los PDFs se "
-        "descargan juntos en un ZIP."
+        "descargan juntos en un ZIP. Si además subes bitácoras de meses "
+        "anteriores, cada PDF incluye el historial del asesor."
     ),
     multiple_archivos=False,
     tipos_permitidos=["xlsx"],
@@ -115,4 +155,10 @@ HERRAMIENTA = Herramienta(
     vista_previa_bitacora=True,
     pide_pdv_e_implant=True,
     pide_vendedores=True,
+    meses_anteriores="varios",
+    ayuda_meses_anteriores=(
+        "Sube las bitácoras de uno o varios meses anteriores y cada PDF "
+        "incluirá el historial del asesor: sus solicitudes, créditos "
+        "financiados y conversión mes a mes, y el cambio contra el mes pasado."
+    ),
 )

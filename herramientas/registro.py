@@ -42,6 +42,16 @@ class Herramienta:
     pide_vendedores: bool = False      # vendedores_incluir (lista)
     pide_etiquetas_mes: bool = False   # nombres_meses (lista)
 
+    # --- Segundo campo de archivos (opcional) -----------------------------
+    # Bitácoras de meses ANTERIORES, para comparar contra ellas:
+    #   None     -> la herramienta no las pide
+    #   "uno"    -> un solo archivo (el mes anterior)
+    #   "varios" -> varios meses
+    # Llegan a ejecutar() como rutas_anteriores (lista de rutas). Siempre
+    # son opcionales: sin ellas el reporte sale igual que antes.
+    meses_anteriores: Optional[str] = None
+    ayuda_meses_anteriores: str = ""
+
     # --- Guía de uso (opcional) -------------------------------------------
     # Rutas desde la raíz del repo. Si hay guía, la página muestra un
     # desplegable con la imagen (guia_vista) y el botón para bajar el PDF.
