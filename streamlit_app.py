@@ -15,6 +15,9 @@ import shutil
 import tempfile
 import traceback
 
+import io
+import zipfile
+
 import pandas as pd
 import streamlit as st
 
@@ -22,6 +25,7 @@ import ui_estilos as ui
 from herramientas import REGISTRO
 from herramientas import estatus as _est
 from herramientas import fechas as _fechas
+from herramientas import vista_bitacora as _vista
 from herramientas.ejecucion import ejecutar_aislado
 from herramientas.config import ANALISTA_DEFECTO as _ANALISTA_DEFECTO
 from herramientas.config import PDV_DEFECTO as _PDV_DEFECTO
@@ -66,7 +70,7 @@ def _etiqueta_menu(h):
     return f"{h.icono} {h.nombre_corto or ui.nombre_limpio(h.nombre)}"
 
 
-def _procesar(herramienta, archivos_subidos, opciones):
+def _procesar(herramienta, archivos_subidos, opciones, archivos_anteriores=()):
     """Ejecuta la herramienta en un directorio temporal y devuelve los
     resultados EN MEMORIA como [(nombre, bytes), ...], el log y, si la
     herramienta lo da, un resumen para dibujar en la página.
@@ -87,6 +91,17 @@ def _procesar(herramienta, archivos_subidos, opciones):
             with open(ruta, "wb") as f:
                 f.write(archivo.getbuffer())
             rutas.append(ruta)
+
+        # Meses anteriores (opcionales): siguen la numeración para que dos
+        # archivos con el mismo nombre no se pisen.
+        rutas_anteriores = []
+        for j, archivo in enumerate(archivos_anteriores, start=len(rutas)):
+            ruta = os.path.join(carpeta, f"{j}_{archivo.name}")
+            with open(ruta, "wb") as f:
+                f.write(archivo.getbuffer())
+            rutas_anteriores.append(ruta)
+        if rutas_anteriores:
+            opciones = {**opciones, "rutas_anteriores": rutas_anteriores}
 
         carpeta_salida = os.path.join(carpeta, "salida")
         os.makedirs(carpeta_salida, exist_ok=True)
@@ -121,12 +136,19 @@ def _procesar(herramienta, archivos_subidos, opciones):
 
 
 def _vista_previa(archivos_subidos):
-    """Muestra qué trae el Excel ANTES de generar: cuántas filas y qué
-    estatus se detectaron. Sirve para cachar una exportación incompleta o
-    un estatus mal escrito sin esperar los dos minutos del reporte."""
+    """Muestra qué trae el Excel ANTES de generar: cuántas filas, qué
+    estatus se detectaron y qué columnas faltan. Sirve para cachar una
+    exportación incompleta o un estatus mal escrito sin esperar los dos
+    minutos del reporte.
+
+    Devuelve los vendedores del primer archivo (para el filtro del Resumen
+    por Vendedor).
+    """
     filas_totales = 0
     conteo = {}
     varias_hojas = []
+    faltantes, otras = {}, []
+    vendedores = None
     for archivo in archivos_subidos:
         try:
             archivo.seek(0)
@@ -138,14 +160,15 @@ def _vista_previa(archivos_subidos):
             archivo.seek(0)
         if len(xls.sheet_names) > 1:
             varias_hojas.append(f"**{archivo.name}** → «{xls.sheet_names[0]}»")
-        filas_totales += len(df)
-        columna = next((c for c in df.columns
-                        if str(c).strip().upper() in ("STATUS", "ESTATUS")), None)
-        if columna is None:
-            continue
-        for valor in df[columna]:
-            clave = _est.clasificar_status(valor)
-            conteo[clave] = conteo.get(clave, 0) + 1
+        revision = _vista.revisar(df)
+        filas_totales += revision["filas"]
+        for clave, n in revision["conteo"].items():
+            conteo[clave] = conteo.get(clave, 0) + n
+        for columna, consecuencia in revision["faltantes"]:
+            faltantes.setdefault(columna, (consecuencia, []))[1].append(archivo.name)
+        otras += [c for c in revision["otras"] if c not in otras]
+        if vendedores is None:
+            vendedores = revision["vendedores"]
 
     # Los reportes leen solo la primera hoja: si los datos están en otra, el
     # reporte saldría con datos equivocados o vacío.
@@ -158,7 +181,7 @@ def _vista_previa(archivos_subidos):
         )
 
     if not filas_totales:
-        return
+        return vendedores or []
 
     if not conteo:
         ui.resumen_lectura(filas_totales, [])
@@ -166,22 +189,52 @@ def _vista_previa(archivos_subidos):
             "No se encontró una columna STATUS en el archivo. El reporte se "
             "generará sin el desglose por estatus."
         )
-        return
+    else:
+        ui.resumen_lectura(filas_totales, [
+            (_est.etiqueta(c), n, _est.COLOR_CATEGORIA.get(c, ui.TEXTO_TENUE))
+            for c, n in sorted(conteo.items(), key=lambda x: -x[1])
+        ])
 
-    ui.resumen_lectura(filas_totales, [
-        (_est.etiqueta(c), n, _est.COLOR_CATEGORIA.get(c, ui.TEXTO_TENUE))
-        for c, n in sorted(conteo.items(), key=lambda x: -x[1])
-    ])
+        # Un estatus fuera del catálogo se grafica igual, pero sin color ni
+        # etiqueta propios: conviene avisarlo aquí, no solo en la consola.
+        sin_catalogar = [c for c in conteo if not _est.esta_catalogado(c)]
+        if sin_catalogar:
+            st.warning(
+                "Estatus fuera del catálogo: **" + ", ".join(sorted(sin_catalogar)) + "**. "
+                "El reporte los incluye con un color automático. Para fijarles "
+                "color y etiqueta, agrégalos en `herramientas/estatus.py`."
+            )
 
-    # Un estatus fuera del catálogo se grafica igual, pero sin color ni
-    # etiqueta propios: conviene avisarlo aquí, no solo en la consola.
-    sin_catalogar = [c for c in conteo if not _est.esta_catalogado(c)]
-    if sin_catalogar:
+    # Columnas que faltan: antes solo se sabía al abrir el PDF y ver que una
+    # sección no estaba. Se dice aquí, con lo que se pierde por cada una.
+    if faltantes:
+        varios = len(archivos_subidos) > 1
+        renglones = []
+        for columna, (consecuencia, nombres) in faltantes.items():
+            donde = f" (en {', '.join(nombres)})" if varios else ""
+            renglones.append(f"- **{columna}**{donde}: {consecuencia}.")
         st.warning(
-            "Estatus fuera del catálogo: **" + ", ".join(sorted(sin_catalogar)) + "**. "
-            "El reporte los incluye con un color automático. Para fijarles "
-            "color y etiqueta, agrégalos en `herramientas/estatus.py`."
+            "Faltan columnas en la bitácora. El reporte se genera, pero sin estas partes:\n\n"
+            + "\n".join(renglones),
+            icon=":material/view_column:",
         )
+    if otras:
+        st.caption("También faltan, sin afectar las cifras: " + ", ".join(otras) + ".")
+
+    return vendedores or []
+
+
+def _zip_de(archivos, respaldo):
+    """(nombre, bytes) de un ZIP con todos los archivos generados.
+
+    El nombre sale de lo que tienen en común ("Resumen_Oct26.pdf",
+    "Resumen_Oct26_datos.xlsx" -> "Resumen_Oct26_completo.zip")."""
+    comun = os.path.commonprefix([nombre for nombre, _ in archivos]).rstrip(" ._-")
+    memoria = io.BytesIO()
+    with zipfile.ZipFile(memoria, "w", zipfile.ZIP_DEFLATED) as zf:
+        for nombre, contenido in archivos:
+            zf.writestr(nombre, contenido)
+    return f"{comun or respaldo}_completo.zip", memoria.getvalue()
 
 
 # =======================================================================
@@ -246,11 +299,15 @@ opciones = {}
 clave_resultado = f"resultado_{herramienta.id}"
 
 
-def _olvidar_resultado(clave):
+def _olvidar_resultado(clave, *otras_claves):
     """Al subir, cambiar o quitar el archivo, las descargas anteriores ya no
     corresponden a lo que está en pantalla. Antes seguían visibles hasta
-    volver a generar y era fácil bajar el reporte del archivo anterior."""
-    st.session_state.pop(clave, None)
+    volver a generar y era fácil bajar el reporte del archivo anterior.
+
+    otras_claves: lo que también depende del archivo (los vendedores
+    elegidos: con otro Excel pueden no existir)."""
+    for c in (clave, *otras_claves):
+        st.session_state.pop(c, None)
 
 
 # --- 1. Archivo ---------------------------------------------------------
@@ -264,18 +321,39 @@ with st.container(border=True, key="tarjeta_archivo"):
         label_visibility="collapsed",
         key=f"uploader_{herramienta.id}",
         on_change=_olvidar_resultado,
-        args=(clave_resultado,),
+        args=(clave_resultado, f"vend_{herramienta.id}"),
     )
     if archivos_subidos and not herramienta.multiple_archivos:
         archivos_subidos = [archivos_subidos]
 
     # La vista previa lee la bitácora en Excel; no aplica a ZIP ni a CSF en PDF.
+    vendedores_del_archivo = []
     if archivos_subidos and herramienta.vista_previa_bitacora:
-        _vista_previa(archivos_subidos)
+        vendedores_del_archivo = _vista_previa(archivos_subidos)
 
     # El comparativo, por ejemplo, necesita al menos dos meses para comparar.
     if archivos_subidos and len(archivos_subidos) < herramienta.minimo_archivos:
         st.warning(f"Sube al menos {herramienta.minimo_archivos} archivos para poder comparar.")
+
+    # Meses anteriores: opcionales, para comparar contra ellos.
+    archivos_anteriores = []
+    if herramienta.meses_anteriores:
+        varios_meses = herramienta.meses_anteriores == "varios"
+        with st.expander("Comparar con " + ("meses anteriores" if varios_meses else "el mes anterior")
+                         + " (opcional)", icon=":material/history:"):
+            if herramienta.ayuda_meses_anteriores:
+                st.caption(herramienta.ayuda_meses_anteriores)
+            anteriores = st.file_uploader(
+                "Bitácoras anteriores" if varios_meses else "Bitácora del mes anterior",
+                type=["xlsx"],
+                accept_multiple_files=varios_meses,
+                label_visibility="collapsed",
+                key=f"anteriores_{herramienta.id}",
+                on_change=_olvidar_resultado,
+                args=(clave_resultado,),
+            )
+            if anteriores:
+                archivos_anteriores = anteriores if varios_meses else [anteriores]
 
 # --- 2. Datos del reporte (solo si la herramienta los pide) --------------
 if tiene_opciones:
@@ -302,19 +380,21 @@ if tiene_opciones:
                 opciones["fecha_corte"] = fecha_elegida.strftime("%d/%m/%Y")
 
         if herramienta.pide_vendedores:
-            with st.expander("Generar solo para ciertos vendedores (opcional)",
-                             icon=":material/filter_list:"):
-                st.caption(
-                    "Por default se genera el PDF de todos los vendedores que "
-                    "aparezcan en el Excel. Para limitarlo, escribe un nombre "
-                    "por línea, tal como viene en la columna Nombre del Vendedor."
-                )
-                texto_vend = st.text_area("Un vendedor por línea",
-                                          key=f"vend_{herramienta.id}")
-                if texto_vend.strip():
-                    opciones["vendedores_incluir"] = [
-                        l.strip() for l in texto_vend.splitlines() if l.strip()
-                    ]
+            # Los nombres salen del Excel que se subió: antes se escribían a
+            # mano, uno por línea, y un error de dedo dejaba fuera a alguien
+            # sin avisar.
+            elegidos = st.multiselect(
+                "Vendedores",
+                vendedores_del_archivo,
+                key=f"vend_{herramienta.id}",
+                placeholder=("Todos los vendedores" if vendedores_del_archivo
+                             else "Sube primero el archivo"),
+                disabled=not vendedores_del_archivo,
+                help="Déjalo vacío para generar el PDF de todos. Elige uno o "
+                     "varios para limitarlo.",
+            )
+            if elegidos:
+                opciones["vendedores_incluir"] = elegidos
 
         if herramienta.pide_etiquetas_mes:
             with st.expander("Etiquetas de mes (opcional)", icon=":material/label:"):
@@ -334,7 +414,8 @@ generar = st.button("Generar reporte", key=f"generar_{herramienta.id}",
 if generar and archivos_subidos:
     with st.spinner("Generando el reporte. Puede tardar uno o dos minutos."):
         try:
-            archivos, registro, resumen = _procesar(herramienta, archivos_subidos, opciones)
+            archivos, registro, resumen = _procesar(herramienta, archivos_subidos, opciones,
+                                                    archivos_anteriores)
         except Exception as e:
             st.session_state.pop(clave_resultado, None)
             st.error(f"No se pudo generar el reporte: {e}", icon=":material/error:")
@@ -346,6 +427,8 @@ if generar and archivos_subidos:
                 "log": registro,
                 "resumen": resumen,
                 "fecha": _fechas.ahora().strftime("%d/%m/%Y · %H:%M"),
+                # Todo junto en un ZIP, armado una sola vez (no en cada clic).
+                "zip": _zip_de(archivos, herramienta.id) if len(archivos) > 1 else None,
             }
 
 # --- 3. Resultado en la página (si la herramienta lo ofrece) --------------
@@ -384,6 +467,18 @@ if resultado:
                         key=f"descarga_{herramienta.id}_{nombre}",
                         width="stretch",
                     )
+
+        if resultado.get("zip"):
+            nombre_zip, contenido_zip = resultado["zip"]
+            st.download_button(
+                f"Descargar todo en un ZIP ({cuantos} archivos)",
+                data=contenido_zip,
+                file_name=nombre_zip,
+                mime="application/zip",
+                icon=":material/folder_zip:",
+                key=f"todo_{herramienta.id}",
+                width="stretch",
+            )
 
         if resultado.get("log"):
             with st.expander("Detalle del proceso", icon=":material/terminal:"):

@@ -57,7 +57,7 @@ from reportlab.lib import colors as rl_colors
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     Table, TableStyle, Spacer, Image,
-    HRFlowable
+    HRFlowable, KeepTogether
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
@@ -153,6 +153,8 @@ _MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
 
 __all__ = [
     "SIN_VENDEDOR", "contar_vendedores", "exigir_solicitudes",
+    "analisis_por_modelo", "modelo_mas_financiado", "filas_tabla_modelos",
+    "filas_tabla_ticket_gap", "encabezados_vendedores", "tablas_desempeno_volteadas",
     "limpiar_texto", "normalizar_gap",
     "filas_tabla_vendedor", "recortar_nombre",
     "secciones_detalladas",
@@ -837,21 +839,260 @@ def analisis_por_vendedor(df):
         tabla[["Monto Financiado ($)", "Monto Aprobado ($)"]] = tabla[
             ["Monto Financiado ($)", "Monto Aprobado ($)"]
         ].fillna(0)
+        # Ticket promedio: monto financiado entre créditos financiados. Sin
+        # créditos no hay ticket (NaN), no un $0 que parecería un dato.
+        if "FINANCIADO" in tabla.columns:
+            tabla["Ticket Promedio ($)"] = (
+                tabla["Monto Financiado ($)"] / tabla["FINANCIADO"].where(tabla["FINANCIADO"] > 0)
+            )
 
     if "¿Tiene GAP?" in df.columns:
         gap_total_v = df[df["¿Tiene GAP?"] == "SI"].groupby("Nombre del Vendedor").size()
         tabla["GAP Total"] = gap_total_v.reindex(tabla.index).fillna(0).astype(int)
         if "Categoria" in df.columns:
-            gap_fin_v = (
-                df[(df["Categoria"] == "FINANCIADO") & (df["¿Tiene GAP?"] == "SI")]
-                .groupby("Nombre del Vendedor").size()
-            )
+            fin_con_gap = df[(df["Categoria"] == "FINANCIADO") & (df["¿Tiene GAP?"] == "SI")]
+            gap_fin_v = fin_con_gap.groupby("Nombre del Vendedor").size()
             tabla["GAP Financiado"] = gap_fin_v.reindex(tabla.index).fillna(0).astype(int)
+            # Cuánto dinero representa ese GAP ya vendido.
+            if "Monto GAP" in df.columns:
+                monto_gap_v = fin_con_gap.groupby("Nombre del Vendedor")["Monto GAP"].sum()
+                tabla["Monto GAP Financiado ($)"] = monto_gap_v.reindex(tabla.index).fillna(0)
 
     tabla = tabla.sort_values("Total", ascending=False)
     print(tabla)
     print()
     return tabla
+
+
+def filas_tabla_ticket_gap(tabla_vendedor):
+    """Filas de la tabla "ticket promedio y GAP por vendedor" para el PDF.
+
+    Solo entran los vendedores con créditos financiados: el ticket y el GAP
+    vendido no existen para quien aún no financia nada. Devuelve
+    (filas, nota, anchos en cm) o (None, None, None) si no hay qué mostrar.
+    """
+    if (tabla_vendedor is None or "Ticket Promedio ($)" not in tabla_vendedor.columns
+            or "FINANCIADO" not in tabla_vendedor.columns):
+        return None, None, None
+    con_creditos = tabla_vendedor[tabla_vendedor["FINANCIADO"] > 0]
+    if con_creditos.empty:
+        return None, None, None
+    con_creditos = con_creditos.sort_values("Monto Financiado ($)", ascending=False)
+    hay_gap = "GAP Financiado" in tabla_vendedor.columns
+    hay_monto_gap = "Monto GAP Financiado ($)" in tabla_vendedor.columns
+
+    cabecera = ["Vendedor", "Créditos<br/>financiados", "Monto<br/>financiado",
+                "Ticket<br/>promedio"]
+    anchos = [3.6, 2.3, 2.8, 2.6]
+    if hay_gap:
+        cabecera.append("GAP<br/>colocados")
+        anchos.append(2.0)
+    if hay_monto_gap:
+        cabecera.append("Monto<br/>GAP")
+        anchos.append(2.3)
+
+    filas = [cabecera]
+    for vendedor, fila in con_creditos.iterrows():
+        celdas = [recortar_nombre(vendedor), str(int(fila["FINANCIADO"])),
+                  f"${fila['Monto Financiado ($)']:,.0f}", f"${fila['Ticket Promedio ($)']:,.0f}"]
+        if hay_gap:
+            celdas.append(str(int(fila["GAP Financiado"])))
+        if hay_monto_gap:
+            celdas.append(f"${fila['Monto GAP Financiado ($)']:,.0f}")
+        filas.append(celdas)
+
+    n_fin = int(con_creditos["FINANCIADO"].sum())
+    monto = float(con_creditos["Monto Financiado ($)"].sum())
+    totales = ["TOTAL EQUIPO", str(n_fin), f"${monto:,.0f}", f"${monto / n_fin:,.0f}"]
+    if hay_gap:
+        totales.append(str(int(con_creditos["GAP Financiado"].sum())))
+    if hay_monto_gap:
+        totales.append(f"${con_creditos['Monto GAP Financiado ($)'].sum():,.0f}")
+    filas.append(totales)
+
+    sin_creditos = len(tabla_vendedor) - len(con_creditos)
+    nota = "Ticket promedio = monto financiado entre créditos financiados."
+    if sin_creditos:
+        nota += (f" No {'aparece' if sin_creditos == 1 else 'aparecen'} {sin_creditos} "
+                 f"{'vendedor' if sin_creditos == 1 else 'vendedores'} sin créditos financiados.")
+    anchos[0] += max(0.0, 16.0 - sum(anchos))
+    return filas, nota, anchos
+
+
+# ---------- conversión por modelo ----------
+def analisis_por_modelo(df):
+    """Por modelo: solicitudes, créditos financiados, % de conversión y
+    monto financiado. Antes el reporte solo decía cuál era el modelo más
+    solicitado, no cuál se financia más. Devuelve None si faltan columnas."""
+    if "Vehículo" not in df.columns or "Categoria" not in df.columns:
+        return None
+    base = df.dropna(subset=["Vehículo"])
+    if base.empty:
+        return None
+    financiados = base[base["Categoria"] == "FINANCIADO"]
+    tabla = pd.DataFrame({"Solicitudes": base.groupby("Vehículo").size()})
+    tabla["Financiados"] = (financiados.groupby("Vehículo").size()
+                            .reindex(tabla.index).fillna(0).astype(int))
+    tabla["% Financiado"] = (tabla["Financiados"] / tabla["Solicitudes"] * 100).round(1)
+    if "Monto Total a Financiar" in df.columns:
+        tabla["Monto Financiado ($)"] = (
+            financiados.groupby("Vehículo")["Monto Total a Financiar"].sum()
+            .reindex(tabla.index).fillna(0)
+        )
+    return tabla.sort_values(["Solicitudes", "Financiados"], ascending=False)
+
+
+def modelo_mas_financiado(tabla_modelos):
+    """(modelo, financiados, solicitudes, %) del modelo con más créditos
+    financiados (en empate, el de mejor conversión), o None si no hay."""
+    if tabla_modelos is None or tabla_modelos.empty or not tabla_modelos["Financiados"].any():
+        return None
+    orden = tabla_modelos.sort_values(["Financiados", "% Financiado"], ascending=False)
+    modelo, fila = orden.index[0], orden.iloc[0]
+    return modelo, int(fila["Financiados"]), int(fila["Solicitudes"]), float(fila["% Financiado"])
+
+
+def filas_tabla_modelos(tabla_modelos, maximo=10):
+    """Filas de la tabla de conversión por modelo. Los modelos más allá de
+    `maximo` se suman en un renglón "Otros". Devuelve (filas, anchos en cm)."""
+    if tabla_modelos is None or tabla_modelos.empty:
+        return None, None
+    hay_monto = "Monto Financiado ($)" in tabla_modelos.columns
+    cabecera = ["Modelo", "Solicitudes", "Créditos<br/>financiados", "%<br/>Financiado"]
+    anchos = [5.0, 2.4, 2.6, 2.4]
+    if hay_monto:
+        cabecera.append("Monto<br/>financiado")
+        anchos.append(3.0)
+
+    def _fila(nombre, solicitudes, fin, monto):
+        celdas = [nombre, str(int(solicitudes)), str(int(fin)),
+                  f"{fin / solicitudes * 100:.1f}%" if solicitudes else "—"]
+        if hay_monto:
+            celdas.append(f"${monto:,.0f}")
+        return celdas
+
+    def _monto(t):
+        return float(t["Monto Financiado ($)"].sum()) if hay_monto else 0.0
+
+    visibles, resto = tabla_modelos.iloc[:maximo], tabla_modelos.iloc[maximo:]
+    filas = [cabecera]
+    for modelo, f in visibles.iterrows():
+        filas.append(_fila(str(modelo), f["Solicitudes"], f["Financiados"],
+                           f["Monto Financiado ($)"] if hay_monto else 0.0))
+    if not resto.empty:
+        filas.append(_fila(f"Otros ({len(resto)} modelos)", resto["Solicitudes"].sum(),
+                           resto["Financiados"].sum(), _monto(resto)))
+    filas.append(_fila("TOTAL", tabla_modelos["Solicitudes"].sum(),
+                       tabla_modelos["Financiados"].sum(), _monto(tabla_modelos)))
+    anchos[0] += max(0.0, 16.0 - sum(anchos))
+    return filas, anchos
+
+
+# ---------- tabla de desempeño con los vendedores en columnas ----------
+# Más vendedores que estos por tabla y las columnas quedan tan angostas que
+# ni los números caben: la tabla se divide en partes.
+MAX_VENDEDORES_POR_TABLA = 8
+
+
+def encabezados_vendedores(nombres):
+    """Nombre corto y ÚNICO de cada vendedor para encabezar una columna.
+
+    "Jessica Elizabeth Machuca Roque" -> "Jessica E.". Con el nombre
+    completo, una columna de 1.5 cm lo partía cada tres letras. Si dos
+    vendedores quedan iguales se agregan iniciales hasta distinguirlos.
+    Devuelve {nombre completo: nombre corto}.
+    """
+    def corto(nombre, iniciales):
+        if nombre == SIN_VENDEDOR:
+            return "Sin vendedor"
+        partes = str(nombre).split()
+        if len(partes) <= 1:
+            return str(nombre)
+        return " ".join([partes[0]] + [f"{p[0]}." for p in partes[1:1 + iniciales]])
+
+    resultado = {n: corto(n, 1) for n in nombres}
+    for iniciales in (2, 3, 99):          # 99 = todas las iniciales
+        repetidos = {c for c in resultado.values() if list(resultado.values()).count(c) > 1}
+        if not repetidos:
+            break
+        for n in nombres:
+            if resultado[n] in repetidos:
+                resultado[n] = corto(n, iniciales)
+    repetidos = {c for c in resultado.values() if list(resultado.values()).count(c) > 1}
+    for n in nombres:                      # último recurso: el nombre completo
+        if resultado[n] in repetidos:
+            resultado[n] = str(n)
+    return resultado
+
+
+def tablas_desempeno_volteadas(tabla_vendedor, claves, tabla_estilo_mg, estilo_nota):
+    """Tabla estatus × vendedor (estatus en filas, vendedores en columnas),
+    dividida en varias tablas si el equipo es grande. Devuelve flowables."""
+    vendedores = list(tabla_vendedor.index)
+    tiene_pct = "% Financiado" in tabla_vendedor.columns
+
+    n_partes = -(-len(vendedores) // MAX_VENDEDORES_POR_TABLA)        # techo
+    por_parte = -(-len(vendedores) // n_partes)
+    partes = [vendedores[i:i + por_parte] for i in range(0, len(vendedores), por_parte)]
+    rotulo_total = "Total" if n_partes == 1 else "Total<br/>equipo"
+
+    # Todas las partes con las mismas columnas de ancho y la misma letra,
+    # para que se lean como una sola tabla aunque la última traiga menos
+    # vendedores.
+    ancho_estatus = 4.2 * cm
+    ancho_col = (_pdf_util.ANCHO_UTIL - ancho_estatus) / (por_parte + 1)
+    compacta = por_parte + 2 > 7
+
+    # Con pocos vendedores el nombre completo cabe (en dos renglones); se
+    # abrevia solo cuando a alguno no le alcanza la columna, y entonces a
+    # todos, para que los encabezados se vean parejos.
+    letras = int(ancho_col / (4.2 if compacta else 4.7))      # por renglón, aprox.
+    caben = all(max(len(p) for p in str(v).split()) <= letras and len(str(v)) <= 2 * letras - 2
+                for v in vendedores if v != SIN_VENDEDOR)
+    cortos = ({v: ("Sin vendedor" if v == SIN_VENDEDOR else str(v)) for v in vendedores}
+              if caben else encabezados_vendedores(vendedores))
+
+    salida = []
+    for k, grupo in enumerate(partes):
+        ultima = k == len(partes) - 1
+        encabezado = ["Estatus"] + [cortos[v] for v in grupo] + ([rotulo_total] if ultima else [])
+        filas = []
+        for c in claves:
+            fila = [_est.etiqueta(c)] + [int(tabla_vendedor.loc[v].get(c, 0)) for v in grupo]
+            if ultima:
+                fila.append(int(tabla_vendedor[c].sum()))
+            filas.append(fila)
+        fila = ["Total"] + [int(tabla_vendedor.loc[v].get("Total", 0)) for v in grupo]
+        if ultima:
+            fila.append(int(tabla_vendedor["Total"].sum()))
+        filas.append(fila)
+        if tiene_pct:
+            fila = ["% Financiado"] + [f"{tabla_vendedor.loc[v].get('% Financiado', 0):.1f}%"
+                                       for v in grupo]
+            if ultima:
+                total = int(tabla_vendedor["Total"].sum())
+                fin = int(tabla_vendedor["FINANCIADO"].sum()) if "FINANCIADO" in tabla_vendedor else 0
+                fila.append(f"{fin / total * 100:.1f}%" if total else "—")
+            filas.append(fila)
+        tabla = tabla_estilo_mg([encabezado] + filas,
+                                col_widths=[ancho_estatus] + [ancho_col] * (len(encabezado) - 1),
+                                compacta=compacta)
+        tabla.hAlign = "LEFT"
+        if k:
+            salida.append(Spacer(1, 0.3 * cm))
+        salida.append(tabla)
+
+    abreviados = [f"{cortos[v]} = {v}" for v in vendedores
+                  if cortos[v] != str(v) and v != SIN_VENDEDOR]
+    notas = []
+    if n_partes > 1:
+        notas.append(f"La tabla va en {n_partes} partes por el número de vendedores; "
+                     f"«Total equipo» suma a todos.")
+    if abreviados:
+        notas.append("Nombres abreviados: " + "; ".join(abreviados) + ".")
+    if notas:
+        salida.append(Paragraph(" ".join(notas), estilo_nota))
+    return salida
 
 
 # =======================================================================
@@ -1563,26 +1804,8 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
         # la orientación natural cuando hay más estatus que vendedores.
         VOLTEAR_DESDE = 8
         if len(claves_v) >= VOLTEAR_DESDE:
-            vendedores_v = list(tabla_vendedor.index)
-            encabezados_v = ["Estatus"] + list(vendedores_v) + ["Total"]
-            filas_v = []
-            for c in claves_v:
-                valores = [int(tabla_vendedor.loc[v].get(c, 0)) for v in vendedores_v]
-                filas_v.append([_est.etiqueta(c)] + valores + [sum(valores)])
-            filas_v.append(["Total"]
-                           + [int(tabla_vendedor.loc[v].get("Total", 0)) for v in vendedores_v]
-                           + [int(tabla_vendedor["Total"].sum())])
-            if tiene_pct:
-                filas_v.append(["% Financiado"]
-                               + [f"{tabla_vendedor.loc[v].get('% Financiado', 0):.1f}%"
-                                  for v in vendedores_v] + [""])
-
-            ancho_nombre_v = 4.6 * cm
-            ancho_col_v = (_pdf_util.ANCHO_UTIL - ancho_nombre_v) / max(len(encabezados_v) - 1, 1)
-            anchos_v = [ancho_nombre_v] + [ancho_col_v] * (len(encabezados_v) - 1)
-            elementos.append(tabla_estilo_mg([encabezados_v] + filas_v,
-                                             col_widths=anchos_v,
-                                             compacta=len(encabezados_v) > 7))
+            elementos.extend(tablas_desempeno_volteadas(
+                tabla_vendedor, claves_v, tabla_estilo_mg, e["nota"]))
         else:
             # Las etiquetas cortas de encabezado (con los saltos de línea para
             # que no se partan a media palabra) vienen del catálogo.
@@ -1632,6 +1855,17 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
             e["cuerpo"]
         ))
         elementos.append(imagen_ajustada(rutas_graficas["monto_por_vendedor"], ancho_cm=16, alto_max_cm=15))
+        filas_tg, nota_tg, anchos_tg = filas_tabla_ticket_gap(tabla_vendedor)
+        if filas_tg:
+            elementos.append(Spacer(1, 0.2 * cm))
+            elementos.append(Paragraph(
+                "La tabla agrega, para quienes ya tienen créditos <b>FINANCIADOS</b>, el ticket "
+                "promedio por crédito y el seguro GAP que colocaron en ellos.",
+                e["cuerpo"]
+            ))
+            elementos.append(KeepTogether(tabla_estilo_mg(
+                filas_tg, col_widths=[a * cm for a in anchos_tg], fila_total=True)))
+            elementos.append(Paragraph(nota_tg, e["nota"]))
         elementos.append(Spacer(1, 0.4 * cm))
 
     # --- 4. Comparativo financiero por categoría ---
@@ -1716,5 +1950,15 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
             texto_modelos += f" <b>{modelo_top}</b> encabeza la lista con {modelo_top_val} solicitudes."
         elementos.append(Paragraph(texto_modelos, e["cuerpo"]))
         elementos.append(imagen_ajustada(rutas_graficas["modelos"], ancho_cm=16, alto_max_cm=13))
+        filas_mod, anchos_mod = filas_tabla_modelos(analisis_por_modelo(df))
+        if filas_mod:
+            elementos.append(Spacer(1, 0.2 * cm))
+            elementos.append(Paragraph(
+                "Más solicitado no es lo mismo que más financiado: la tabla muestra, por modelo, "
+                "cuántas solicitudes terminaron en crédito <b>FINANCIADO</b>.",
+                e["cuerpo"]
+            ))
+            elementos.append(tabla_estilo_mg(
+                filas_mod, col_widths=[a * cm for a in anchos_mod], fila_total=True))
         elementos.append(Spacer(1, 0.4 * cm))
     return elementos

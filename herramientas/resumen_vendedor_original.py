@@ -519,7 +519,84 @@ def grafica_modelos_vendedor(df_v, vendedor, guardar_como=None):
     return guardar_como
 
 
-def generar_graficas_vendedor(df_total, df_v, vendedor, carpeta):
+# -----------------------------------------------------------------------
+# Historial del vendedor (cuando se suben bitácoras de meses anteriores)
+# -----------------------------------------------------------------------
+def historial_vendedor(meses, vendedor):
+    """Indicadores del vendedor mes a mes.
+
+    meses: [(etiqueta, df limpio), ...] en orden cronológico; el último es
+        el mes del reporte.
+    Devuelve una lista de dicts, uno por mes: {"mes", "presente",
+    "ind" (lateral.indicadores del vendedor), "conversion_equipo"}.
+    """
+    historial = []
+    for etiqueta, df_mes in meses:
+        df_v = df_mes[df_mes["Nombre del Vendedor"] == vendedor]
+        historial.append({
+            "mes": etiqueta,
+            "presente": not df_v.empty,
+            "ind": _lateral.indicadores(df_v),
+            "conversion_equipo": _lateral.indicadores(df_mes)["conversion"],
+        })
+    return historial
+
+
+def _comparacion_de_historial(historial):
+    """(comparación contra el mes anterior, nombre de ese mes) o (None, "")
+    si no hay mes anterior o el vendedor no tuvo solicitudes en él."""
+    if not historial or len(historial) < 2 or not historial[-2]["presente"]:
+        return None, ""
+    return (_lateral.comparar_indicadores(historial[-2]["ind"], historial[-1]["ind"]),
+            historial[-2]["mes"])
+
+
+def grafica_historial_vendedor(historial, guardar_como=None):
+    """Solicitudes y créditos financiados del vendedor, mes a mes, con su
+    conversión anotada sobre cada mes."""
+    if not historial or len(historial) < 2:
+        return None
+    meses = [h["mes"] for h in historial]
+    solicitudes = [h["ind"]["solicitudes"] or 0 for h in historial]
+    financiados = [h["ind"]["financiados"] or 0 for h in historial]
+    if not any(solicitudes):
+        return None
+
+    x = np.arange(len(meses))
+    ancho = 0.36
+    fig, ax = plt.subplots(figsize=(8, 3.8))
+    ax.bar(x - ancho / 2, solicitudes, ancho, color=MG_GRIS_CLARO, label="Solicitudes")
+    ax.bar(x + ancho / 2, financiados, ancho, color=MG_ROJO_OSCURO, label="Créditos financiados")
+    tope = max(solicitudes) or 1
+    for i in range(len(historial)):
+        ax.text(x[i] - ancho / 2, solicitudes[i] + tope * 0.02, str(solicitudes[i]),
+                ha="center", va="bottom", fontsize=9)
+        ax.text(x[i] + ancho / 2, financiados[i] + tope * 0.02, str(financiados[i]),
+                ha="center", va="bottom", fontsize=9, fontweight="bold", color=MG_ROJO_OSCURO)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{m}\n{h['ind']['conversion']:.0f}% de conversión" if h["presente"]
+                        else f"{m}\nsin solicitudes" for m, h in zip(meses, historial)])
+    ax.set_ylim(0, tope * 1.18)
+    ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+    ax.set_ylabel("Número de solicitudes")
+
+    primero = next((h for h in historial if h["presente"]), historial[0])
+    ultimo = historial[-1]
+    antes, ahora = primero["ind"]["conversion"] or 0, ultimo["ind"]["conversion"] or 0
+    if primero is ultimo or abs(ahora - antes) < 0.5:
+        hallazgo = f"Tu conversión se mantiene en {ahora:.0f}%"
+    else:
+        hallazgo = (f"Tu conversión {'subió' if ahora > antes else 'bajó'} de "
+                    f"{antes:.0f}% a {ahora:.0f}% desde {primero['mes']}")
+    _h.titular(ax, hallazgo, "Tus solicitudes y créditos financiados por mes")
+    plt.tight_layout()
+    _h.leyenda_bajo_eje(ax, ncol=2)
+    _guardar_si_procede(fig, guardar_como)
+    plt.close(fig)
+    return guardar_como
+
+
+def generar_graficas_vendedor(df_total, df_v, vendedor, carpeta, historial=None):
     """Gráficas del vendedor, como PNG en `carpeta` (la de la corrida)."""
     # Se vuelve a repartir con el equipo completo por si otra herramienta
     # cambió los colores entre la limpieza y las gráficas (Streamlit).
@@ -529,6 +606,7 @@ def generar_graficas_vendedor(df_total, df_v, vendedor, carpeta):
         ("dona_status", lambda: grafica_dona_status_vendedor(df_v, vendedor, os.path.join(carpeta, f"dona_{_slug(vendedor)}.png"))),
         ("equipo_destacado", lambda: grafica_equipo_destacado(df_total, vendedor, os.path.join(carpeta, f"equipo_{_slug(vendedor)}.png"))),
         ("modelos", lambda: grafica_modelos_vendedor(df_v, vendedor, os.path.join(carpeta, f"modelos_{_slug(vendedor)}.png"))),
+        ("historial", lambda: grafica_historial_vendedor(historial, os.path.join(carpeta, f"historial_{_slug(vendedor)}.png"))),
     ]
     rutas = {}
     for clave, funcion in especificaciones:
@@ -638,8 +716,13 @@ def anchos_ajustados(datos, ancho_total=None, tam_fuente=8.2, tam_encabezado=8.3
 
 
 def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq, ctx_mes,
-                                  rutas_graficas, nombre_archivo=None, datos=None):
-    """datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config."""
+                                  rutas_graficas, nombre_archivo=None, datos=None,
+                                  historial=None):
+    """datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config.
+    historial: historial_vendedor() si se subieron bitácoras de meses
+        anteriores; agrega el cambio contra el mes anterior y la sección
+        "Tu historial"."""
+    comparacion, mes_anterior = _comparacion_de_historial(historial)
     datos = datos or DatosReporte()
     df_v = resumen_v["df"]
     total_v = resumen_v["total"]
@@ -796,7 +879,8 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
 
     # Cifras clave: en el PDF se dibujan como la columna lateral de la
     # portada (pdf_util.construir_con_lateral); en el Word quedan como tabla.
-    elementos.append(_lateral.bloque_cifras(_lateral.cifras_vendedor(resumen_v["df_equipo"], vendedor)))
+    elementos.append(_lateral.bloque_cifras(_lateral.cifras_vendedor(
+        resumen_v["df_equipo"], vendedor, comparacion, mes_anterior)))
     elementos.append(Spacer(1, 0.5 * cm))
 
     # --- Resumen Ejecutivo ---
@@ -857,6 +941,26 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
             "No fue posible calcular tu posición en el equipo con los datos disponibles.", estilo_nota
         ))
     elementos.append(Spacer(1, 0.3 * cm))
+
+    # Contra el mes anterior, si se subió y el vendedor tuvo solicitudes en él.
+    if comparacion:
+        cambios = {f["clave"]: f for f in comparacion}
+        partes_mes = []
+        for clave, sujeto in (("solicitudes", "tus solicitudes"), ("financiados", "tus créditos financiados"),
+                              ("conversion", "tu conversión")):
+            f = cambios.get(clave)
+            if not f or f["cambio"] == "—":
+                continue
+            partes_mes.append(
+                f"{sujeto} se {'mantuvieron' if clave != 'conversion' else 'mantuvo'} en {f['actual']}"
+                if f["cambio"] == "sin cambio" else
+                f"{sujeto} {'pasaron' if clave != 'conversion' else 'pasó'} de {f['anterior']} "
+                f"a {f['actual']} ({f['cambio'].replace(' (', ', ').replace(')', '')})")
+        if partes_mes:
+            elementos.append(Paragraph("Frente al mes anterior", estilo_h2))
+            texto_mes = f"Frente a {mes_anterior}, " + _nombres_y(partes_mes) + "."
+            elementos.append(Paragraph(_pdf_util.resaltar(texto_mes), estilo_cuerpo))
+            elementos.append(Spacer(1, 0.3 * cm))
 
     elementos.append(Paragraph("Seguro GAP", estilo_h2))
     if "pct_gap" in resumen_v:
@@ -1012,6 +1116,15 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
         ["% Conversión a financiado", f"{resumen_v.get('pct_financiado', 0):.1f}%", f"{resumen_eq.get('promedio_pct_financiado', 0):.1f}%"],
         ["% Solicitudes con GAP", f"{resumen_v.get('pct_gap', 0):.1f}%", f"{resumen_eq.get('pct_gap_equipo', 0):.1f}%"],
     ]
+    # Ticket promedio (monto financiado entre créditos financiados): tuyo y
+    # del equipo completo.
+    if resumen_eq.get("financiados") and resumen_eq.get("monto_financiado"):
+        ticket_equipo = resumen_eq["monto_financiado"] / resumen_eq["financiados"]
+        filas_comp.append([
+            "Ticket promedio por crédito",
+            f"${resumen_v['ticket_financiado']:,.0f}" if resumen_v.get("ticket_financiado") else "—",
+            f"${ticket_equipo:,.0f}",
+        ])
     elementos.append(KeepTogether(tabla_estilo_mg(
         [["Métrica", "Tú", "Promedio del Equipo"]] + filas_comp,
         col_widths=[ANCHO_UTIL * 0.46, ANCHO_UTIL * 0.27, ANCHO_UTIL * 0.27],
@@ -1019,6 +1132,41 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
         tam_fuente=9,
     )))
     elementos.append(Spacer(1, 0.4 * cm))
+
+    # --- Tu historial (solo con bitácoras de meses anteriores) ---
+    if historial and len(historial) >= 2:
+        elementos.append(Paragraph("Tu Historial", estilo_h2))
+        elementos.append(Paragraph(
+            f"Tus resultados de los últimos {len(historial)} meses. La columna «Equipo» es la "
+            f"conversión de todo el equipo en ese mes, como referencia.",
+            estilo_cuerpo
+        ))
+        if "historial" in rutas_graficas:
+            elementos.append(imagen_ajustada(rutas_graficas["historial"], ancho_cm=14, alto_max_cm=8))
+            elementos.append(Spacer(1, 0.2 * cm))
+        filas_hist = []
+        for h in historial:
+            ind = h["ind"]
+            equipo = f"{h['conversion_equipo']:.1f}%" if h["conversion_equipo"] is not None else "—"
+            if not h["presente"]:
+                filas_hist.append([h["mes"], "0", "—", "—", equipo, "—", "—"])
+                continue
+            filas_hist.append([
+                h["mes"], str(ind["solicitudes"]),
+                str(ind["financiados"]) if ind["financiados"] is not None else "—",
+                f"{ind['conversion']:.1f}%" if ind["conversion"] is not None else "—",
+                equipo,
+                f"${ind['monto']:,.0f}" if ind["monto"] is not None else "—",
+                f"{ind['gap']:.0f}%" if ind["gap"] is not None else "—",
+            ])
+        elementos.append(KeepTogether(tabla_estilo_mg(
+            [["Mes", "Solicitudes", "Financiados", "Conversión", "Equipo",
+              "Monto financiado", "GAP en financiados"]] + filas_hist,
+            # El mes a lo ancho ("Septiembre 2026" se partía en dos renglones).
+            col_widths=[3.4 * cm] + [(ANCHO_UTIL - 3.4 * cm) / 6] * 6,
+            alineaciones=["left"] + ["center"] * 6,
+        )))
+        elementos.append(Spacer(1, 0.4 * cm))
 
     # --- 4. Modelos más solicitados ---
     if "modelos" in rutas_graficas:

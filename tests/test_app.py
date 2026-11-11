@@ -1,6 +1,7 @@
 """La app de punta a punta, sin navegador (streamlit.testing.v1.AppTest)."""
 
 import io
+import zipfile
 from pathlib import Path
 
 import pandas as pd
@@ -42,7 +43,8 @@ def _excel(hojas):
 
 def _descargas(at):
     """Botones de descarga del RESULTADO (sin el de la guía de uso)."""
-    return [b for b in at.get("download_button") if not (b.key or "").startswith("guia_")]
+    return [b for b in at.get("download_button")
+            if not (b.key or "").startswith(("guia_", "todo_"))]
 
 
 def test_cambiar_de_archivo_borra_el_resultado_anterior(app):
@@ -75,6 +77,13 @@ def test_genera_un_reporte_desde_la_app(app):
     nombres = sorted(nombre for nombre, _ in app.session_state["resultado_resumen_mensual"]["archivos"])
     assert [n.rsplit(".", 1)[-1] for n in nombres] == ["docx", "pdf", "png", "png", "xlsx"]
     assert len(_descargas(app)) == 5
+    # ...y un botón más para bajarlos todos juntos.
+    todo = [b for b in app.get("download_button") if b.key == "todo_resumen_mensual"]
+    assert len(todo) == 1 and "5 archivos" in todo[0].label
+    nombre_zip, contenido = app.session_state["resultado_resumen_mensual"]["zip"]
+    assert nombre_zip == "Resumen_Oct26_completo.zip"
+    with zipfile.ZipFile(io.BytesIO(contenido)) as zf:
+        assert sorted(zf.namelist()) == nombres
 
 
 def test_vista_previa_avisa_si_hay_varias_hojas(app):
@@ -119,7 +128,11 @@ def test_cada_herramienta_muestra_los_campos_que_declara(app, herramienta):
     assert hay_texto("Implant") == herramienta.pide_pdv_e_implant
     assert any("fecha de corte" in t.label for t in app.toggle) == herramienta.pide_fecha_corte
     areas = {a.label for a in app.text_area}
-    assert ("Un vendedor por línea" in areas) == herramienta.pide_vendedores
+    assert any(m.label == "Vendedores" for m in app.multiselect) == herramienta.pide_vendedores
+    # El segundo campo de archivos (meses anteriores) solo donde se declara.
+    anteriores = [u for u in app.get("file_uploader")
+                  if (u.key or "") == f"anteriores_{herramienta.id}"]
+    assert bool(anteriores) == bool(herramienta.meses_anteriores)
     assert ("Un mes por línea" in areas) == herramienta.pide_etiquetas_mes
     # El menú usa el icono y el nombre corto declarados.
     opciones_menu = app.radio(key="herramienta_activa").options

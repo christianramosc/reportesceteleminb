@@ -383,6 +383,9 @@ def _es_portada(doc):
     return getattr(doc, "con_lateral", False) and doc.page == 1
 
 
+VERDE_MEJORA = "#15803D"
+
+
 def _flowables_lateral(cifras, alto, ancho=ANCHO_LATERAL - 1.9 * _cm):
     """Las cifras clave, repartidas en todo el alto de la columna."""
     from reportlab.platypus import Spacer as _S
@@ -426,9 +429,17 @@ def _flowables_lateral(cifras, alto, ancho=ANCHO_LATERAL - 1.9 * _cm):
             encabezado = fila
         else:
             encabezado = _P(c["etiqueta"], etiqueta)
-        bloques.append([encabezado,
-                        _P(c["valor"], _a_la_medida(c["valor"], alerta if en_alerta else numero)),
-                        _P(c.get("nota", ""), nota)])
+        bloque = [encabezado,
+                  _P(c["valor"], _a_la_medida(c["valor"], alerta if en_alerta else numero)),
+                  _P(c.get("nota", ""), nota)]
+        # Cambio contra el mes anterior (solo si se subió esa bitácora):
+        # verde si mejoró, rojo si empeoró, gris si no es ni bueno ni malo.
+        if c.get("cambio"):
+            color = {True: VERDE_MEJORA, False: "#E4002B"}.get(c.get("mejora"), GRIS_SEC)
+            bloque.append(_P(c["cambio"], nota.clone(
+                f"LatCambio{color}", fontName="Helvetica-Bold", fontSize=7.5, leading=10,
+                textColor=_col.HexColor(color))))
+        bloques.append(bloque)
 
     # El espacio entre cifras se calcula MIDIENDO la altura real de cada una.
     # Antes se estimaba (~56 pt por cifra) y quedaba tan justo que, al agregar

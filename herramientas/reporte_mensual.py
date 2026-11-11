@@ -38,8 +38,10 @@ from .pdf_util import Parrafo as Paragraph
 from .reporte_base import (
     GRIS_LINEA,
     MG_ROJO,
+    analisis_por_modelo,
     clasificar_status,
     contar_vendedores,
+    modelo_mas_financiado,
     contexto_de_corte,
     crear_estilos,
     crear_maquetadores,
@@ -51,10 +53,16 @@ from .reporte_base import (
 MODOS = ("avance", "cierre")
 
 
+def _frase_y(textos):
+    """'a', 'a y b', 'a, b y c'."""
+    textos = list(textos)
+    return textos[0] if len(textos) == 1 else ", ".join(textos[:-1]) + " y " + textos[-1]
+
+
 def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
                         nombre_archivo=None, fecha_corte=None,
                         recolectar_elementos=None, hoja=None, datos=None,
-                        carpeta_graficas=None):
+                        carpeta_graficas=None, df_anterior=None, mes_anterior=""):
     """
     Arma el reporte: portada con KPIs, resumen ejecutivo redactado, reporte
     detallado por sección (con tablas y gráficas) y conclusiones. Recibe los
@@ -68,6 +76,9 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
         para advertir si la fecha de corte cae en otro mes.
     datos: PDV, implant y empresa (config.DatosReporte); por defecto, los de config.
     carpeta_graficas: dónde dibujar las gráficas (por defecto, junto al PDF).
+    df_anterior, mes_anterior: bitácora (ya limpia) y nombre del mes anterior.
+        Opcionales y solo para el cierre: la portada y el resumen ejecutivo
+        muestran entonces el cambio de cada indicador contra ese mes.
     """
     if modo not in MODOS:
         raise ValueError(f"modo debe ser uno de {MODOS}, no {modo!r}")
@@ -237,8 +248,10 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
 
     # Cifras clave: en el PDF se dibujan como la columna lateral de la
     # portada (pdf_util.construir_con_lateral); en el Word quedan como tabla.
+    comparacion = (_lateral.comparar_meses(df, df_anterior)
+                   if df_anterior is not None and not es_avance else None)
     cifras = (_lateral.cifras_avance(df, ctx=ctx, hoja=hoja) if es_avance
-              else _lateral.cifras_resumen(df))
+              else _lateral.cifras_resumen(df, comparacion, mes_anterior))
     elementos.append(_lateral.bloque_cifras(cifras))
     elementos.append(Spacer(1, 0.5 * cm))
 
@@ -308,6 +321,34 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
             estilo_cuerpo
         ))
     elementos.append(Spacer(1, 0.3 * cm))
+
+    # Contra el mes anterior (solo si se subió esa bitácora). Va aquí, tras
+    # el panorama, porque es lo segundo que se pregunta: "¿y contra el mes
+    # pasado?". El detalle mes a mes sigue siendo el Reporte Comparativo.
+    if comparacion:
+        nombre_anterior = str(mes_anterior).strip() or "Mes anterior"
+        nombre_actual = str(hoja).strip().title() if hoja else "Este mes"
+        def _minuscula(nombre):              # "GAP en financiados" se queda igual
+            return nombre if nombre.startswith("GAP") else nombre.lower()
+        mejoran = [_minuscula(f["nombre"]) for f in comparacion if f["mejora"] is True]
+        empeoran = [_minuscula(f["nombre"]) for f in comparacion if f["mejora"] is False]
+        frases = []
+        if mejoran:
+            frases.append(f"{'Sube' if len(mejoran) == 1 else 'Suben'} {_frase_y(mejoran)}")
+        if empeoran:
+            frases.append(f"{'baja' if len(empeoran) == 1 else 'bajan'} {_frase_y(empeoran)}")
+        resumen_cambios = ("; ".join(frases) + "." if frases
+                           else "Los indicadores se mantienen sin cambio.")
+        resumen_cambios = resumen_cambios[0].upper() + resumen_cambios[1:]
+        elementos.append(Paragraph("Comparación con el mes anterior", estilo_h2))
+        elementos.append(Paragraph(
+            f"Frente a <b>{nombre_anterior}</b>: {resumen_cambios}", estilo_cuerpo))
+        elementos.append(KeepTogether(tabla_estilo_mg(
+            [["Indicador", nombre_anterior, nombre_actual, "Cambio"]]
+            + [[f["nombre"], f["anterior"], f["actual"], f["cambio"]] for f in comparacion],
+            col_widths=[5.6 * cm, 3.6 * cm, 3.6 * cm, 3.2 * cm],
+        )))
+        elementos.append(Spacer(1, 0.3 * cm))
 
     elementos.append(Paragraph("Panorama financiero", estilo_h2))
     partes_financiero = []
@@ -422,10 +463,20 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
 
     if modelo_top:
         elementos.append(Paragraph("Modelo más solicitado", estilo_h2))
-        elementos.append(Paragraph(
-            f"El vehículo más solicitado {periodo} es <b>{modelo_top}</b>, con {modelo_top_val} solicitudes.",
-            estilo_cuerpo
-        ))
+        texto_modelo = (f"El vehículo más solicitado {periodo} es <b>{modelo_top}</b>, "
+                        f"con {modelo_top_val} solicitudes.")
+        # ...y cuál se financia más, que no siempre es el mismo.
+        lider = modelo_mas_financiado(analisis_por_modelo(df))
+        if lider:
+            mod_fin, n_fin, n_sol, pct_fin = lider
+            creditos = f"{n_fin} crédito{'s' if n_fin != 1 else ''}"
+            texto_modelo += (
+                f" También es el que más se financia: {creditos} de {n_sol} solicitudes ({pct_fin:.0f}%)."
+                if mod_fin == modelo_top else
+                f" El que más se financia es <b>{mod_fin}</b>: {creditos} de {n_sol} "
+                f"solicitudes ({pct_fin:.0f}%)."
+            )
+        elementos.append(Paragraph(texto_modelo, estilo_cuerpo))
         elementos.append(Spacer(1, 0.2 * cm))
 
     # --- Focos de atención ---
