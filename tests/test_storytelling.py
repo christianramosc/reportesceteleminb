@@ -59,12 +59,10 @@ def test_las_acciones_nombran_cuantas_y_de_quien():
     assert C.acciones_mensual(solo_fin, "cierre") == []
 
 
-def test_idea_principal_con_y_sin_meta():
+def test_idea_principal():
     texto = C.idea_principal_mensual(BASE, "cierre", periodo="Octubre 2026")
     assert texto.startswith("Octubre 2026: se financiaron <b>4 de 15 solicitudes (27%)</b>")
     assert "meta" not in texto
-    assert "faltaron 2 créditos" in C.idea_principal_mensual(BASE, "cierre", meta_conversion=40)
-    assert "faltan 2 créditos" in C.idea_principal_mensual(BASE, "avance", meta_conversion=40)
 
 
 def test_titulares_nuevos():

@@ -212,8 +212,7 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
     texto_intro = _conclusiones.idea_principal_mensual(
         df, "avance" if es_avance else "cierre",
         ctx=ctx if (es_avance and corte_coherente) else None,
-        periodo=str(hoja).strip().title() if hoja and _conclusiones.mes_desde_hoja(hoja) else "",
-        meta_conversion=datos.meta_conversion)
+        periodo=str(hoja).strip().title() if hoja and _conclusiones.mes_desde_hoja(hoja) else "")
     intro_portada = Table([[Paragraph(texto_intro, estilo_cuerpo)]],
                           colWidths=[_pdf_util.ANCHO_UTIL])
     intro_portada.setStyle(TableStyle([
@@ -230,8 +229,8 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
     # portada (pdf_util.construir_con_lateral); en el Word quedan como tabla.
     comparacion = (_lateral.comparar_meses(df, df_anterior)
                    if df_anterior is not None and not es_avance else None)
-    cifras = (_lateral.cifras_avance(df, ctx=ctx, hoja=hoja, meta=datos.meta_conversion) if es_avance
-              else _lateral.cifras_resumen(df, comparacion, mes_anterior, meta=datos.meta_conversion))
+    cifras = (_lateral.cifras_avance(df, ctx=ctx, hoja=hoja) if es_avance
+              else _lateral.cifras_resumen(df, comparacion, mes_anterior))
     elementos.append(_lateral.bloque_cifras(cifras))
     elementos.append(Spacer(1, 0.2 * cm))
 
