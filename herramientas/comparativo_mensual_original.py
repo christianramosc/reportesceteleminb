@@ -15,7 +15,6 @@ import os
 from . import fechas as _fechas   # hora de México, no la del servidor
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 
 from reportlab.lib.pagesizes import letter
@@ -42,24 +41,18 @@ from . import conclusiones as _conclusiones
 from . import pdf_util as _pdf_util
 from . import lateral as _lateral
 from . import folios as _folios
-from . import hallazgos as _h
 from .config import DatosReporte
 # Paragraph que tolera "&" y "<" en los nombres de la bitácora.
 from .pdf_util import Parrafo as Paragraph
 from .reporte_base import limpiar_datos as _limpiar_datos_base
 from .reporte_base import (  # paleta, fuentes, limpieza y gráficas compartidas
-    COLOR_CATEGORIA,
     FUENTE_BOLD,
     FUENTE_REGULAR,
     GRIS_LINEA,
     INBURSA_AZUL,
-    MG_GRIS_CLARO,
     MG_GRIS_OSCURO,
-    MG_ROJO_OSCURO,
     ORDEN_CATEGORIAS,
     _MESES_ES,
-    _color_texto_legible,
-    _guardar_si_procede,
     SIN_VENDEDOR,
     crear_estilos,
     exigir_solicitudes,

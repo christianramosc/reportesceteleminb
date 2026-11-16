@@ -784,7 +784,6 @@ def conclusiones_vendedor(df, vendedor):
 # recomendaciones que apliquen a cualquier mes ("dar seguimiento al equipo"):
 # cada una nombra el número de solicitudes, el monto o la persona.
 MAX_ACCIONES = 4
-_GRUPO_PERDIDA = None
 
 
 def _es_perdida(categorias):

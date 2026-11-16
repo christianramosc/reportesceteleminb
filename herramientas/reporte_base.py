@@ -136,7 +136,6 @@ FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
 # registrar_categorias() lo agrega y aparece aquí automáticamente).
 # =======================================================================
 from . import estatus as _est
-from . import metricas as _metricas
 from . import hallazgos as _h
 from . import pdf_util as _pdf_util
 from . import nombres_archivo as _nombres

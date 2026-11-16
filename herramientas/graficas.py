@@ -25,7 +25,6 @@ Criterios (tomados de "Storytelling con datos", C. Nussbaumer Knaflic):
 import os
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 
@@ -610,7 +609,7 @@ def _lineas_con_rotulo(ax, meses, series, minimo_sep, extras=()):
     nombre al final, del color de la línea; la principal rotula todos sus
     puntos y las demás solo el primero y el último."""
     x = np.arange(len(meses))
-    for nombre, valores, color, principal in series:
+    for _nombre, valores, color, principal in series:
         ax.plot(x, valores, marker="o", color=color, zorder=3 if principal else 2,
                 linewidth=2.8 if principal else 1.6, markersize=6.5 if principal else 4.5)
     # Rótulos de punto, sin choques, mes por mes.
