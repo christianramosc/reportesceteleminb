@@ -45,35 +45,24 @@ import os
 import re
 import datetime
 from . import fechas as _fechas   # hora de México, no la del servidor
-import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")   # servidor sin pantalla: hay que fijarlo ANTES de pyplot
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
-from matplotlib.colors import to_rgb
 
 from . import conclusiones as _conclusiones
 from . import pdf_util as _pdf_util
 from . import lateral as _lateral
-from . import hallazgos as _h
 from . import estatus as _est
 from .config import DatosReporte
 # Paleta, fuentes, estilo de las gráficas, columnas esperadas y limpieza
 # de montos y porcentajes: compartidos con los demás reportes.
 from .reporte_base import (
-    COLOR_CATEGORIA,
     FUENTE_BOLD,
     FUENTE_REGULAR,
     GRIS_LINEA,
-    MG_GRIS_CLARO,
     MG_GRIS_OSCURO,
-    MG_ROJO_OSCURO,
     ORDEN_CATEGORIAS,
     _MESES_ES,
-    _color_texto_legible,
-    _gradiente,
-    _guardar_si_procede,
     SIN_VENDEDOR,
     _nombres_y,
     crear_estilos,
@@ -671,15 +660,6 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
         return (n / total_v * 100) if total_v else 0
 
     financiado = resumen_v.get("financiado", 0)
-    aprobado = resumen_v.get("aprobado", 0)
-    # Resto de estatus presentes en las solicitudes de este vendedor, en el
-    # orden del catálogo (antes solo se contemplaba RECHAZADO y
-    # CONTRAPROPUESTA; cualquier otro estatus se escondía en esta última).
-    _df_v = resumen_v.get("df")
-    _conteo_v = (_df_v["Categoria"].value_counts()
-                 if _df_v is not None and "Categoria" in getattr(_df_v, "columns", []) else pd.Series(dtype=int))
-    otros_estatus = [(c, int(_conteo_v[c])) for c in ORDEN_CATEGORIAS
-                     if c not in ("FINANCIADO", "APROBADO") and _conteo_v.get(c, 0)]
 
     # -------------------------------------------------------------
     # Construcción del documento
