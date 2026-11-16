@@ -324,7 +324,10 @@ def test_equipo_grande_parte_la_tabla_y_abrevia_los_nombres():
 
 def test_equipo_chico_conserva_los_nombres_completos():
     tablas, salida = _tablas_volteadas(["Ana Ruiz", "Luis Mora", "Sofia Paz", "Diego Lara"])
-    assert len(tablas) == 1 and salida == tablas          # sin nota de abreviaturas
+    # Una tabla y, debajo, solo la nota del sombreado y la base pequeña:
+    # sin nota de abreviaturas.
+    assert len(tablas) == 1 and salida[:1] == tablas and len(salida) == 2
+    assert "Nombres abreviados" not in salida[1].text
     encabezado = tablas[0]._cellvalues[0]
     assert encabezado[0] == "Estatus" and encabezado[-1] == "Total"
     assert sorted(encabezado[1:-1]) == ["Ana Ruiz", "Diego Lara", "Luis Mora", "Sofia Paz"]

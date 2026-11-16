@@ -16,7 +16,7 @@ from . import nombres_archivo as _nombres
 
 def ejecutar(rutas_archivos, carpeta_salida="salida", fecha_corte=None,
              nombre_pdv=None, nombre_analista=None, **_opciones):
-    datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista)
+    datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista, **_opciones)
     nombre_pdv, nombre_analista = datos.pdv, datos.analista
 
     os.makedirs(carpeta_salida, exist_ok=True)

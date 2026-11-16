@@ -22,6 +22,7 @@ import pandas as pd
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
+from reportlab.platypus import CondPageBreak  # noqa: E402
 from reportlab.platypus import (
     HRFlowable, KeepTogether, PageBreak, SimpleDocTemplate,
     Spacer, Table, TableStyle,
@@ -183,7 +184,7 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
                 f"Corte: <b>{FECHA_REPORTE}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
                 f"Día {ctx['dia_actual']} de {ctx['dias_en_mes']} de {ctx['nombre_mes']} "
                 f"&nbsp;&nbsp;|&nbsp;&nbsp; "
-                f"<font color='{MG_ROJO}'><b>{ctx['pct_transcurrido']:.0f}% del mes transcurrido</b></font>",
+                f"<b>{ctx['pct_transcurrido']:.0f}% del mes transcurrido</b>",
                 estilo_meta_portada
             ))
         else:
@@ -204,36 +205,14 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
     _presentes = _est.categorias_presentes(df)
     _abiertas_presentes = [c for c in _presentes
                            if _est.GRUPO_CATEGORIA.get(c, _est.ABIERTA) == _est.ABIERTA]
-    _texto_clasificadas = (
-        f"clasificadas en {len(_presentes)} estatus: "
-        f"<b>{_est.frase_enumerada(_presentes)}</b>. "
-        if _presentes else ""
-    )
-    if es_avance:
-        _texto_pueden_moverse = (
-            f"{'Queda' if ctx['dias_restantes'] == 1 else 'Quedan'} "
-            f"{ctx['dias_restantes']} día{'s' if ctx['dias_restantes'] != 1 else ''} "
-            f"para el cierre de {ctx['nombre_mes']}, así que las solicitudes en "
-            f"<b>{_est.frase_enumerada(_abiertas_presentes, y='y')}</b> "
-            f"aún pueden convertirse en FINANCIADAS. "
-            if _abiertas_presentes and corte_coherente else ""
-        )
-        texto_intro = (
-            f"Este es un corte <b>PRELIMINAR</b>: resume el comportamiento de las "
-            f"{total} solicitudes de crédito automotriz registradas en la bitácora hasta el "
-            f"{FECHA_REPORTE}, {_texto_clasificadas}"
-            f"{_texto_pueden_moverse}"
-            f"Cubre el desempeño por vendedor, la colocación del seguro GAP y los modelos "
-            f"de mayor demanda."
-        )
-    else:
-        texto_intro = (
-            f"Este reporte resume el comportamiento de las {total} solicitudes de crédito automotriz "
-            f"registradas en la bitácora, desde su ingreso hasta su cierre de mes, "
-            f"{_texto_clasificadas}"
-            f"Incluye el desempeño por vendedor, la colocación "
-            f"del seguro GAP y los modelos de vehículo con mayor demanda."
-        )
+    # La portada abre con el RESULTADO, no con la descripción del documento
+    # ("Este reporte resume el comportamiento de..."). Quien solo lea este
+    # párrafo ya sabe cómo va el mes.
+    texto_intro = _conclusiones.idea_principal_mensual(
+        df, "avance" if es_avance else "cierre",
+        ctx=ctx if (es_avance and corte_coherente) else None,
+        periodo=str(hoja).strip().title() if hoja and _conclusiones.mes_desde_hoja(hoja) else "",
+        meta_conversion=datos.meta_conversion)
     intro_portada = Table([[Paragraph(texto_intro, estilo_cuerpo)]],
                           colWidths=[_pdf_util.ANCHO_UTIL])
     intro_portada.setStyle(TableStyle([
@@ -250,34 +229,42 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
     # portada (pdf_util.construir_con_lateral); en el Word quedan como tabla.
     comparacion = (_lateral.comparar_meses(df, df_anterior)
                    if df_anterior is not None and not es_avance else None)
-    cifras = (_lateral.cifras_avance(df, ctx=ctx, hoja=hoja) if es_avance
-              else _lateral.cifras_resumen(df, comparacion, mes_anterior))
+    cifras = (_lateral.cifras_avance(df, ctx=ctx, hoja=hoja, meta=datos.meta_conversion) if es_avance
+              else _lateral.cifras_resumen(df, comparacion, mes_anterior, meta=datos.meta_conversion))
     elementos.append(_lateral.bloque_cifras(cifras))
-    elementos.append(Spacer(1, 0.5 * cm))
+    elementos.append(Spacer(1, 0.2 * cm))
+
+    # --- Lo más importante: qué hacer, y en qué se basa ---
+    # Antes los focos iban en la página 4 y las conclusiones en la última.
+    modo_txt = "avance" if es_avance else "cierre"
+    focos, conclusiones = _conclusiones.focos_y_conclusiones_mensual(
+        df, modo_txt, resumen=resumen, ctx=ctx if es_avance else None,
+        hoja=hoja if es_avance else None)
+    _pdf_util.bloque_lo_importante(
+        elementos, _estilos, mensaje=datos.mensaje, analista=datos.analista,
+        acciones=_conclusiones.acciones_mensual(df, modo_txt),
+        # El foco de solicitudes abiertas ya es la acción 1, con los mismos
+        # datos: no se repite como sustento.
+        sustento=[t for t in focos + conclusiones
+                  if not t.startswith(("<b>Sin dispersar", "<b>Por cerrar", "<b>Solicitudes abiertas"))])
+    # El detalle empieza en hoja nueva, salvo que la portada haya desbordado
+    # unas líneas a la siguiente: ahí un salto dejaría una hoja casi vacía.
+    elementos.append(CondPageBreak(17 * cm))
 
     # --- Resumen Ejecutivo ---
-    elementos.append(Paragraph("Resumen Ejecutivo (a la fecha de corte)" if es_avance
-                               else "Resumen Ejecutivo", estilo_h1))
+    elementos.append(Paragraph("Detalle: resumen a la fecha de corte" if es_avance
+                               else "Detalle: resumen del mes", estilo_h1))
     elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     elementos.append(Paragraph("Panorama general", estilo_h2))
     if tiene_categoria:
-        # El desglose enumera todas las categorías con solicitudes este mes.
-        _desglose = _est.frase_desglose(resumen.get("conteo_categorias", {}), total)
+        # Sin párrafo que enumere los estatus: la tabla de abajo ya los trae,
+        # y la sección 1 los grafica. En el avance solo queda la advertencia.
         if es_avance:
-            _moviles = _est.frase_enumerada(_abiertas_presentes, y="y", mayusculas=True)
-            texto_panorama = (
-                f"De las {total} solicitudes registradas hasta el {FECHA_REPORTE}, "
-                f"{_desglose}. "
-                + (f"Por tratarse de un corte preliminar, las cifras de "
-                   f"{_moviles} pueden variar antes del cierre de {ctx['nombre_mes']}."
-                   if _moviles else
-                   f"Por tratarse de un corte preliminar, las cifras pueden variar "
-                   f"antes del cierre de {ctx['nombre_mes']}.")
-            )
-        else:
-            texto_panorama = f"De las {total} solicitudes registradas en el periodo, {_desglose}."
-        elementos.append(Paragraph(texto_panorama, estilo_cuerpo))
+            elementos.append(Paragraph(
+                f"Corte preliminar al {FECHA_REPORTE}: las solicitudes abiertas todavía "
+                f"pueden cambiar de estatus antes del cierre de {ctx['nombre_mes']}.",
+                estilo_nota))
         # La tabla agrupa por CATEGORÍA, no por el texto crudo del Excel: si la
         # bitácora trae "FINANCIADO" y "FINANCIADOS", ambos suman una sola
         # fila. Se ordena igual que las gráficas (del cierre más fuerte al
@@ -479,24 +466,6 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
         elementos.append(Paragraph(texto_modelo, estilo_cuerpo))
         elementos.append(Spacer(1, 0.2 * cm))
 
-    # --- Focos de atención ---
-    # Lo que pide una acción va aquí, arriba, porque es lo primero que alguien
-    # con poco tiempo debe leer. En un avance: qué se puede rescatar antes del
-    # cierre y a quién hay que seguir (si la fecha de corte no corresponde al
-    # mes de los datos, el primer foco lo advierte). Los criterios viven en
-    # herramientas/conclusiones.py y no se repiten en las conclusiones finales.
-    if es_avance:
-        focos, conclusiones = _conclusiones.focos_y_conclusiones_mensual(
-            df, "avance", resumen=resumen, ctx=ctx, hoja=hoja)
-    else:
-        focos, conclusiones = _conclusiones.focos_y_conclusiones_mensual(
-            df, "cierre", resumen=resumen)
-    if focos:
-        elementos.append(Paragraph("Focos de atención", estilo_h2))
-        for nota in focos:
-            elementos.append(Paragraph(_pdf_util.resaltar("•  " + nota), estilo_cuerpo))
-        elementos.append(Spacer(1, 0.2 * cm))
-
     elementos.append(PageBreak())
     # === FIN RESUMEN EJECUTIVO — continúa el Reporte Detallado abajo ===
 
@@ -507,9 +476,8 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
     secciones_detalladas(
         elementos, _estilos,
         textos={
-            "estatus": "La primera gráfica cuenta las solicitudes de cada estatus; la dona muestra "
-                       "esos mismos estatus como proporción del total e indica qué vendedores "
-                       "aportan a cada uno.",
+            "estatus": "La primera gráfica cuenta las solicitudes de cada estatus. La segunda las "
+                       "agrupa en cuatro: financiado, aprobado, en trámite y lo que no procedió.",
             "vendedores": f"{'Se registra' if n_vendedores == 1 else 'Se registran'} {n_vendedores} "
                           f"{'vendedor' if n_vendedores == 1 else 'vendedores'} con solicitudes "
                           f"{'a la fecha de corte' if es_avance else 'en el periodo'}. "
@@ -524,14 +492,6 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
         n_vendedores=n_vendedores, modelo_top=modelo_top,
         modelo_top_val=modelo_top_val,
     )
-
-    # ===============================================================
-    elementos.append(Paragraph("Conclusiones y Factores Importantes (a la fecha)" if es_avance
-                               else "Conclusiones y Factores Importantes", estilo_h1))
-    elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
-
-    for c in conclusiones:
-        elementos.append(Paragraph(_pdf_util.resaltar("•  " + c), estilo_cuerpo))
 
     # -------------------------------------------------------------
     # Generar el PDF

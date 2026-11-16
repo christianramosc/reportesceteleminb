@@ -393,7 +393,7 @@ def _flowables_lateral(cifras, alto, ancho=ANCHO_LATERAL - 1.9 * _cm):
     from reportlab.pdfbase.pdfmetrics import stringWidth as _ancho_de
     _P = Parrafo
     titulo = _PS("LatTit", fontName="Helvetica-Bold", fontSize=8.5,
-                 textColor=_col.HexColor("#E4002B"), leading=11)
+                 textColor=_col.HexColor("#6B7280"), leading=11)
     etiqueta = _PS("LatEtq", fontName="Helvetica-Bold", fontSize=7, leading=9,
                    textColor=_col.HexColor(GRIS_SEC))
     numero = _PS("LatNum", fontName="Times-Bold", fontSize=30, leading=33,
@@ -489,7 +489,7 @@ def barra_seccion(texto, numero):
     from reportlab.lib.styles import ParagraphStyle as _PS
     estilo = _PS("Barra", fontName="Helvetica-Bold", fontSize=10, leading=13,
                  textColor=_col.white)
-    titulo = _P(f'<font color="#FF8A9B">{numero:02d}</font>&nbsp;&nbsp;&nbsp;{texto.upper()}', estilo)
+    titulo = _P(f'<font color="#AEB7EA">{numero:02d}</font>&nbsp;&nbsp;&nbsp;{texto.upper()}', estilo)
     dibujo = _iconos.icono(_iconos.nombre_seccion(texto), 12.5, "#FFFFFF")
     if dibujo is not None:
         # Columna del icono de ancho FIJO y "*" para el texto: con un
@@ -499,7 +499,7 @@ def barra_seccion(texto, numero):
         t = _T([[dibujo, titulo]], colWidths=[0.85 * _cm, "*"])
         estilo_t = [("LEFTPADDING", (0, 0), (0, 0), 10), ("LEFTPADDING", (1, 0), (1, 0), 2)]
     else:
-        t = _T([[titulo]], colWidths=["100%"])
+        t = _T([[titulo]], colWidths=[ANCHO_UTIL])
         estilo_t = [("LEFTPADDING", (0, 0), (-1, -1), 10)]
     t.setStyle(_TS([("BACKGROUND", (0, 0), (-1, -1), _col.HexColor(AZUL)),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -709,3 +709,60 @@ def construir_con_lateral(doc_simple, elementos, al_dibujar):
     historia += [NextPageTemplate("interior")] + _para_pdf(resto)
     doc.build(historia, canvasmaker=LienzoNumerado)
     return doc
+
+
+# ---------------------------------------------------------------------------
+# Portada: lo más importante primero
+# ---------------------------------------------------------------------------
+def bloque_lo_importante(elementos, estilos, acciones, sustento, mensaje="", analista=""):
+    """Agrega a la portada, en este orden: el comentario de quien hace el
+    reporte (si lo escribió), las acciones recomendadas numeradas y los datos
+    que las sostienen.
+
+    Va en la portada porque es lo único que leerá quien tenga un minuto. El
+    resto del reporte es el detalle para quien quiera comprobarlo.
+    """
+    from reportlab.platypus import Table as _T, TableStyle as _TS, Spacer as _S
+    _P = Parrafo          # tolera "&" y "<" en nombres de vendedores
+    cuerpo = estilos["cuerpo"]
+    rotulo = cuerpo.clone("RotuloImportante", fontName="Helvetica-Bold", fontSize=8.5,
+                          leading=11, textColor=_col.HexColor(AZUL), spaceBefore=6, spaceAfter=4)
+    rotulo_gris = rotulo.clone("RotuloSustento", textColor=_col.HexColor(GRIS_SEC))
+    accion = cuerpo.clone("AccionPortada", fontSize=10.5, leading=14.5, spaceAfter=0,
+                          textColor=_col.HexColor("#111827"))
+    numero = accion.clone("NumeroAccion", fontName="Helvetica-Bold", fontSize=13,
+                          textColor=_col.HexColor(AZUL))
+    apoyo = cuerpo.clone("SustentoPortada", fontSize=8.5, leading=11.5, spaceAfter=2,
+                         textColor=_col.HexColor("#4B5563"))
+
+    if mensaje:
+        quien = f"Comentario de {marcado_seguro(analista)}: " if analista else "Comentario: "
+        nota = _T([[_P(f"<b>{quien}</b>{marcado_seguro(mensaje)}",
+                       cuerpo.clone("MensajeAnalista", fontSize=10, leading=14, spaceAfter=0))]],
+                  colWidths=[ANCHO_UTIL])
+        nota.setStyle(_TS([
+            ("BACKGROUND", (0, 0), (-1, -1), _col.HexColor("#F3F4F8")),
+            ("LINEBEFORE", (0, 0), (0, -1), 3, _col.HexColor(AZUL)),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10), ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ]))
+        elementos.append(nota)
+        elementos.append(_S(1, 8))
+
+    if acciones:
+        elementos.append(_P("QUÉ HACER", rotulo))
+        filas = [[_P(str(i), numero), _P(resaltar(a), accion)] for i, a in enumerate(acciones, 1)]
+        tabla = _T(filas, colWidths=[ANCHO_UTIL * 0.06, ANCHO_UTIL * 0.94])
+        tabla.setStyle(_TS([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.5, _col.HexColor("#E5E7EB")),
+        ]))
+        elementos.append(tabla)
+        elementos.append(_S(1, 8))
+
+    if sustento:
+        elementos.append(_P("EN QUÉ SE BASA", rotulo_gris))
+        for texto in sustento:
+            elementos.append(_P(resaltar("•  " + texto), apoyo))
