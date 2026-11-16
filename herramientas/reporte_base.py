@@ -137,6 +137,7 @@ FUENTE_BOLD_ITALICA = _fuente_activa["bold_italica"]
 # =======================================================================
 from . import estatus as _est
 from . import hallazgos as _h
+from .graficas import BASE_MINIMA, BASE_MINIMA_FINANCIADOS
 from . import pdf_util as _pdf_util
 from . import nombres_archivo as _nombres
 from .conclusiones import SIN_VENDEDOR
@@ -760,7 +761,7 @@ def filas_tabla_vendedor(tabla_vendedor):
             recortar_nombre(vendedor),
             str(int(fila["Total"])),
             str(financiado),
-            f"{fila.get('% Financiado', 0):.1f}%" + ("*" if fila["Total"] < BASE_MINIMA else ""),
+            f"{fila.get('% Financiado', 0):.1f}%",
         ]
         hay_base_chica = hay_base_chica or fila["Total"] < BASE_MINIMA
         if hay_monto:
@@ -772,8 +773,7 @@ def filas_tabla_vendedor(tabla_vendedor):
             # una raya en vez de un 0% que se leería como mal desempeño.
             chico = 0 < financiado < BASE_MINIMA_FINANCIADOS
             hay_base_chica = hay_base_chica or chico
-            celdas.append((f"{gap_fin / financiado * 100:.0f}%" + ("*" if chico else ""))
-                          if financiado else "—")
+            celdas.append(f"{gap_fin / financiado * 100:.0f}%" if financiado else "—")
         filas.append(celdas)
 
     total_sol = int(tabla_vendedor["Total"].sum())
@@ -791,11 +791,9 @@ def filas_tabla_vendedor(tabla_vendedor):
     nota = ("El % de GAP se calcula sobre créditos FINANCIADOS: es el GAP "
             "efectivamente vendido." if hay_gap else None)
     if hay_base_chica:
-        # Un "1 de 1 (100%)" no es un logro: se marca para que no se lea así.
-        nota = ((nota + " ") if nota else "") + (
-            f"* Base pequeña (menos de {BASE_MINIMA} solicitudes o de "
-            f"{BASE_MINIMA_FINANCIADOS} créditos financiados): el porcentaje no es "
-            f"comparable con el de los demás.")
+        # Una sola nota, no un asterisco por renglón: en un punto de venta
+        # chico casi todos los vendedores tienen pocos casos.
+        nota = ((nota + " ") if nota else "") + NOTA_POCOS_CASOS
 
     # Si sobran columnas, el ancho restante se le da al nombre, que es el que
     # más lo aprovecha.
@@ -1035,6 +1033,12 @@ def encabezados_vendedores(nombres):
     return resultado
 
 
+NOTA_POCOS_CASOS = (
+    f"Con menos de {BASE_MINIMA} solicitudes (o de {BASE_MINIMA_FINANCIADOS} créditos "
+    f"financiados), el porcentaje de un vendedor cambia mucho con un solo caso: "
+    f"conviene leerlo junto con el conteo.")
+
+
 def _mezcla_calor(intensidad):
     """De blanco a un azul claro (nunca tan oscuro que tape el número)."""
     t = 0.12 + 0.88 * max(0.0, min(1.0, intensidad))
@@ -1087,9 +1091,7 @@ def tablas_desempeno_volteadas(tabla_vendedor, claves, tabla_estilo_mg, estilo_n
         filas.append(fila)
         if tiene_pct:
             fila = ["% Financiado"] + [
-                f"{tabla_vendedor.loc[v].get('% Financiado', 0):.1f}%"
-                + ("*" if tabla_vendedor.loc[v].get("Total", 0) < BASE_MINIMA else "")
-                for v in grupo]
+                f"{tabla_vendedor.loc[v].get('% Financiado', 0):.1f}%" for v in grupo]
             if ultima:
                 total = int(tabla_vendedor["Total"].sum())
                 fin = int(tabla_vendedor["FINANCIADO"].sum()) if "FINANCIADO" in tabla_vendedor else 0
@@ -1120,8 +1122,7 @@ def tablas_desempeno_volteadas(tabla_vendedor, claves, tabla_estilo_mg, estilo_n
                   if cortos[v] != str(v) and v != SIN_VENDEDOR]
     notas = ["Sombreado: cuanto más oscuro, más solicitudes."] if maximo_celda else []
     if any(tabla_vendedor.loc[v].get("Total", 0) < BASE_MINIMA for v in vendedores) and tiene_pct:
-        notas.append(f"* Base pequeña (menos de {BASE_MINIMA} solicitudes): el porcentaje "
-                     f"no es comparable.")
+        notas.append(NOTA_POCOS_CASOS)
     if n_partes > 1:
         notas.append(f"La tabla va en {n_partes} partes por el número de vendedores; "
                      f"«Total equipo» suma a todos.")
@@ -1186,7 +1187,6 @@ def analisis_financiero_por_categoria(df):
 # =======================================================================
 
 # Las gráficas viven en graficas.py (un solo criterio visual para los cuatro reportes).
-from .graficas import BASE_MINIMA, BASE_MINIMA_FINANCIADOS  # noqa: E402
 from .graficas import (  # noqa: E402,F401
     grafica_status, grafica_mezcla_cierre, grafica_vendedores, grafica_vendedor_status,
     grafica_monto_por_vendedor, grafica_modelos, grafica_gap_por_categoria,

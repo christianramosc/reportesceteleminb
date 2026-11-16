@@ -452,6 +452,7 @@ def tabla_promedio_vendedor(df_combinado, orden_meses):
 
 
 # --- 6B) Gráficas COMPARATIVAS entre meses (nuevas de este reporte) ---
+from . import graficas as _graficas  # noqa: E402
 from .graficas import (  # noqa: E402,F401
     grafica_comp_totales_por_mes, grafica_comp_tasa_conversion, grafica_comp_montos_por_mes,
     grafica_comp_gap_vs_gap_financiado, grafica_pendiente_vendedores,
@@ -626,7 +627,11 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     # De aquí en adelante df_combinado tiene una fila por folio (su último
     # estatus, en su mes de captura). Todo lo "del periodo" y "por vendedor"
     # sale de ahí; lo "por mes" sigue saliendo de tabla_comp. Ver folios.py.
+    _df_todas_las_filas = df_combinado
     df_combinado, _res_folios = _folios.consolidar(df_combinado, orden_meses)
+    # Lectura y conclusiones con la conversión por folio, igual que la portada.
+    lectura, conclusiones_fin = _conclusiones.lectura_y_conclusiones_comparativo(
+        tabla_comp, orden_meses, _df_todas_las_filas, df_unico=df_combinado)
 
     # --- Datos clave para portada/KPIs ---
     # Por folio único. Antes el total sumaba las filas de cada mes (81 en
@@ -757,9 +762,11 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     if "totales_mes" in rutas_graficas:
         elementos.append(Paragraph("1. Volumen y Categorías de Cierre por Mes", estilo_h2))
         elementos.append(Paragraph(
-            "La siguiente gráfica apila, para cada mes comparado, cuántas solicitudes cerraron en "
-            "cada estatus, para comparar de un "
-            "vistazo tanto el volumen total como la calidad del cierre mes a mes.",
+            ("La gráfica apila, para cada mes, cuántas solicitudes quedaron en cada grupo, "
+             "para comparar el volumen total y cómo se repartió. "
+             + _graficas.nota_grupos(pd.concat(
+                 [datos_por_mes[m]["df"]["Categoria"] for m in orden_meses
+                  if "Categoria" in datos_por_mes[m]["df"].columns] or [pd.Series(dtype=str)]))).strip(),
             estilo_cuerpo
         ))
         elementos.append(imagen_ajustada(rutas_graficas["totales_mes"], ancho_cm=16, alto_max_cm=11))

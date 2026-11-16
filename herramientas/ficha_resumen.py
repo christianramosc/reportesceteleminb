@@ -222,7 +222,13 @@ def _conteo_grupos(df):
     pictograma usaba un color por estatus: diez colores y diez renglones de
     leyenda para una imagen que se lee en el teléfono."""
     conteo = _g.conteo_por_grupo(df["Categoria"])
-    return conteo[conteo > 0]
+    conteo = conteo[conteo > 0]
+    # Si un grupo trae un solo estatus, se llama como ese estatus
+    # ("Contrapropuesta" en vez de "En trámite"); si reúne varios, la nota
+    # dice cuáles.
+    conteo.attrs["etiquetas"] = _g.etiquetas_grupos(df["Categoria"])
+    conteo.attrs["nota"] = _g.nota_grupos(df["Categoria"])
+    return conteo
 
 
 def _color_clave(clave):
@@ -437,10 +443,14 @@ def _pictograma(lz, x, y, w, h_min, dibujar, conteo):
     filas = math.ceil(len(autos) / por_fila)
     alto_autos = filas * paso * 0.62
     # Tantas columnas como quepan con el nombre más largo + "12  ·  45%".
-    largo = max(len(_etq_leyenda(c)) for c in conteo.index) * 8.6 / 72 * 0.58 + 0.26 + 0.85
+    etq = lambda c: conteo.attrs.get("etiquetas", {}).get(c) or _etq_leyenda(c)   # noqa: E731
+    nota_grupos = (_envolver(conteo.attrs["nota"], w - 2 * PAD, 7.4)
+                   if conteo.attrs.get("nota") else [])
+    largo = max(len(etq(c)) for c in conteo.index) * 8.6 / 72 * 0.58 + 0.26 + 0.85
     columnas = max(1, min(3, int(interior // largo)))
     alto_ley = math.ceil(len(conteo) / columnas) * 0.30
-    h = max(0.62 + alto_autos + 0.18 + alto_ley + PAD - 0.12, h_min)
+    h = max(0.62 + alto_autos + 0.18 + alto_ley + (0.08 + len(nota_grupos) * 0.16 if nota_grupos else 0)
+            + PAD - 0.12, h_min)
     if not dibujar:
         return h
     lz.tarjeta(x, y, w, h)
@@ -462,9 +472,13 @@ def _pictograma(lz, x, y, w, h_min, dibujar, conteo):
         f, c = divmod(k, columnas)
         xl, yy = x + PAD + c * col_w, yl + f * 0.30
         lz.rect(xl, yy + 0.02, 0.16, 0.16, _color_clave(clave), redondeo=0.04, z=4)
-        lz.texto(xl + 0.26, yy + 0.10, _etq_leyenda(clave), tam=8.6, color=TINTA, va="center")
+        lz.texto(xl + 0.26, yy + 0.10, etq(clave), tam=8.6, color=TINTA, va="center")
         lz.texto(xl + col_w - 0.18, yy + 0.10, f"{int(n)}  ·  {n / total * 100:.0f}%", tam=8.6,
                  color=TINTA, peso="bold", ha="right", va="center")
+    yn = yl + alto_ley + 0.06
+    for renglon in nota_grupos:
+        lz.texto(x + PAD, yn, renglon, tam=7.4, color=TINTA_SEC)
+        yn += 0.16
     return h
 
 
@@ -681,7 +695,11 @@ def ficha_mensual(df, ruta_png, modo="cierre", periodo="", pdv="", analista="",
     focos, conclusiones = _c.focos_y_conclusiones_mensual(df, modo, resumen=resumen,
                                                           ctx=ctx, hoja=hoja)
     conteo = _conteo_grupos(df)
-    acciones = _c.acciones_mensual(df, modo)
+    # Avance con fecha de corte de otro mes: sin "antes de fin de mes".
+    corte_ok = not (modo == "avance" and any(
+        c["etiqueta"] == "DÍAS RESTANTES" and c.get("alerta")
+        for c in _lateral.cifras_avance(df, ctx=ctx, hoja=hoja)))
+    acciones = _c.acciones_mensual(df, modo, corte_coherente=corte_ok)
     return _componer(
         ruta_png, formato,
         encabezado=dict(kicker=f"Autoexpress Inbursa  ·  {pdv}", titulo=titulo, periodo=periodo,
@@ -704,8 +722,9 @@ def ficha_comparativo(df_unico, tabla_comp, orden_meses, df_combinado, ruta_png,
     cifras = _lateral.cifras_comparativo(df_unico, tabla_comp, n)
     monto = next((c for c in cifras if c["etiqueta"] == "MONTO FINANCIADO"), None)
     cifras = _cifras_sin(cifras, ["SOLICITUDES", "CONVERSIÓN", "MONTO FINANCIADO"])[:3]
-    lectura, _ = _c.lectura_y_conclusiones_comparativo(tabla_comp, orden_meses, df_combinado)
-    acciones = _c.acciones_comparativo(tabla_comp, orden_meses, df_combinado)
+    lectura, _ = _c.lectura_y_conclusiones_comparativo(tabla_comp, orden_meses, df_combinado,
+                                                       df_unico=df_unico)
+    acciones = _c.acciones_comparativo(tabla_comp, orden_meses, df_unico)
     meses = [str(m).title() for m in orden_meses]
     periodo = meses[0] if n == 1 else f"{meses[0]} a {meses[-1]}"
     return _componer(

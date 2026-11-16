@@ -18,8 +18,15 @@ Criterios (tomados de "Storytelling con datos", C. Nussbaumer Knaflic):
    horizontales.
 7. Las leyendas son palabras del color de su serie, junto al título o al
    final de la línea, no un recuadro aparte.
-8. Una tasa calculada con muy pocos casos se dibuja atenuada y lo dice
-   ("base pequeña"), para que un "1 de 1 (100%)" no se lea como logro.
+8. Una tasa calculada con muy pocos casos se escribe como conteo ("2 de 4")
+   y no como porcentaje, para que un "1 de 1 (100%)" no se lea como logro.
+   El color NO se quita: en un punto de venta con 20 o 30 solicitudes al
+   mes casi todos los vendedores tienen pocos casos, y atenuarlos dejaba
+   las gráficas de GAP prácticamente en gris.
+9. Los grupos se llaman como los estatus que el periodo trae: si lo único
+   "en trámite" es Contrapropuesta, la leyenda dice Contrapropuesta; el
+   nombre genérico solo aparece cuando reúne varios estatus, y entonces el
+   reporte explica cuáles (nota_grupos).
 """
 
 import os
@@ -65,6 +72,53 @@ def grupo_de(clave):
     if _est.GRUPO_CATEGORIA.get(clave, _est.ABIERTA) == _est.CERRADA_NEGATIVA:
         return PER
     return TRA
+
+
+def _por_grupo(categorias):
+    """{grupo: [estatus presentes, en orden de catálogo]}."""
+    presentes = {str(c).strip().upper() for c in pd.Series(categorias).dropna()}
+    orden = [c for c in _est.ORDEN_CATEGORIAS if c in presentes]
+    orden += sorted(presentes - set(orden))
+    salida = {}
+    for c in orden:
+        salida.setdefault(grupo_de(c), []).append(c)
+    return salida
+
+
+def etiquetas_grupos(categorias):
+    """Nombre de cada grupo para ESTE periodo. Un grupo con un solo estatus
+    lleva el nombre de ese estatus ("Contrapropuesta", "Rechazado"); el
+    genérico ("En trámite", "No procedió") solo cuando reúne varios."""
+    etiquetas = dict(ETIQUETA_GRUPO)
+    for grupo, claves in _por_grupo(categorias).items():
+        if grupo in (TRA, PER) and len(claves) == 1:
+            etiquetas[grupo] = _est.etiqueta(claves[0])
+    return etiquetas
+
+
+def nota_grupos(categorias):
+    """Explica los nombres genéricos que se estén usando, con los estatus
+    que reúnen. Cadena vacía si ninguno hace falta."""
+    grupos = _por_grupo(categorias)
+
+    def lista(claves):
+        nombres = [_est.etiqueta(c) for c in claves]
+        return ", ".join(nombres[:-1]) + " y " + nombres[-1]
+
+    partes = []
+    if len(grupos.get(TRA, [])) > 1:
+        partes.append(f"«En trámite» reúne las solicitudes abiertas que todavía no están "
+                      f"aprobadas ({lista(grupos[TRA])}).")
+    if len(grupos.get(PER, [])) > 1:
+        partes.append(f"«No procedió» reúne las que ya no van a financiarse "
+                      f"({lista(grupos[PER])}).")
+    return " ".join(partes)
+
+
+def _leyenda_grupos(categorias, presentes, colores=None):
+    colores = colores or COLOR_GRUPO
+    etiquetas = etiquetas_grupos(categorias)
+    return [(etiquetas[g], colores[g] if g != TRA else TEXTO_SEC) for g in GRUPOS if presentes(g)]
 
 
 def conteo_por_grupo(categorias):
@@ -235,10 +289,9 @@ def grafica_mezcla_cierre(df, guardar_como=None):
     ax.set_xlim(0, 100)
     ax.set_ylim(-0.45, 0.45)
     ax.axis("off")
-    titular(ax, _h.mezcla_por_grupo(conteo),
+    titular(ax, _h.mezcla_por_grupo(conteo, etiquetas_grupos(df[COL_CAT])[PER]),
             f"Las {total} solicitudes, agrupadas por cómo quedaron",
-            leyenda=[(ETIQUETA_GRUPO[g], COLOR_GRUPO[g] if g != TRA else TEXTO_SEC)
-                     for g in GRUPOS if conteo[g]])
+            leyenda=_leyenda_grupos(df[COL_CAT], lambda g: conteo[g]))
     plt.tight_layout()
     return _guardar(fig, guardar_como)
 
@@ -291,16 +344,16 @@ def grafica_vendedor_status(df, guardar_como=None):
     y = np.arange(len(pct))
     izquierda = np.zeros(len(pct))
     for g in GRUPOS:
-        alphas = [0.4 if chicos[v] else 1.0 for v in pct.index]
-        barras = ax.barh(y, pct[g].values, left=izquierda, color=COLOR_GRUPO[g],
-                         height=0.66, edgecolor="white", linewidth=1.2)
-        for barra, a in zip(barras, alphas):
-            barra.set_alpha(a)
+        ax.barh(y, pct[g].values, left=izquierda, color=COLOR_GRUPO[g],
+                height=0.66, edgecolor="white", linewidth=1.2)
         izquierda += pct[g].values
     for i, v in enumerate(pct.index):
         p = pct.loc[v, FIN]
         if chicos[v]:
-            texto, color, peso = f"{pivote.loc[v, FIN]} de {totales[v]} · base pequeña", TEXTO_SEC, "normal"
+            # Pocos casos: el conteo, no el porcentaje.
+            n_fin = int(pivote.loc[v, FIN])
+            texto = f"{n_fin} de {totales[v]} financiada{'s' if totales[v] != 1 else ''}"
+            color, peso = TEXTO_SEC, "normal"
         else:
             texto = f"{p:.0f}% financiado"
             destaca = mejor is not None and p == mejor
@@ -314,8 +367,7 @@ def grafica_vendedor_status(df, guardar_como=None):
     titular(ax, hallazgo,
             "Cómo quedaron las solicitudes de cada vendedor (entre paréntesis, cuántas ingresó)"
             + _nota_excluidos(excluidos),
-            leyenda=[(ETIQUETA_GRUPO[g], COLOR_GRUPO[g] if g != TRA else TEXTO_SEC)
-                     for g in GRUPOS if pivote[g].sum()])
+            leyenda=_leyenda_grupos(df[COL_CAT], lambda g: pivote[g].sum()))
     plt.tight_layout()
     return _guardar(fig, guardar_como)
 
@@ -389,7 +441,7 @@ def _linea_alerta_gap(ax, y_texto):
     u = _c.UMBRAL_ALERTA_GAP
     ax.axvline(u, color=ROJO, linestyle=(0, (4, 3)), linewidth=0.9, zorder=0)
     ax.text(u, y_texto, " alerta: menos de la mitad", color=ROJO, fontsize=8,
-            ha="left", va="bottom")
+            ha="left", va="top")
 
 
 def grafica_gap_por_categoria(df, guardar_como=None):
@@ -407,25 +459,24 @@ def grafica_gap_por_categoria(df, guardar_como=None):
 
     colores, textos, colores_texto = [], [], []
     for clave, fila in con.iterrows():
-        chico = fila["size"] < BASE_MINIMA
-        if chico:
-            c = GRIS_FONDO
-        elif fila["pct"] < _c.UMBRAL_ALERTA_GAP:
+        # Rojo solo con casos suficientes: 0 de 1 no es una alerta.
+        if fila["size"] >= BASE_MINIMA and fila["pct"] < _c.UMBRAL_ALERTA_GAP:
             c = ROJO
         elif clave == FIN:
             c = AZUL
         else:
             c = GRIS_BARRA
         colores.append(c)
-        textos.append(f"{fila['pct']:.0f}%  ·  {int(fila['sum'])} de {int(fila['size'])}"
-                      + ("  · base pequeña" if chico else ""))
+        textos.append(f"{fila['pct']:.0f}%  ·  {int(fila['sum'])} de {int(fila['size'])}")
         colores_texto.append(c if c in (AZUL, ROJO) else TEXTO_SEC)
 
     fig, ax = plt.subplots(figsize=(8, _alto(len(con), 0.42)))
     _barras_h(ax, [_est.etiqueta(c) for c in con.index], con["pct"].values, colores,
               textos, colores_texto)
     ax.set_xlim(0, 150)
-    _linea_alerta_gap(ax, len(con) - 0.45)
+    # El rótulo va al pie de la línea: arriba chocaba con la descripción.
+    ax.set_ylim(-1.0, len(con) - 0.5)
+    _linea_alerta_gap(ax, -0.55)
     _resaltar_nombres(ax, [_est.etiqueta(FIN)])
     titular(ax, _h.gap_por_estatus(pct_titulo), "% de solicitudes con GAP en cada estatus")
     plt.tight_layout()
@@ -454,10 +505,8 @@ def grafica_gap_por_vendedor_total(df, guardar_como=None):
         chico = t < BASE_MINIMA
         alerta = not chico and pct < _c.UMBRAL_ALERTA_GAP
         hay_alerta = hay_alerta or alerta
-        color = ROJO if alerta else (GRIS_OSCURO if chico else AZUL)
-        ax.barh([i], [g], color=color, height=0.66, alpha=0.55 if chico else 1)
-        ax.text(t + tope * 0.015, i,
-                f"{g} de {t}  ({pct:.0f}%)" + ("  · base pequeña" if chico else ""),
+        ax.barh([i], [g], color=ROJO if alerta else AZUL, height=0.66)
+        ax.text(t + tope * 0.015, i, f"{g} de {t}" if chico else f"{g} de {t}  ({pct:.0f}%)",
                 va="center", fontsize=9, color=ROJO if alerta else TEXTO_SEC,
                 fontweight="bold" if alerta else "normal")
     ax.set_yticks(y)
@@ -510,10 +559,10 @@ def grafica_gap_por_vendedor_y_status(df, guardar_como=None):
     ax.set_xlim(0, tope * 1.2)
     ax.spines["left"].set_color(GRIS_BARRA)
     _sin_eje(ax, "x")
-    titular(ax, _h.gap_que_no_procede(df_gap_equipo[COL_CAT].map(grupo_de)),
+    titular(ax, _h.gap_que_no_procede(df_gap_equipo[COL_CAT].map(grupo_de),
+                                      etiquetas_grupos(df_gap_equipo[COL_CAT])[PER]),
             "Solicitudes con GAP de cada vendedor, según cómo quedaron" + _nota_excluidos(excluidos),
-            leyenda=[(ETIQUETA_GRUPO[g], colores[g] if g != TRA else TEXTO_SEC)
-                     for g in GRUPOS if pivote[g].sum()])
+            leyenda=_leyenda_grupos(df_gap[COL_CAT], lambda g: pivote[g].sum(), colores))
     plt.tight_layout()
     return _guardar(fig, guardar_como)
 
@@ -543,11 +592,11 @@ def grafica_gap_financiado_por_vendedor(df, guardar_como=None):
         chico = fila["fin"] < BASE_MINIMA_FINANCIADOS
         alerta = not chico and fila["pct"] < _c.UMBRAL_ALERTA_GAP
         hay_alerta = hay_alerta or alerta
-        ax.barh([i], [fila["gap"]], height=0.66, alpha=0.55 if chico else 1,
-                color=ROJO if alerta else (GRIS_OSCURO if chico else AZUL))
-        ax.text(fila["fin"] + tope * 0.015, i,
-                _metricas.etiqueta_gap(fila["gap"], fila["fin"], fila["pct"])
-                + ("  · base pequeña" if chico else ""),
+        ax.barh([i], [fila["gap"]], height=0.66, color=ROJO if alerta else AZUL)
+        etiqueta = _metricas.etiqueta_gap(fila["gap"], fila["fin"], fila["pct"])
+        if chico:                       # pocos créditos: sin el porcentaje
+            etiqueta = etiqueta.rsplit(" (", 1)[0]
+        ax.text(fila["fin"] + tope * 0.015, i, etiqueta,
                 va="center", fontsize=9, color=ROJO if alerta else TEXTO_SEC,
                 fontweight="bold" if alerta else "normal")
     ax.set_yticks(y)
@@ -599,7 +648,8 @@ def grafica_comp_totales_por_mes(datos_por_mes, orden_meses, guardar_como=None):
     _sin_eje(ax, "y")
     titular(ax, _h.volumen_por_mes(meses, totales),
             "Solicitudes de cada mes, según cómo quedaron (arriba, el total)",
-            leyenda=[(ETIQUETA_GRUPO[g], COLOR_GRUPO[g] if g != TRA else TEXTO_SEC) for g in GRUPOS])
+            leyenda=_leyenda_grupos(pd.concat([datos_por_mes[m]["df"][COL_CAT] for m in meses]),
+                                    lambda g: any(c[g] for c in conteos)))
     plt.tight_layout()
     return _guardar(fig, guardar_como)
 
@@ -685,7 +735,8 @@ def grafica_comp_montos_por_mes(tabla_comp, guardar_como=None):
     for i, (v, t) in enumerate(zip(fin, tot)):
         es_max = destaca and v == fin.max()
         ax.text(i, v + tope * 0.02, _h.monto_corto(v), ha="center", va="bottom", fontsize=10.5,
-                fontweight="bold", color=AZUL if es_max else TEXTO)
+                fontweight="bold", color=AZUL if es_max else TEXTO, zorder=5,
+                bbox=dict(boxstyle="round,pad=0.12", facecolor="white", edgecolor="none"))
         if t and v / tope > 0.12:
             ax.text(i, v - tope * 0.03, f"{v / t * 100:.0f}% de lo\nsolicitado", ha="center",
                     va="top", fontsize=8.5, color="white" if es_max else TEXTO, linespacing=1.2)
