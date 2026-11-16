@@ -428,7 +428,7 @@ def _participacion(tabla_comp, columna):
     return tabla_comp[columna] / tabla_comp["Total"].replace(0, pd.NA) * 100
 
 
-def lectura_y_conclusiones_comparativo(tabla_comp, orden_meses, df_combinado):
+def lectura_y_conclusiones_comparativo(tabla_comp, orden_meses, df_combinado, df_unico=None):
     """Devuelve (lectura, conclusiones) del comparativo, sin textos en común.
 
     - Lectura del periodo (resumen ejecutivo): qué pasó con volumen,
@@ -575,7 +575,11 @@ def lectura_y_conclusiones_comparativo(tabla_comp, orden_meses, df_combinado):
                         f"{'registró' if len(ausentes) == 1 else 'registraron'} "
                         f"solicitudes. Conviene tenerlo presente al leer sus totales.")
 
-    conv_vend = _conclusion_conversion_vendedores(df_combinado)
+    # La conversión del periodo se calcula con un renglón por folio (df_unico,
+    # ver folios.consolidar) para que coincida con la portada: con todas las
+    # filas, un folio que cruza de mes contaba dos veces ("21 de 97" junto a
+    # una portada que decía 92 solicitudes).
+    conv_vend = _conclusion_conversion_vendedores(df_unico if df_unico is not None else df_combinado)
     if conv_vend:
         conclusiones.append(conv_vend.replace("<b>Conversión:</b>",
                                               "<b>Conversión en el periodo:</b>"))
@@ -791,6 +795,30 @@ def _es_perdida(categorias):
         lambda c: _est.GRUPO_CATEGORIA.get(str(c).upper(), _est.ABIERTA) == _est.CERRADA_NEGATIVA)
 
 
+def _detalle_perdidas(categorias):
+    """Cómo se reparten las solicitudes que no procedieron, con el nombre de
+    cada estatus: ("fueron rechazadas", "") si solo hay rechazos, o
+    ("no procedieron", " (9 rechazadas, 2 canceladas y 1 no financiable)").
+    "No procedieron" a secas no decía qué les pasó."""
+    perdidas = categorias[_es_perdida(categorias)].astype(str).str.upper()
+    conteo = perdidas.value_counts()
+    conteo = conteo.reindex([c for c in _est.ORDEN_CATEGORIAS if c in conteo.index]
+                            + [c for c in conteo.index if c not in _est.ORDEN_CATEGORIAS])
+    n = int(conteo.sum())
+    if len(conteo) == 1 and conteo.index[0] == "RECHAZADO":
+        return ("fue rechazada" if n == 1 else "fueron rechazadas"), ""
+    verbo = "no procedió" if n == 1 else "no procedieron"
+    if conteo.empty:
+        return verbo, ""
+    nombres = {"RECHAZADO": ("rechazada", "rechazadas"), "CANCELADO": ("cancelada", "canceladas"),
+               "NO FINANCIABLE": ("no financiable", "no financiables")}
+    partes = []
+    for clave, k in conteo.items():
+        sing, plur = nombres.get(clave, (_est.etiqueta(clave).lower(),) * 2)
+        partes.append(f"{int(k)} {sing if k == 1 else plur}")
+    return verbo, f" ({_lista(partes)})"
+
+
 def _corto(nombre):
     partes = str(nombre).split()
     return " ".join(partes[:2]) if len(partes) > 2 else str(nombre)
@@ -826,6 +854,8 @@ def _accion_abiertas(df, modo="cierre", tuteo=False):
         return texto + "."
     if modo == "avance":
         texto = f"<b>Cerrar antes de fin de mes las {_n(n, 'solicitud abierta', 'solicitudes abiertas')}</b>{dinero}"
+    elif modo == "avance_sin_fecha":
+        texto = f"<b>Dar seguimiento a las {_n(n, 'solicitud abierta', 'solicitudes abiertas')}</b>{dinero}"
     else:
         texto = f"<b>Dar seguimiento a las {_n(n, 'solicitud', 'solicitudes')} sin dispersar</b>{dinero}"
     detalle = []
@@ -893,7 +923,8 @@ def _accion_conversion_baja(df):
              f"{fila['tasa']:.0f}% ({int(fila['fin'])} de {int(fila['total'])}) contra "
              f"{tasa_eq:.0f}% del equipo")
     if perdidas:
-        texto += f", y {perdidas} no {'procedió' if perdidas == 1 else 'procedieron'}"
+        verbo, detalle = _detalle_perdidas(suyas[COL_CAT])
+        texto += f", y {perdidas} {verbo}{detalle}"
     return texto + "."
 
 
@@ -905,8 +936,10 @@ def _accion_perdidas(df):
     pct = _pct(perdidas, len(df)) or 0
     if pct < 25 or perdidas < MIN_CASOS_GRUPO:
         return None
+    verbo, detalle = _detalle_perdidas(df[COL_CAT])
     texto = (f"<b>Revisar el perfil del cliente antes de ingresar la solicitud</b>: "
-             f"{perdidas} de {len(df)} no procedieron ({pct:.0f}%)")
+             f"{perdidas} de {len(df)} {verbo} ({pct:.0f}%)"
+             + (f": {detalle.strip(' ()')}" if detalle else ""))
     if {"Enganche", "Precio Venta (c/IVA)"}.issubset(df.columns):
         def _eng(g):
             base = g["Precio Venta (c/IVA)"].replace(0, pd.NA)
@@ -975,9 +1008,11 @@ def idea_principal_mensual(df, modo, ctx=None, periodo="", meta_conversion=None)
     return texto[0].upper() + texto[1:] if not texto.startswith("<") else texto
 
 
-def acciones_mensual(df, modo):
+def acciones_mensual(df, modo, corte_coherente=True):
+    """corte_coherente=False: avance cuya fecha de corte cae en otro mes que
+    los datos; entonces no se habla de "antes de fin de mes"."""
     return _limpiar([
-        _accion_abiertas(df, modo),
+        _accion_abiertas(df, modo if corte_coherente else "avance_sin_fecha"),
         _accion_gap(df),
         _accion_conversion_baja(df),
         _accion_perdidas(df),
@@ -1079,6 +1114,7 @@ def acciones_vendedor(df, vendedor):
     perdidas = int(_es_perdida(mio[COL_CAT]).sum())
     if n >= MIN_SOLICITUDES_TASA and pct_eq - pct >= UMBRAL_CONTRASTE and perdidas:
         acciones.append(
-            f"<b>Revisa con tu gerente tus {_n(perdidas, 'solicitud que no procedió', 'solicitudes que no procedieron')}</b>: "
+            f"<b>Revisa con tu gerente {'tu solicitud' if perdidas == 1 else f'tus {perdidas} solicitudes'} "
+            f"que {_detalle_perdidas(mio[COL_CAT])[0]}</b>: "
             f"financias {pct:.0f}% y el equipo, {pct_eq:.0f}%.")
     return _limpiar(acciones)

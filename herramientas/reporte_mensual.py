@@ -23,6 +23,7 @@ from reportlab.lib import colors as rl_colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
 from reportlab.platypus import CondPageBreak  # noqa: E402
+from . import graficas as _graficas  # noqa: E402
 from reportlab.platypus import (
     HRFlowable, KeepTogether, PageBreak, SimpleDocTemplate,
     Spacer, Table, TableStyle,
@@ -242,7 +243,8 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
         hoja=hoja if es_avance else None)
     _pdf_util.bloque_lo_importante(
         elementos, _estilos, mensaje=datos.mensaje, analista=datos.analista,
-        acciones=_conclusiones.acciones_mensual(df, modo_txt),
+        acciones=_conclusiones.acciones_mensual(
+            df, modo_txt, corte_coherente=corte_coherente or not es_avance),
         # El foco de solicitudes abiertas ya es la acción 1, con los mismos
         # datos: no se repite como sustento.
         sustento=[t for t in focos + conclusiones
@@ -476,8 +478,9 @@ def generar_reporte_pdf(df, resumen, tabla_vendedor, tabla_categoria, modo,
     secciones_detalladas(
         elementos, _estilos,
         textos={
-            "estatus": "La primera gráfica cuenta las solicitudes de cada estatus. La segunda las "
-                       "agrupa en cuatro: financiado, aprobado, en trámite y lo que no procedió.",
+            "estatus": ("La primera gráfica cuenta las solicitudes de cada estatus. La segunda "
+                        "las agrupa por cómo quedaron. "
+                        + (_graficas.nota_grupos(df["Categoria"]) if tiene_categoria else "")).strip(),
             "vendedores": f"{'Se registra' if n_vendedores == 1 else 'Se registran'} {n_vendedores} "
                           f"{'vendedor' if n_vendedores == 1 else 'vendedores'} con solicitudes "
                           f"{'a la fecha de corte' if es_avance else 'en el periodo'}. "

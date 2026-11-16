@@ -418,14 +418,23 @@ def volumen_por_mes(meses, totales):
             f"a {str(meses[-1]).title()}: de {ini} a {fin}")
 
 
-def gap_que_no_procede(grupos):
+def _frase_perdida(nombre, plural=True):
+    """Cómo decir que una solicitud se perdió, según el nombre del grupo."""
+    if not nombre or nombre == "No procedió":
+        return "no procedieron" if plural else "no procedió"
+    if nombre == "Rechazado":
+        return "terminaron rechazadas" if plural else "se rechazó"
+    return f"quedaron en {nombre.lower()}" if plural else f"quedó en {nombre.lower()}"
+
+
+def gap_que_no_procede(grupos, nombre_perdida=None):
     """grupos: Serie con el grupo (FINANCIADO, APROBADO, TRAMITE, PERDIDA) de
     cada solicitud CON GAP de todo el equipo."""
     n = len(grupos)
     if not n:
         return "GAP por vendedor"
     p = int((grupos == "PERDIDA").sum())
-    return f"{p} de {n} solicitudes con GAP no procedieron: ese GAP se perdió"
+    return f"{p} de {n} solicitudes con GAP {_frase_perdida(nombre_perdida)}: ese GAP se perdió"
 
 
 def quien_subio_y_bajo(cambio):
@@ -449,7 +458,7 @@ def quien_subio_y_bajo(cambio):
     return texto[0].upper() + texto[1:]
 
 
-def mezcla_por_grupo(conteo):
+def mezcla_por_grupo(conteo, nombre_perdida=None):
     """conteo: Serie grupo -> solicitudes (FINANCIADO, APROBADO, TRAMITE, PERDIDA)."""
     total = int(conteo.sum())
     if not total:
@@ -457,7 +466,10 @@ def mezcla_por_grupo(conteo):
     fin = conteo.get("FINANCIADO", 0) / total * 100
     per = conteo.get("PERDIDA", 0) / total * 100
     abiertas = (conteo.get("APROBADO", 0) + conteo.get("TRAMITE", 0)) / total * 100
-    texto = f"Se financió {fin:.0f}% y {per:.0f}% no procedió"
+    if nombre_perdida == "Rechazado":
+        texto = f"Se financió {fin:.0f}% y se rechazó {per:.0f}%"
+    else:
+        texto = f"Se financió {fin:.0f}% y {per:.0f}% {_frase_perdida(nombre_perdida, plural=False)}"
     if abiertas >= 1:
         texto += f"; {abiertas:.0f}% sigue abierto"
     return texto
