@@ -973,7 +973,7 @@ def _limpiar(acciones):
     return [a for a in acciones if a][:MAX_ACCIONES]
 
 
-def idea_principal_mensual(df, modo, ctx=None, periodo="", meta_conversion=None):
+def idea_principal_mensual(df, modo, ctx=None, periodo=""):
     """El resultado del mes en una o dos frases, para abrir la portada."""
     total = len(df)
     if not total or COL_CAT not in df.columns:
@@ -999,12 +999,6 @@ def idea_principal_mensual(df, modo, ctx=None, periodo="", meta_conversion=None)
             texto += (f" Quedaron <b>{n_ab} abiertas"
                       + (f" por {_moneda(monto_ab)}" if monto_ab else "")
                       + "</b>: de ahí sale el resultado del siguiente mes.")
-    if meta_conversion:
-        faltan = int(-(-(meta_conversion / 100 * total - n_fin) // 1))
-        texto += (f" La meta de conversión es {meta_conversion:.0f}%: "
-                  + ((f"faltan {_n(faltan, 'crédito')}." if modo == "avance"
-                      else f"faltaron {_n(faltan, 'crédito')}.") if faltan > 0
-                     else ("ya se alcanzó." if modo == "avance" else "se cumplió.")))
     return texto[0].upper() + texto[1:] if not texto.startswith("<") else texto
 
 
