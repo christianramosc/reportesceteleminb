@@ -369,6 +369,20 @@ if tiene_opciones:
             opciones["nombre_analista"] = col_analista.text_input(
                 "Implant", value=_ANALISTA_DEFECTO, key=f"analista_{herramienta.id}",
             )
+            # Lo que los datos no traen. Se imprime en la portada, antes de
+            # las acciones recomendadas; vacío, simplemente no aparece.
+            opciones["mensaje_principal"] = st.text_area(
+                "Mensaje principal o comentario (opcional)",
+                key=f"mensaje_{herramienta.id}", height=80, max_chars=400,
+                placeholder="Ej.: Septiembre incluyó la feria; octubre tuvo 4 días sin sistema.",
+                help="Contexto que solo tú conoces. Aparece en la portada del reporte.",
+            )
+            opciones["meta_conversion"] = st.number_input(
+                "Meta de conversión, en % (opcional; 0 = sin meta)",
+                min_value=0, max_value=100, value=0, step=1,
+                key=f"meta_{herramienta.id}",
+                help="Si la capturas, la portada compara la conversión contra la meta.",
+            )
 
         if herramienta.pide_fecha_corte:
             usar_hoy = st.toggle("Usar la fecha de hoy como fecha de corte", value=True,

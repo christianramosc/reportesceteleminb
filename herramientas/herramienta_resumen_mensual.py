@@ -27,7 +27,7 @@ def _mes_anterior(rutas_anteriores):
 
 def ejecutar(rutas_archivos, carpeta_salida="salida", nombre_pdv=None,
              nombre_analista=None, rutas_anteriores=None, **_opciones):
-    datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista)
+    datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista, **_opciones)
     nombre_pdv, nombre_analista = datos.pdv, datos.analista
 
     os.makedirs(carpeta_salida, exist_ok=True)

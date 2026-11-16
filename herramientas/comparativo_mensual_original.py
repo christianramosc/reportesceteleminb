@@ -459,170 +459,10 @@ def tabla_promedio_vendedor(df_combinado, orden_meses):
 
 
 # --- 6B) Gráficas COMPARATIVAS entre meses (nuevas de este reporte) ---
-def grafica_comp_totales_por_mes(datos_por_mes, orden_meses, guardar_como=None):
-    """Barras apiladas por mes: cuántas solicitudes cerraron en cada categoría."""
-    meses_disp = [m for m in orden_meses if "Categoria" in datos_por_mes[m]["df"].columns]
-    if not meses_disp:
-        return None
-    etiquetas = [m.title() for m in meses_disp]
-
-    # Solo las categorías que aparecen en ALGUNO de los meses comparados,
-    # para no meter series en cero a la leyenda cuando el catálogo tiene
-    # muchos estatus posibles.
-    cats_presentes = []
-    for cat in ORDEN_CATEGORIAS:
-        if any(cat in set(datos_por_mes[m]["df"]["Categoria"]) for m in meses_disp):
-            cats_presentes.append(cat)
-
-    fig, ax = plt.subplots(figsize=(max(7, len(meses_disp) * 1.3), 5.5))
-    abajo = np.zeros(len(meses_disp))
-    for cat in cats_presentes:
-        valores = np.array([
-            int(datos_por_mes[m]["df"]["Categoria"].value_counts().get(cat, 0))
-            for m in meses_disp
-        ])
-        ax.bar(etiquetas, valores, bottom=abajo, color=COLOR_CATEGORIA.get(cat, MG_GRIS_CLARO),
-               edgecolor="white", label=_est.etiqueta(cat))
-        for i, (v, b) in enumerate(zip(valores, abajo)):
-            if v > 0:
-                ax.text(i, b + v / 2, str(int(v)), ha="center", va="center",
-                         fontsize=8.5, color=_color_texto_legible(COLOR_CATEGORIA.get(cat, MG_GRIS_CLARO)))
-        abajo += valores
-    totales = [int(datos_por_mes[m]["resumen"].get("total", 0)) for m in meses_disp]
-    for i, t in enumerate(totales):
-        ax.text(i, t + max(totales) * 0.02, f"Total: {t}", ha="center", va="bottom",
-                 fontsize=9, fontweight="bold", color=MG_GRIS_OSCURO)
-    ax.set_ylim(0, max(totales) * 1.18 if totales else 1)
-    rechazos = [int(datos_por_mes[m]["df"]["Categoria"].value_counts().get("RECHAZADO", 0)) for m in meses_disp]
-    _h.titular(ax, _h.rechazo_por_mes(meses_disp, totales, rechazos),
-               "Solicitudes por estatus de cierre, por mes")
-    ax.set_ylabel("Número de solicitudes")
-    ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
-              mode="expand", frameon=False, fontsize=8,
-              handlelength=1.4, columnspacing=1.2,
-              ncol=min(3, max(1, len(cats_presentes))))
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
-def grafica_comp_tasa_conversion(tabla_comp, guardar_como=None):
-    """Línea: % Financiado y % Aprobado por mes (tendencia de conversión)."""
-    if tabla_comp.empty or "% Financiado" not in tabla_comp.columns:
-        return None
-    meses = tabla_comp.index.tolist()
-    pct_fin = tabla_comp["% Financiado"].values
-    pct_apr = ((tabla_comp["Aprobado"] / tabla_comp["Total"]).fillna(0) * 100).values \
-        if "Aprobado" in tabla_comp.columns else np.zeros(len(meses))
-
-    fig, ax = plt.subplots(figsize=(max(7, len(meses) * 1.3), 5.5))
-    ax.plot(meses, pct_fin, marker="o", linewidth=2.4, color=MG_ROJO_OSCURO, label="% Financiado")
-    ax.plot(meses, pct_apr, marker="o", linewidth=2.0, color=INBURSA_AZUL,
-             linestyle="--", label="% Aprobado")
-    # Los rótulos se colocan al final (etiquetas_lineas), cuando ya se
-    # conoce la escala: con desplazamientos fijos chocaban si dos líneas
-    # andaban cerca (15% financiado y 8% aprobado quedaban pegados).
-    rotulos = [(pct_fin, MG_ROJO_OSCURO, dict(fontsize=9, fontweight="bold")),
-               (pct_apr, INBURSA_AZUL, dict(fontsize=8.5))]
-    # Rechazo: la "Lectura del periodo" explica la caída de conversión con el
-    # rechazo; ahora la gráfica muestra esa evidencia junto a la conversión.
-    pct_rech = ((tabla_comp["Rechazado"] / tabla_comp["Total"]).fillna(0) * 100).values \
-        if "Rechazado" in tabla_comp.columns else None
-    if pct_rech is not None:
-        color_rech = COLOR_CATEGORIA.get("RECHAZADO", "#F4A6B1")
-        ax.plot(meses, pct_rech, marker="o", linewidth=2.0, color=color_rech, linestyle=":", label="% Rechazado")
-        rotulos.append((pct_rech, color_rech, dict(fontsize=8.5)))
-    tope = max([x.max() for x in (pct_fin, pct_apr, pct_rech) if x is not None and len(x)] or [0])
-    ax.set_ylim(0, tope * 1.3 + 5)
-    _h.etiquetas_lineas(ax, rotulos)
-    _h.titular(ax, _h.por_mes_minimo(meses, list(pct_fin), "la conversión"),
-               "% de las solicitudes de cada mes: financiadas, aprobadas y rechazadas")
-    ax.set_ylabel("% de las solicitudes del mes")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=3)
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
-def grafica_comp_montos_por_mes(tabla_comp, guardar_como=None):
-    """Barras agrupadas: monto financiado vs monto aprobado, por mes."""
-    if tabla_comp.empty or "Monto Financiado" not in tabla_comp.columns:
-        return None
-    meses = tabla_comp.index.tolist()
-    monto_fin = tabla_comp["Monto Financiado"].fillna(0).values
-    monto_tot = tabla_comp["Monto Total"].fillna(0).values
-    x = np.arange(len(meses))
-    ancho = 0.38
-    fig, ax = plt.subplots(figsize=(max(7, len(meses) * 1.4), 5.5))
-    ax.bar(x - ancho / 2, monto_fin, width=ancho, color=MG_ROJO_OSCURO, edgecolor="white", label="Monto Financiado")
-    ax.bar(x + ancho / 2, monto_tot, width=ancho, color=MG_GRIS_CLARO, edgecolor="white", label="Monto Total a Financiar (todas)")
-    for xi, v in zip(x - ancho / 2, monto_fin):
-        ax.text(xi, v + max(monto_tot.max(), 1) * 0.015, _h.monto_corto(v), ha="center", fontsize=8, rotation=90 if len(meses) > 4 else 0, va="bottom",
-                zorder=4, bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none"))
-    for xi, v in zip(x + ancho / 2, monto_tot):
-        ax.text(xi, v + max(monto_tot.max(), 1) * 0.015, _h.monto_corto(v), ha="center", fontsize=8, rotation=90 if len(meses) > 4 else 0, va="bottom",
-                zorder=4, bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none"))
-    # Referencia: el promedio mensual financiado, la misma cifra de la portada.
-    promedio = float(monto_fin.mean()) if len(monto_fin) else 0
-    if promedio:
-        # En la leyenda y no como rótulo: chocaba con la etiqueta de un mes
-        # cercano al promedio (junio financió $1.80 M con promedio de $1.79 M).
-        ax.axhline(promedio, color=INBURSA_AZUL, linestyle=(0, (4, 3)), linewidth=1.1, zorder=3,
-                   label=f"Promedio mensual financiado ({_h.monto_corto(promedio)})")
-    ax.set_xticks(x)
-    ax.set_xticklabels(meses)
-    _h.formato_millones(ax, eje="y")
-    _h.titular(ax, _h.montos_por_mes(meses, list(monto_fin)),
-               "Monto financiado vs. monto total solicitado, por mes")
-    ax.set_ylabel("Monto (millones de pesos)")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=3, fontsize=8.5)
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
-def grafica_comp_gap_vs_gap_financiado(tabla_comp, guardar_como=None):
-    """Líneas: % GAP (todas las solicitudes) vs % GAP Financiado (solo dentro
-    de los créditos ya FINANCIADOS), por mes. Compara si el GAP se está
-    colocando también en las solicitudes que sí terminan dispersándose."""
-    if tabla_comp.empty or "% GAP Financiado" not in tabla_comp.columns or \
-       tabla_comp["% GAP Financiado"].isna().all():
-        return None
-
-    meses = tabla_comp.index.tolist()
-    pct_gap = tabla_comp["% GAP"].fillna(0).values if "% GAP" in tabla_comp.columns else None
-    pct_gap_fin = tabla_comp["% GAP Financiado"].fillna(0).values
-
-    fig, ax = plt.subplots(figsize=(max(7, len(meses) * 1.3), 5.5))
-    ax.plot(meses, pct_gap_fin, marker="o", linewidth=2.4, color=MG_ROJO_OSCURO,
-             label="% GAP Financiado")
-    rotulos = [(pct_gap_fin, MG_ROJO_OSCURO, dict(fontsize=9, fontweight="bold"))]
-
-    maximo = pct_gap_fin.max() if len(pct_gap_fin) else 0
-    if pct_gap is not None:
-        ax.plot(meses, pct_gap, marker="o", linewidth=2.0, color=INBURSA_AZUL,
-                 linestyle="--", label="% GAP (todas las solicitudes)")
-        rotulos.append((pct_gap, INBURSA_AZUL, dict(fontsize=8.5)))
-        maximo = max(maximo, pct_gap.max() if len(pct_gap) else 0)
-
-    # Hasta 108 para que se vea la línea de "lo esperado: todas" (100%).
-    ax.set_ylim(0, 108)
-    # Rótulos sin choques: con +3 fijo, dos líneas en el mismo valor (o a
-    # pocos puntos) dejaban un número encima del otro.
-    _h.etiquetas_lineas(ax, rotulos)
-    _h.referencia_alerta_gap(ax)
-    _h.titular(ax, _h.gap_financiados_por_mes(meses, list(pct_gap_fin)),
-               "% con GAP: en créditos financiados y en todas las solicitudes")
-    ax.set_ylabel("% de solicitudes")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), frameon=False, ncol=2, fontsize=8.5)
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
+from .graficas import (  # noqa: E402,F401
+    grafica_comp_totales_por_mes, grafica_comp_tasa_conversion, grafica_comp_montos_por_mes,
+    grafica_comp_gap_vs_gap_financiado, grafica_pendiente_vendedores,
+)
 
 def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_combinado, carpeta):
     # Vendedores y modelos cuentan cada folio una vez (ver folios.py). Las
@@ -649,6 +489,7 @@ def generar_graficas_comparativas(datos_por_mes, orden_meses, tabla_comp, df_com
         ("montos_mes",         lambda ruta: grafica_comp_montos_por_mes(tabla_comp, ruta),                    "c03_montos_mes.png"),
         ("gap_vs_gap_fin_mes", lambda ruta: grafica_comp_gap_vs_gap_financiado(tabla_comp, ruta),              "c04b_gap_vs_gap_fin_mes.png"),
         ("vendedores",         lambda ruta: grafica_vendedores(df_combinado, ruta, " en el periodo"),"c06_vendedores.png"),
+        ("pendiente_vendedores", lambda ruta: grafica_pendiente_vendedores(df_combinado, orden_meses, ruta), "c06b_pendiente_vendedores.png"),
         ("vendedor_status",    lambda ruta: grafica_vendedor_status(df_combinado, ruta),                      "c07_vendedor_status.png"),
         ("gap_por_vendedor",   lambda ruta: grafica_gap_por_vendedor_total(df_combinado, ruta),               "c09_gap_vendedor.png"),
         ("gap_financiado_vend", lambda ruta: grafica_gap_financiado_por_vendedor(df_combinado, ruta),         "c10_gap_financiado_vendedor.png"),
@@ -824,9 +665,12 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     ))
     elementos.append(Spacer(1, 0.5 * cm))
 
+    # La portada abre con el resultado del periodo, no con la descripción del
+    # documento. Con un solo mes no hay evolución y se conserva la descripción.
+    _idea = _conclusiones.idea_principal_comparativo(tabla_comp, orden_meses)
     intro_portada = Table(
         [[Paragraph(
-            f"Este reporte compara <b>{n_meses} mes{'es' if n_meses != 1 else ''}</b> de la bitácora "
+            _idea or f"Este reporte compara <b>{n_meses} mes{'es' if n_meses != 1 else ''}</b> de la bitácora "
             f"de solicitudes de crédito automotriz ({PERIODO_TXT}), con un total de "
             f"<b>{total_periodo} solicitudes</b> en el periodo. Incluye la evolución del volumen y "
             f"las categorías de cierre, la tasa "
@@ -849,10 +693,20 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
     # Cifras clave: en el PDF se dibujan como la columna lateral de la
     # portada (pdf_util.construir_con_lateral); en el Word quedan como tabla.
     elementos.append(_lateral.bloque_cifras(_lateral.cifras_comparativo(df_combinado, tabla_comp, n_meses)))
-    elementos.append(Spacer(1, 0.5 * cm))
+    elementos.append(Spacer(1, 0.2 * cm))
+
+    # --- Lo más importante: qué hacer, y en qué se basa ---
+    # (antes: "Lectura del periodo" tras la tabla y conclusiones al final)
+    _pdf_util.bloque_lo_importante(
+        elementos, _estilos, mensaje=datos.mensaje, analista=datos.analista,
+        acciones=_conclusiones.acciones_comparativo(
+            tabla_comp, orden_meses, df_combinado,
+            df_ultimo=datos_por_mes[orden_meses[-1]]["df"] if orden_meses else None),
+        sustento=lectura + conclusiones_fin + _folios.texto_aviso(_res_folios))
+    elementos.append(CondPageBreak(17 * cm))
 
     # --- Resumen ejecutivo: tabla comparativa mensual ---
-    elementos.append(Paragraph("Resumen Ejecutivo — Comparativo por Mes", estilo_h1))
+    elementos.append(Paragraph("Detalle: comparativo por mes", estilo_h1))
     elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     if not tabla_comp.empty:
@@ -895,9 +749,6 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         elementos.append(Paragraph("No se pudo construir la tabla comparativa mensual.", estilo_nota))
     elementos.append(Spacer(1, 0.4 * cm))
 
-    elementos.append(Paragraph("Lectura del periodo", estilo_h2))
-    for texto in lectura + _folios.texto_aviso(_res_folios):
-        elementos.append(Paragraph(_pdf_util.resaltar("•  " + texto), estilo_cuerpo))
     # Salto condicional: si la lectura cabe en la portada, el reporte
     # detallado empieza en página nueva como siempre; si se desborda (por
     # ejemplo, con el aviso de folios entre meses), sigue en la misma página
@@ -1158,25 +1009,25 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
             tabla_var, mes_ini, mes_fin = resultado_var
             elementos.append(Spacer(1, 0.35 * cm))
             elementos.append(Paragraph("Quién subió y quién bajó", estilo_h3))
-            elementos.append(Paragraph(
-                f"Comparación directa entre {str(mes_ini).title()} y "
-                f"{str(mes_fin).title()}, ordenada de mayor aumento a mayor "
-                f"caída. Los meses intermedios no entran en esta lectura.",
-                estilo_cuerpo
-            ))
-            filas_var = [["Vendedor", str(mes_ini).title(), str(mes_fin).title(),
-                          "Variación", "% Cambio"]]
-            for vendedor, fila in tabla_var.iterrows():
-                var = int(fila["Variación"])
-                pct = fila["% Cambio"]
-                filas_var.append([
-                    _recortar_nombre(str(vendedor)),
-                    str(int(fila["Inicio"])),
-                    str(int(fila["Fin"])),
-                    f"{var:+d}" if var else "0",
-                    "—" if pd.isna(pct) else f"{pct:+.0f}%",
-                ])
-            elementos.append(KeepTogether(tabla_estilo_mg(filas_var)))
+            if "pendiente_vendedores" in rutas_graficas:
+                # Gráfica de pendiente en lugar de la tabla de variación: la
+                # dirección y el tamaño del cambio se ven sin leer números.
+                elementos.append(imagen_ajustada(rutas_graficas["pendiente_vendedores"],
+                                                 ancho_cm=14, alto_max_cm=12))
+            else:
+                filas_var = [["Vendedor", str(mes_ini).title(), str(mes_fin).title(),
+                              "Variación", "% Cambio"]]
+                for vendedor, fila in tabla_var.iterrows():
+                    var = int(fila["Variación"])
+                    pct = fila["% Cambio"]
+                    filas_var.append([
+                        _recortar_nombre(str(vendedor)),
+                        str(int(fila["Inicio"])),
+                        str(int(fila["Fin"])),
+                        f"{var:+d}" if var else "0",
+                        "—" if pd.isna(pct) else f"{pct:+.0f}%",
+                    ])
+                elementos.append(KeepTogether(tabla_estilo_mg(filas_var)))
 
         # --- Ticket promedio ----------------------------------------
         if not fusionada and tabla_ticket is not None and not tabla_ticket.empty:
@@ -1272,14 +1123,6 @@ def generar_reporte_pdf_comparativo(datos_por_mes, orden_meses, tabla_comp,
         ))
         elementos.append(imagen_ajustada(rutas_graficas["modelos"], ancho_cm=16, alto_max_cm=13))
         elementos.append(Spacer(1, 0.4 * cm))
-
-    # ===============================================================
-    # CONCLUSIONES
-    # ===============================================================
-    elementos.append(Paragraph("Conclusiones y Factores Importantes", estilo_h1))
-    elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
-    for texto in conclusiones_fin:
-        elementos.append(Paragraph(_pdf_util.resaltar("•  " + texto), estilo_cuerpo))
 
     # -------------------------------------------------------------
     doc = SimpleDocTemplate(

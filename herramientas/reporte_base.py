@@ -211,7 +211,7 @@ __all__ = [
     "analisis_por_vendedor",
     "analisis_financiero_por_categoria",
     "grafica_status",
-    "grafica_dona_categoria",
+    "grafica_mezcla_cierre",
     "grafica_vendedores",
     "grafica_vendedor_status",
     "grafica_monto_por_vendedor",
@@ -754,14 +754,16 @@ def filas_tabla_vendedor(tabla_vendedor):
         anchos += [2.3, 1.4]
 
     filas = [cabecera]
+    hay_base_chica = False
     for vendedor, fila in tabla_vendedor.iterrows():
         financiado = int(fila.get("FINANCIADO", 0))
         celdas = [
             recortar_nombre(vendedor),
             str(int(fila["Total"])),
             str(financiado),
-            f"{fila.get('% Financiado', 0):.1f}%",
+            f"{fila.get('% Financiado', 0):.1f}%" + ("*" if fila["Total"] < BASE_MINIMA else ""),
         ]
+        hay_base_chica = hay_base_chica or fila["Total"] < BASE_MINIMA
         if hay_monto:
             celdas.append(f"${fila['Monto Financiado ($)']:,.0f}")
         if hay_gap:
@@ -769,7 +771,10 @@ def filas_tabla_vendedor(tabla_vendedor):
             celdas.append(str(gap_fin))
             # Sin créditos financiados el porcentaje no existe: se marca con
             # una raya en vez de un 0% que se leería como mal desempeño.
-            celdas.append(f"{gap_fin / financiado * 100:.0f}%" if financiado else "—")
+            chico = 0 < financiado < BASE_MINIMA_FINANCIADOS
+            hay_base_chica = hay_base_chica or chico
+            celdas.append((f"{gap_fin / financiado * 100:.0f}%" + ("*" if chico else ""))
+                          if financiado else "—")
         filas.append(celdas)
 
     total_sol = int(tabla_vendedor["Total"].sum())
@@ -786,6 +791,12 @@ def filas_tabla_vendedor(tabla_vendedor):
 
     nota = ("El % de GAP se calcula sobre créditos FINANCIADOS: es el GAP "
             "efectivamente vendido." if hay_gap else None)
+    if hay_base_chica:
+        # Un "1 de 1 (100%)" no es un logro: se marca para que no se lea así.
+        nota = ((nota + " ") if nota else "") + (
+            f"* Base pequeña (menos de {BASE_MINIMA} solicitudes o de "
+            f"{BASE_MINIMA_FINANCIADOS} créditos financiados): el porcentaje no es "
+            f"comparable con el de los demás.")
 
     # Si sobran columnas, el ancho restante se le da al nombre, que es el que
     # más lo aprovecha.
@@ -1025,6 +1036,13 @@ def encabezados_vendedores(nombres):
     return resultado
 
 
+def _mezcla_calor(intensidad):
+    """De blanco a un azul claro (nunca tan oscuro que tape el número)."""
+    t = 0.12 + 0.88 * max(0.0, min(1.0, intensidad))
+    claro, tope = (255, 255, 255), (0xB4, 0xBE, 0xEC)
+    return rl_colors.Color(*[(a + (b - a) * t) / 255 for a, b in zip(claro, tope)])
+
+
 def tablas_desempeno_volteadas(tabla_vendedor, claves, tabla_estilo_mg, estilo_nota):
     """Tabla estatus × vendedor (estatus en filas, vendedores en columnas),
     dividida en varias tablas si el equipo es grande. Devuelve flowables."""
@@ -1052,6 +1070,8 @@ def tablas_desempeno_volteadas(tabla_vendedor, claves, tabla_estilo_mg, estilo_n
     cortos = ({v: ("Sin vendedor" if v == SIN_VENDEDOR else str(v)) for v in vendedores}
               if caben else encabezados_vendedores(vendedores))
 
+    maximo_celda = max((int(tabla_vendedor.loc[v].get(c, 0)) for v in vendedores for c in claves),
+                       default=0)
     salida = []
     for k, grupo in enumerate(partes):
         ultima = k == len(partes) - 1
@@ -1067,8 +1087,10 @@ def tablas_desempeno_volteadas(tabla_vendedor, claves, tabla_estilo_mg, estilo_n
             fila.append(int(tabla_vendedor["Total"].sum()))
         filas.append(fila)
         if tiene_pct:
-            fila = ["% Financiado"] + [f"{tabla_vendedor.loc[v].get('% Financiado', 0):.1f}%"
-                                       for v in grupo]
+            fila = ["% Financiado"] + [
+                f"{tabla_vendedor.loc[v].get('% Financiado', 0):.1f}%"
+                + ("*" if tabla_vendedor.loc[v].get("Total", 0) < BASE_MINIMA else "")
+                for v in grupo]
             if ultima:
                 total = int(tabla_vendedor["Total"].sum())
                 fin = int(tabla_vendedor["FINANCIADO"].sum()) if "FINANCIADO" in tabla_vendedor else 0
@@ -1078,13 +1100,29 @@ def tablas_desempeno_volteadas(tabla_vendedor, claves, tabla_estilo_mg, estilo_n
                                 col_widths=[ancho_estatus] + [ancho_col] * (len(encabezado) - 1),
                                 compacta=compacta)
         tabla.hAlign = "LEFT"
+        # Mapa de calor: cuanto más solicitudes, más oscuro el fondo. Así las
+        # concentraciones saltan a la vista sin leer celda por celda. Solo
+        # las celdas de vendedor (no la columna de total ni las filas de
+        # total y porcentaje), y con la misma escala en todas las partes.
+        if maximo_celda and hasattr(tabla, "setStyle"):
+            calor = []
+            for i, c in enumerate(claves, start=1):
+                for j, v in enumerate(grupo, start=1):
+                    n = int(tabla_vendedor.loc[v].get(c, 0))
+                    if n:
+                        calor.append(("BACKGROUND", (j, i), (j, i),
+                                      _mezcla_calor(n / maximo_celda)))
+            tabla.setStyle(TableStyle(calor))
         if k:
             salida.append(Spacer(1, 0.3 * cm))
         salida.append(tabla)
 
     abreviados = [f"{cortos[v]} = {v}" for v in vendedores
                   if cortos[v] != str(v) and v != SIN_VENDEDOR]
-    notas = []
+    notas = ["Sombreado: cuanto más oscuro, más solicitudes."] if maximo_celda else []
+    if any(tabla_vendedor.loc[v].get("Total", 0) < BASE_MINIMA for v in vendedores) and tiene_pct:
+        notas.append(f"* Base pequeña (menos de {BASE_MINIMA} solicitudes): el porcentaje "
+                     f"no es comparable.")
     if n_partes > 1:
         notas.append(f"La tabla va en {n_partes} partes por el número de vendedores; "
                      f"«Total equipo» suma a todos.")
@@ -1148,401 +1186,14 @@ def analisis_financiero_por_categoria(df):
 #    mostrarla en pantalla como antes. Devuelve la ruta guardada (o None).
 # =======================================================================
 
-def grafica_status(df, guardar_como=None):
-    """Barras: número de solicitudes por ESTATUS."""
-    if "STATUS" not in df.columns:
-        return None
-    conteo = df["STATUS"].value_counts().sort_values(ascending=False)
-
-    fig, ax = plt.subplots(figsize=(8, 5))
-    # Cada barra toma el color de SU categoría (no un degradado de rojos por
-    # posición): así esta gráfica se lee junto con la dona y las barras
-    # apiladas, donde el color significa lo mismo.
-    colores = [COLOR_CATEGORIA.get(clasificar_status(s), MG_GRIS_CLARO)
-               for s in conteo.index]
-    barras = ax.bar(range(len(conteo)), conteo.values, color=colores, edgecolor="white")
-
-    for barra, valor in zip(barras, conteo.values):
-        ax.text(barra.get_x() + barra.get_width() / 2, valor + max(conteo.values) * 0.01,
-                 f"{valor}\n({valor/conteo.sum()*100:.0f}%)", ha="center", va="bottom", fontsize=9)
-
-    _h.titular(ax, _h.estatus_mayoritario(conteo), "Solicitudes por estatus de la bitácora")
-    ax.set_ylabel("Número de solicitudes")
-    ax.set_ylim(0, max(conteo.values) * 1.2)
-    # Nombres partidos en renglones en vez de inclinados: inclinados a 15°,
-    # los largos ("DOCUMENTACION ADICIONAL") se salían de la gráfica y con
-    # más estatus se encimaban con el vecino.
-    _h.etiquetas_categorias_x(ax, list(conteo.index))
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-def grafica_dona_categoria(df, guardar_como=None):
-    """Dona: proporción Financiado vs Aprobado vs CONTRAPROPUESTA vs Rechazado,
-    con los nombres (primer nombre) de los vendedores que aportan a cada
-    categoría dentro de la leyenda."""
-    if "Categoria" not in df.columns:
-        return None
-    conteo_bruto = df["Categoria"].value_counts()
-    orden_presente = [c for c in ORDEN_CATEGORIAS if c in conteo_bruto.index]
-    conteo = conteo_bruto.reindex(orden_presente)
-    colores = [COLOR_CATEGORIA.get(c, MG_GRIS_CLARO) for c in conteo.index]
-
-    fig, ax = plt.subplots(figsize=(8, 7))
-    wedges, _, autotextos = ax.pie(
-        conteo.values, labels=None, autopct="%1.0f%%", pctdistance=0.8,
-        colors=colores, startangle=90, wedgeprops=dict(width=0.42, edgecolor="white"),
-        textprops=dict(fontweight="bold"),
-    )
-    for autotexto, color_rebanada in zip(autotextos, colores):
-        autotexto.set_color(_color_texto_legible(color_rebanada))
-
-    etiquetas = []
-    for cat, valor in zip(conteo.index, conteo.values):
-        etiqueta = f"{_est.etiqueta(cat).upper()} ({valor})"
-        if "Nombre del Vendedor" in df.columns:
-            etiqueta += f"\n   {_lista_vendedores_por_categoria(df, cat)}"
-        etiquetas.append(etiqueta)
-
-    # Con muchos estatus, una leyenda de una sola columna crecía tanto hacia
-    # abajo que al exportar (bbox "tight") la imagen quedaba altísima y, al
-    # escalarla al ancho del PDF, la dona se encogía hasta casi desaparecer.
-    # A partir de 7 entradas se reparte en dos columnas.
-    n_cat = len(etiquetas)
-    ax.legend(wedges, etiquetas, loc="upper center", bbox_to_anchor=(0.5, -0.02),
-               frameon=False, fontsize=8.5 if n_cat > 9 else 9,
-               ncol=2 if n_cat > 6 else 1,
-               labelspacing=0.9 if n_cat > 6 else 1.2,
-               columnspacing=1.5)
-    _h.titular(ax, _h.mezcla_de_cierre(conteo), "Proporción de solicitudes por estatus de cierre")
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-def grafica_vendedores(df, guardar_como=None, sufijo=""):
-    """Barras horizontales: total de solicitudes por vendedor.
-
-    sufijo: se agrega al subtítulo (el Comparativo pasa " en el periodo")."""
-    if "Nombre del Vendedor" not in df.columns:
-        return None
-    total_equipo = len(df)   # con capturas genéricas: cuadra con la portada
-    df, excluidos = _h.solo_personas(df)
-    conteo = df["Nombre del Vendedor"].value_counts().sort_values(ascending=True)
-
-    fig, ax = plt.subplots(figsize=(8, max(4, len(conteo) * 0.5)))
-    colores = list(reversed(_gradiente(len(conteo))))
-    ax.barh(conteo.index, conteo.values, color=colores, edgecolor="white")
-
-    for i, valor in enumerate(conteo.values):
-        ax.text(valor + max(conteo.values) * 0.01, i, str(valor), va="center", fontsize=9)
-
-    _h.titular(ax, _h.vendedor_con_mas(conteo, total_equipo), f"Solicitudes ingresadas por vendedor{sufijo}" + (" · sin capturas genéricas" if excluidos else ""))
-    ax.set_xlabel("Número de solicitudes")
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-def grafica_vendedor_status(df, guardar_como=None):
-    """Barras horizontales apiladas: desempeño de cada vendedor por categoría."""
-    if "Nombre del Vendedor" not in df.columns or "Categoria" not in df.columns:
-        return None
-
-    df, excluidos = _h.solo_personas(df)
-    pivote = pd.crosstab(df["Nombre del Vendedor"], df["Categoria"])
-    orden_cols = [c for c in ORDEN_CATEGORIAS if c in pivote.columns]
-    pivote = pivote[orden_cols]
-    hallazgo = _h.vendedor_mejor_conversion(pivote)
-    pivote["Total"] = pivote.sum(axis=1)
-    pivote = pivote.sort_values("Total", ascending=True).drop(columns="Total")
-
-    fig, ax = plt.subplots(figsize=(9, max(4, len(pivote) * 0.55) + 0.8))
-    izquierda = np.zeros(len(pivote))
-    for col in orden_cols:
-        valores = pivote[col].values
-        ax.barh(pivote.index, valores, left=izquierda,
-                 color=COLOR_CATEGORIA.get(col, MG_GRIS_CLARO),
-                 label=_est.etiqueta(col), edgecolor="white")
-        izquierda += valores
-
-    # El título NO enumera las categorías (la leyenda de abajo ya lo hace):
-    # con muchos estatus esa línea salía más ancha que la gráfica y deformaba
-    # la imagen al exportarla.
-    _h.titular(ax, hallazgo, "Estatus de cierre de las solicitudes de cada vendedor" + (" · sin capturas genéricas" if excluidos else ""))
-    ax.set_xlabel("Número de solicitudes")
-    # ncol se ajusta al número de categorías para que la leyenda no se
-    # amontone cuando hay más de cuatro.
-    ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
-              mode="expand", frameon=False, fontsize=8,
-              handlelength=1.4, columnspacing=1.2,
-              ncol=min(3, max(1, len(orden_cols))))
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-def grafica_monto_por_vendedor(df, guardar_como=None):
-    """Barras horizontales agrupadas: monto colocado por vendedor,
-    separando APROBADO (aún sin dispersar) de FINANCIADO (ya dispersado)."""
-    if not {"Nombre del Vendedor", "Categoria", "Monto Total a Financiar"}.issubset(df.columns):
-        return None
-
-    df, excluidos = _h.solo_personas(df)
-    monto_aprobado = (
-        df[df["Categoria"] == "APROBADO"]
-        .groupby("Nombre del Vendedor")["Monto Total a Financiar"].sum()
-    )
-    monto_financiado = (
-        df[df["Categoria"] == "FINANCIADO"]
-        .groupby("Nombre del Vendedor")["Monto Total a Financiar"].sum()
-    )
-
-    vendedores = sorted(
-        set(monto_aprobado.index) | set(monto_financiado.index),
-        key=lambda v: monto_aprobado.get(v, 0) + monto_financiado.get(v, 0),
-    )
-    if not vendedores:
-        return None
-
-    valores_aprobado = np.array([monto_aprobado.get(v, 0) for v in vendedores])
-    valores_financiado = np.array([monto_financiado.get(v, 0) for v in vendedores])
-    maximo = max(valores_aprobado.max(), valores_financiado.max(), 1)
-
-    y = np.arange(len(vendedores))
-    alto = 0.36
-
-    fig, ax = plt.subplots(figsize=(9, max(4, len(vendedores) * 0.65)))
-    ax.barh(y + alto / 2, valores_aprobado, height=alto, color=MG_ROJO,
-             edgecolor="white", label="Aprobado (sin dispersar)")
-    ax.barh(y - alto / 2, valores_financiado, height=alto, color=MG_ROJO_OSCURO,
-             edgecolor="white", label="Financiado (dispersado)")
-
-    for yi, valor in zip(y + alto / 2, valores_aprobado):
-        if valor > 0:
-            ax.text(valor + maximo * 0.015, yi, _h.monto_corto(valor), va="center", fontsize=8)
-    for yi, valor in zip(y - alto / 2, valores_financiado):
-        if valor > 0:
-            ax.text(valor + maximo * 0.015, yi, _h.monto_corto(valor), va="center", fontsize=8)
-
-    ax.set_yticks(y)
-    ax.set_yticklabels(vendedores)
-    ax.set_xlim(0, maximo * 1.18)
-    _h.formato_millones(ax, eje="x")
-
-    _h.titular(ax, _h.monto_top_vendedor(pd.Series(valores_financiado, index=vendedores)),
-               "Monto aprobado y financiado de cada vendedor" + (" · sin capturas genéricas" if excluidos else ""))
-    ax.set_xlabel("Monto a financiar ($ MXN)")
-    plt.tight_layout()
-    # Debajo del eje, no en la esquina inferior derecha: ahí caía encima de
-    # la etiqueta de la barra más baja ("15 de 15 (100%)" quedaba tapada).
-    _h.leyenda_bajo_eje(ax, ncol=2)
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-def grafica_modelos(df, guardar_como=None, sufijo=""):
-    """Barras horizontales: modelos de vehículo más solicitados.
-
-    sufijo: se agrega al subtítulo (el Comparativo pasa " en el periodo")."""
-    if "Vehículo" not in df.columns:
-        return None
-    conteo_completo = df["Vehículo"].dropna().value_counts()
-    if conteo_completo.empty:
-        return None
-
-    TOP_N = 10
-    conteo = conteo_completo.head(TOP_N).sort_values(ascending=True)
-
-    fig, ax = plt.subplots(figsize=(8, max(4, len(conteo) * 0.4)))
-    colores = list(reversed(_gradiente(len(conteo))))
-    ax.barh(conteo.index, conteo.values, color=colores, edgecolor="white")
-
-    for i, valor in enumerate(conteo.values):
-        ax.text(valor + max(conteo.values) * 0.02, i, str(valor), va="center", fontsize=9)
-
-    _h.titular(ax, _h.modelo_lider(conteo_completo),
-               f"Modelos con más solicitudes{sufijo} (top {min(TOP_N, len(conteo_completo))})")
-    ax.set_xlabel("Número de solicitudes")
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-def grafica_gap_por_categoria(df, guardar_como=None):
-    """Barras: % de solicitudes que llevan GAP, por categoría de status."""
-    if "Categoria" not in df.columns or "¿Tiene GAP?" not in df.columns:
-        return None
-
-    pct_gap = (
-        (df["¿Tiene GAP?"] == "SI").groupby(df["Categoria"]).mean().mul(100)
-    )
-    orden_presente = [c for c in ORDEN_CATEGORIAS if c in pct_gap.index]
-    pct_gap = pct_gap.reindex(orden_presente)
-    if pct_gap.empty:
-        return None
-
-    colores = [COLOR_CATEGORIA.get(c, MG_GRIS_CLARO) for c in pct_gap.index]
-
-    fig, ax = plt.subplots(figsize=(7, 5))
-    barras = ax.bar(range(len(pct_gap)), pct_gap.values, color=colores, edgecolor="white")
-
-    for barra, valor in zip(barras, pct_gap.values):
-        ax.text(barra.get_x() + barra.get_width() / 2, valor + 2,
-                 f"{valor:.0f}%", ha="center", va="bottom", fontsize=9, fontweight="bold")
-
-    _h.titular(ax, _h.gap_por_estatus(pct_gap), "% de solicitudes con GAP en cada estatus")
-    ax.set_ylabel("% con GAP")
-    # El tope se ajusta al dato real (antes estaba fijo en 120% y dejaba
-    # media gráfica vacía). Las etiquetas se inclinan más porque con muchas
-    # categorías los nombres se encimaban unos con otros.
-    ax.set_ylim(0, 108)
-    _h.referencia_alerta_gap(ax)
-    # Los nombres se parten en renglones y la leyenda se coloca midiendo
-    # dónde terminan: con -0.24 fijo y nombres inclinados a 30°,
-    # "DOCUMENTACION ADICIONAL" quedaba encima de la leyenda.
-    _h.etiquetas_categorias_x(ax, list(pct_gap.index), ancho=13)
-    plt.tight_layout()
-    _h.leyenda_bajo_eje(ax, ncol=2, fontsize=8.5)
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-def grafica_gap_por_vendedor_total(df, guardar_como=None):
-    """Barras horizontales agrupadas: solicitudes con GAP por vendedor,
-    comparadas contra el total de solicitudes de cada vendedor (para ver
-    de un vistazo qué proporción de las solicitudes de cada quien llevó GAP)."""
-    if "Nombre del Vendedor" not in df.columns or "¿Tiene GAP?" not in df.columns:
-        print("Las columnas 'Nombre del Vendedor' o '¿Tiene GAP?' no están presentes.")
-        return None
-
-    total_equipo, gap_equipo = len(df), int((df["¿Tiene GAP?"] == "SI").sum())
-    df, excluidos = _h.solo_personas(df)
-    df_gap = df[df["¿Tiene GAP?"] == "SI"].copy()
-    if df_gap.empty:
-        print("No hay solicitudes con GAP para graficar.")
-        return None
-
-    conteo_gap = df_gap["Nombre del Vendedor"].value_counts()
-    conteo_total = df["Nombre del Vendedor"].value_counts()
-
-    # Se usa el total de solicitudes (no solo las que tienen GAP) para que
-    # aparezcan TODOS los vendedores, incluso los que tuvieron 0 GAP.
-    vendedores = conteo_total.sort_values(ascending=True).index.tolist()
-    valores_total = np.array([conteo_total.get(v, 0) for v in vendedores])
-    valores_gap = np.array([conteo_gap.get(v, 0) for v in vendedores])
-    maximo = max(valores_total.max(), valores_gap.max(), 1)
-
-    y = np.arange(len(vendedores))
-    alto = 0.36
-
-    fig, ax = plt.subplots(figsize=(9, max(4, len(vendedores) * 0.65)))
-    ax.barh(y + alto / 2, valores_total, height=alto, color=MG_GRIS_CLARO,
-             edgecolor="white", label="Total de solicitudes")
-    ax.barh(y - alto / 2, valores_gap, height=alto, color=MG_ROJO,
-             edgecolor="white", label="Con GAP")
-
-    for yi, g, t in zip(y, valores_gap, valores_total):
-        ax.text(max(g, t) + maximo * 0.015, yi, f"{g} de {t} ({g / t * 100:.0f}%)" if t else "—",
-                va="center", fontsize=8.5, color=MG_GRIS_OSCURO)
-
-    ax.set_yticks(y)
-    ax.set_yticklabels(vendedores)
-    ax.set_xlim(0, maximo * 1.45)
-
-    _h.titular(ax, _h.cobertura_gap(total_equipo, gap_equipo), "Solicitudes con GAP frente al total de cada vendedor" + (" · sin capturas genéricas" if excluidos else ""))
-    ax.set_xlabel("Número de solicitudes")
-    plt.tight_layout()
-    # Debajo del eje, no en la esquina inferior derecha: ahí caía encima de
-    # la etiqueta de la barra más baja ("15 de 15 (100%)" quedaba tapada).
-    _h.leyenda_bajo_eje(ax, ncol=2)
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-def grafica_gap_por_vendedor_y_status(df, guardar_como=None):
-    """Barras horizontales apiladas: solicitudes con GAP por vendedor, desglosado por categoría de status."""
-    if not {"Nombre del Vendedor", "Categoria", "¿Tiene GAP?"}.issubset(df.columns):
-        print("Las columnas 'Nombre del Vendedor', 'Categoria' o '¿Tiene GAP?' no están presentes.")
-        return None
-
-    df, excluidos = _h.solo_personas(df)
-    df_gap = df[df["¿Tiene GAP?"] == "SI"].copy()
-    if df_gap.empty:
-        print("No hay solicitudes con GAP para graficar.")
-        return None
-
-    pivote = pd.crosstab(df_gap["Nombre del Vendedor"], df_gap["Categoria"])
-    orden_cols = [c for c in ORDEN_CATEGORIAS if c in pivote.columns]
-    pivote = pivote[orden_cols]
-    pivote["Total"] = pivote.sum(axis=1)
-    pivote = pivote.sort_values("Total", ascending=True).drop(columns="Total")
-
-    if pivote.empty:
-        print("No hay datos de GAP por vendedor y status para graficar.")
-        return None
-
-    fig, ax = plt.subplots(figsize=(9, max(4, len(pivote) * 0.55) + 0.8))
-    izquierda = np.zeros(len(pivote))
-    for col in orden_cols:
-        valores = pivote[col].values
-        ax.barh(pivote.index, valores, left=izquierda,
-                 color=COLOR_CATEGORIA.get(col, MG_GRIS_CLARO),
-                 label=_est.etiqueta(col), edgecolor="white")
-        izquierda += valores
-
-    _h.titular(ax, _h.gap_que_se_rechaza(df_gap), "Solicitudes con GAP de cada vendedor, por estatus" + (" · sin capturas genéricas" if excluidos else ""))
-    ax.set_xlabel("Número de solicitudes con GAP")
-    ax.legend(loc="upper center", bbox_to_anchor=(0, -0.30, 1, 0.16),
-              mode="expand", frameon=False, fontsize=8,
-              handlelength=1.4, columnspacing=1.2,
-              ncol=min(3, max(1, len(orden_cols))))
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-def grafica_gap_financiado_por_vendedor(df, guardar_como=None):
-    """Barras horizontales: créditos financiados con GAP por vendedor.
-
-    Cada barra dice "3 de 5 financiados (60%)". Antes llevaba
-    "¡Felicidades, <nombre>!" para quien tuviera el máximo, lo que además de
-    informal premiaba empates en 1 y ocultaba con cuántos créditos se logró.
-    El cálculo vive en metricas.py y lo comparte el comparativo.
-    """
-    fin_equipo = df[df["Categoria"] == "FINANCIADO"] if "Categoria" in df.columns else df.iloc[0:0]
-    gap_fin_equipo = int((fin_equipo["¿Tiene GAP?"] == "SI").sum()) if "¿Tiene GAP?" in df.columns else 0
-    df, excluidos = _h.solo_personas(df)
-    datos = _metricas.gap_en_financiados_por_vendedor(df)
-    if datos.empty:
-        return None
-
-    fig, ax = plt.subplots(figsize=(8, max(4, len(datos) * 0.5)))
-    # Color por valor, no por posición: los empates se ven iguales.
-    rangos, n_valores = _metricas.rango_de_valor(datos)
-    paleta = list(reversed(_gradiente(n_valores)))
-    ax.barh(datos.index, datos["con_gap"], color=[paleta[r] for r in rangos],
-            edgecolor="white")
-
-    # Cada barra lleva el dato que permite juzgarla, no una felicitación.
-    tope = datos["con_gap"].max()
-    for i, (_, fila) in enumerate(datos.iterrows()):
-        ax.text(fila["con_gap"] + tope * 0.02, i,
-                _metricas.etiqueta_gap(fila["con_gap"], fila["financiados"], fila["pct"]),
-                va="center", fontsize=9, color=MG_GRIS_OSCURO)
-
-    # Espacio a la derecha para la etiqueta, que es más larga que un número.
-    ax.set_xlim(0, tope * 2.1)
-    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
-    ax.set_xlabel("Créditos financiados con GAP")
-    _h.titular(ax, _h.gap_en_financiados(gap_fin_equipo, len(fin_equipo)), "Créditos financiados con GAP, por vendedor" + (" · sin capturas genéricas" if excluidos else ""))
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    # plt.close y no plt.show: en el servidor no hay pantalla, y show() sin
-    # cerrar dejaba la figura viva en memoria en cada corrida.
-    plt.close(fig)
-    return guardar_como
+# Las gráficas viven en graficas.py (un solo criterio visual para los cuatro reportes).
+from .graficas import BASE_MINIMA, BASE_MINIMA_FINANCIADOS  # noqa: E402
+from .graficas import (  # noqa: E402,F401
+    grafica_status, grafica_mezcla_cierre, grafica_vendedores, grafica_vendedor_status,
+    grafica_monto_por_vendedor, grafica_modelos, grafica_gap_por_categoria,
+    grafica_gap_por_vendedor_total, grafica_gap_por_vendedor_y_status,
+    grafica_gap_financiado_por_vendedor,
+)
 
 def generar_graficas_para_pdf(df, carpeta):
     """Genera todas las gráficas guardándolas como PNG en `carpeta`,
@@ -1558,7 +1209,7 @@ def generar_graficas_para_pdf(df, carpeta):
     print("=" * 72)
     especificaciones = [
         ("status",               grafica_status,                    "g01_status.png"),
-        ("dona_categoria",       grafica_dona_categoria,             "g02_dona_categoria.png"),
+        ("mezcla_cierre",        grafica_mezcla_cierre,              "g02_mezcla_cierre.png"),
         ("vendedores",           grafica_vendedores,                 "g03_vendedores.png"),
         ("vendedor_status",      grafica_vendedor_status,            "g04_vendedor_status.png"),
         ("monto_por_vendedor",   grafica_monto_por_vendedor,         "g05_monto_vendedor.png"),
@@ -1627,7 +1278,7 @@ def crear_estilos():
     styles = getSampleStyleSheet()
     estilo_kicker_portada = ParagraphStyle(
         "KickerPortada", parent=styles["Normal"], fontName=FUENTE_BOLD, fontSize=9.5,
-        textColor=rl_colors.HexColor(MG_ROJO), alignment=TA_LEFT, spaceAfter=6, leading=12)
+        textColor=rl_colors.HexColor("#6B7280"), alignment=TA_LEFT, spaceAfter=6, leading=12)
     estilo_titulo_portada = ParagraphStyle(
         "TituloPortada", parent=styles["Title"], fontName=FUENTE_BOLD, fontSize=25,
         textColor=rl_colors.HexColor(INBURSA_AZUL), alignment=TA_LEFT,
@@ -1773,7 +1424,7 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
     elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     # --- 1. Distribución de solicitudes por status ---
-    if "status" in rutas_graficas or "dona_categoria" in rutas_graficas:
+    if "status" in rutas_graficas or "mezcla_cierre" in rutas_graficas:
         elementos.append(Paragraph("1. Distribución de Solicitudes por Estatus", e["h2"]))
         elementos.append(Paragraph(
             textos["estatus"],
@@ -1782,8 +1433,8 @@ def secciones_detalladas(elementos, e, textos, df, rutas_graficas, tabla_vendedo
         if "status" in rutas_graficas:
             elementos.append(imagen_ajustada(rutas_graficas["status"], ancho_cm=16, alto_max_cm=9))
             elementos.append(Spacer(1, 0.2 * cm))
-        if "dona_categoria" in rutas_graficas:
-            elementos.append(imagen_ajustada(rutas_graficas["dona_categoria"], ancho_cm=12, alto_max_cm=12))
+        if "mezcla_cierre" in rutas_graficas:
+            elementos.append(imagen_ajustada(rutas_graficas["mezcla_cierre"], ancho_cm=16, alto_max_cm=5))
         elementos.append(Spacer(1, 0.4 * cm))
 
     # --- 2. Desempeño por vendedor ---

@@ -38,7 +38,7 @@ def _validar_meses_distintos(archivos, rutas_archivos):
 
 def ejecutar(rutas_archivos, carpeta_salida="salida", nombres_meses=None,
              nombre_pdv=None, nombre_analista=None, **_opciones):
-    datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista)
+    datos = DatosReporte.desde_opciones(nombre_pdv, nombre_analista, **_opciones)
     nombre_pdv, nombre_analista = datos.pdv, datos.analista
 
     os.makedirs(carpeta_salida, exist_ok=True)

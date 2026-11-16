@@ -245,5 +245,5 @@ def test_columna_lateral_cuenta_lo_que_falta():
     df = _bitacora([("Ana Lopez Ruiz", "FINANCIADO", "SI", 1)] * 2 +
                    [("Ana Lopez Ruiz", "FINANCIADO", "NO", 1)] * 4)
     gap = [c for c in L.cifras_resumen(df) if "GAP" in c["etiqueta"]][0]
-    assert gap["nota"] == "4 sin GAP de 6 créditos" and gap["alerta"]
+    assert gap["nota"] == "4 sin GAP de 6 créditos · esperado: 100%" and gap["alerta"]
     assert "meta" not in gap["nota"]

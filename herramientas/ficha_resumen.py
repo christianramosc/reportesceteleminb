@@ -46,6 +46,7 @@ from matplotlib.patches import Circle, FancyBboxPatch, Polygon, Rectangle, Wedge
 
 from . import conclusiones as _c
 from . import estatus as _est
+from . import graficas as _g
 from . import hallazgos as _h
 from . import iconos as _iconos_pdf      # reglas para elegir icono por etiqueta
 from . import lateral as _lateral
@@ -63,7 +64,7 @@ AZUL = "#191970"           # azul Inbursa
 AZUL_2 = "#24247F"         # franjas decorativas del encabezado
 AZUL_3 = "#2E2E8F"
 ROJO = "#E4002B"           # rojo MG (alertas, progreso del mes)
-VINO = "#7A0019"           # financiado
+VINO = AZUL                # financiado: mismo azul que en las gráficas (el rojo es solo alerta)
 TINTA = "#1F2937"
 TINTA_SEC = "#6B7280"
 FONDO = "#EEF1F7"          # fondo de la página
@@ -175,7 +176,9 @@ def _vineta(texto_html):
     etiqueta, cuerpo = (m.group(1), m.group(2)) if m else (None, texto_html)
     limpiar = lambda t: html.unescape(re.sub(r"<[^>]+>", "", t or "")).strip()
     etiqueta = limpiar(etiqueta).rstrip(":").strip() if etiqueta else None
-    cuerpo = limpiar(cuerpo)
+    cuerpo = limpiar(cuerpo).lstrip(":,; ").strip()   # acciones: "<b>Verbo...</b>: dato"
+    # "(\$18.5 millones): empezar por..." -> "\$18.5 millones: empezar por..."
+    cuerpo = re.sub(r"^\((.*?)\)\s*[:,]?\s*", lambda m: m.group(1) + ": ", cuerpo)
     if cuerpo:
         cuerpo = cuerpo[0].upper() + cuerpo[1:]
     return etiqueta, cuerpo
@@ -213,9 +216,24 @@ def _conteo_estatus(df):
     return conteo.reindex(orden)
 
 
+def _conteo_grupos(df):
+    """Las solicitudes en cuatro grupos (Financiado, Aprobado, En trámite,
+    No procedió), con los mismos colores que las gráficas del PDF. Antes el
+    pictograma usaba un color por estatus: diez colores y diez renglones de
+    leyenda para una imagen que se lee en el teléfono."""
+    conteo = _g.conteo_por_grupo(df["Categoria"])
+    return conteo[conteo > 0]
+
+
+def _color_clave(clave):
+    return _g.COLOR_GRUPO[clave] if clave in _g.COLOR_GRUPO else _est.color(clave)
+
+
 def _etq_leyenda(clave):
     """Nombre del estatus para la leyenda; los largos usan la versión corta
     del catálogo ("Documentación adicional" -> "Docum. adicional")."""
+    if clave in _g.ETIQUETA_GRUPO:
+        return _g.ETIQUETA_GRUPO[clave]
     nombre = _est.etiqueta(clave)
     if len(nombre) <= 18:
         return nombre
@@ -260,7 +278,7 @@ def _encabezado(lz, m, kicker, titulo, periodo, progreso, alto):
     ax.add_patch(Polygon([(W - 1.0, 0), (W, 0), (W, alto), (W - 1.8, alto)],
                          fc=AZUL_3, ec="none", zorder=0.7))
     lz.icono("car", W - 2.45, -0.70, 2.75, "white", z=0.8, alpha=0.09, grosor=1.6)
-    lz.rect(0, 0, W, 0.07, ROJO, z=0.9)
+    lz.rect(0, 0, W, 0.07, "#8E9BD6", z=0.9)
 
     lz.texto(m, 0.30, kicker.upper(), tam=7.6, color="white", peso="bold", alpha=0.75)
     lz.texto(m, 0.52, titulo, tam=22, color="white", peso="bold")
@@ -279,7 +297,7 @@ def _encabezado(lz, m, kicker, titulo, periodo, progreso, alto):
         yb = y + 0.42
         ancho = W - 2 * m - 0.40
         lz.rect(m, yb, ancho, 0.10, "white", redondeo=0.05, z=3, alpha=0.18)
-        lz.rect(m, yb, max(ancho * frac, 0.10), 0.10, ROJO, redondeo=0.05, z=3.5)
+        lz.rect(m, yb, max(ancho * frac, 0.10), 0.10, "white", redondeo=0.05, z=3.5)
         w = 0.46                                       # el auto avanza con el mes
         xa = min(max(m + ancho * frac - w * 0.75, m - 0.05), W - m - w)
         _auto(lz, xa, yb - w * 0.47, w, "white", z=5)
@@ -437,13 +455,13 @@ def _pictograma(lz, x, y, w, h_min, dibujar, conteo):
     for k, clave in enumerate(autos):
         f, c = divmod(k, por_fila)
         _auto(lz, x + PAD + c * paso + paso * 0.07, y0 + f * paso * 0.62, paso * 0.86,
-              _est.color(clave))
+              _color_clave(clave))
     yl = y0 + alto_autos + 0.18
     col_w = interior / columnas
     for k, (clave, n) in enumerate(conteo.items()):
         f, c = divmod(k, columnas)
         xl, yy = x + PAD + c * col_w, yl + f * 0.30
-        lz.rect(xl, yy + 0.02, 0.16, 0.16, _est.color(clave), redondeo=0.04, z=4)
+        lz.rect(xl, yy + 0.02, 0.16, 0.16, _color_clave(clave), redondeo=0.04, z=4)
         lz.texto(xl + 0.26, yy + 0.10, _etq_leyenda(clave), tam=8.6, color=TINTA, va="center")
         lz.texto(xl + col_w - 0.18, yy + 0.10, f"{int(n)}  ·  {n / total * 100:.0f}%", tam=8.6,
                  color=TINTA, peso="bold", ha="right", va="center")
@@ -552,11 +570,13 @@ def _importante(lz, x, y, w, h_min, dibujar, vinetas):
     if not dibujar:
         return h
     lz.tarjeta(x, y, w, h)
-    _titulo_tarjeta(lz, x, y - 0.04, w, "list-checks", "Lo más importante")
+    _titulo_tarjeta(lz, x, y - 0.04, w, "list-checks", "Qué hacer")
     yy = y + 0.66
     for (etiqueta, _, lineas), alto in zip(bloques, alto_b):
         nombre = _icono_vineta(" ".join(etiqueta))
-        es_alerta = nombre in ("triangle-alert", "hourglass", "trending-down")
+        # Son acciones, no alertas: el rojo queda solo para las cifras que
+        # están por debajo de su umbral.
+        es_alerta = False
         lz.insignia(nombre, x + PAD + 0.20, yy + 0.18, 0.20,
                     color=ROJO if es_alerta else AZUL, fondo=TINTE_ROJO if es_alerta else TINTE_AZUL)
         tx, ty = x + PAD + 0.62, yy
@@ -590,14 +610,13 @@ def _componer(ruta, formato, encabezado, heroe, cifras, central, equipo, vinetas
         b_cifras = lambda lz, x, y, w, hm, d: _cifras(lz, x, y, w, hm, d, cifras, apiladas=True)
         filas = [[(b_heroe, 0.64), (b_cifras, 0.36)]]
         if central_ancho_completo:          # comparativo: las filas de autos por mes
-            filas += [[(central, 1.0)], [(b_equipo, 1.0)]]
+            filas += [[(b_imp, 1.0)], [(central, 1.0)], [(b_equipo, 1.0)]]
         else:
-            filas += [[(central, 0.55), (b_equipo, 0.45)]]
-        filas += [[(b_imp, 1.0)]]
+            filas += [[(b_imp, 1.0)], [(central, 0.55), (b_equipo, 0.45)]]
     else:
         b_cifras = lambda lz, x, y, w, hm, d: _cifras(lz, x, y, w, hm, d, cifras, apiladas=False)
-        filas = [[(b_heroe, 1.0)], [(b_cifras, 1.0)], [(central, 1.0)], [(b_equipo, 1.0)],
-                 [(b_imp, 1.0)]]
+        filas = [[(b_heroe, 1.0)], [(b_imp, 1.0)], [(b_cifras, 1.0)], [(central, 1.0)],
+                 [(b_equipo, 1.0)]]
 
     def geometria(fila):
         activos = [(b, f) for b, f in fila if b(None, 0, 0, f * util, 0, False)]
@@ -661,7 +680,8 @@ def ficha_mensual(df, ruta_png, modo="cierre", periodo="", pdv="", analista="",
     linea_monto = (f"{cifra_monto['valor']} financiado", cifra_monto["nota"]) if cifra_monto else None
     focos, conclusiones = _c.focos_y_conclusiones_mensual(df, modo, resumen=resumen,
                                                           ctx=ctx, hoja=hoja)
-    conteo = _conteo_estatus(df)
+    conteo = _conteo_grupos(df)
+    acciones = _c.acciones_mensual(df, modo)
     return _componer(
         ruta_png, formato,
         encabezado=dict(kicker=f"Autoexpress Inbursa  ·  {pdv}", titulo=titulo, periodo=periodo,
@@ -670,7 +690,7 @@ def ficha_mensual(df, ruta_png, modo="cierre", periodo="", pdv="", analista="",
         cifras=cifras,
         central=lambda lz, x, y, w, hm, d: _pictograma(lz, x, y, w, hm, d, conteo),
         equipo=_tabla_vendedores(df),
-        vinetas=[_vineta(t) for t in focos + conclusiones],
+        vinetas=[_vineta(t) for t in (acciones or focos + conclusiones)],
         analista=analista,
     )
 
@@ -685,6 +705,7 @@ def ficha_comparativo(df_unico, tabla_comp, orden_meses, df_combinado, ruta_png,
     monto = next((c for c in cifras if c["etiqueta"] == "MONTO FINANCIADO"), None)
     cifras = _cifras_sin(cifras, ["SOLICITUDES", "CONVERSIÓN", "MONTO FINANCIADO"])[:3]
     lectura, _ = _c.lectura_y_conclusiones_comparativo(tabla_comp, orden_meses, df_combinado)
+    acciones = _c.acciones_comparativo(tabla_comp, orden_meses, df_combinado)
     meses = [str(m).title() for m in orden_meses]
     periodo = meses[0] if n == 1 else f"{meses[0]} a {meses[-1]}"
     return _componer(
@@ -697,7 +718,7 @@ def ficha_comparativo(df_unico, tabla_comp, orden_meses, df_combinado, ruta_png,
         cifras=cifras,
         central=lambda lz, x, y, w, hm, d: _pictograma_meses(lz, x, y, w, hm, d, tabla_comp),
         equipo=_tabla_vendedores(df_unico),
-        vinetas=[_vineta(t) for t in lectura],
+        vinetas=[_vineta(t) for t in (acciones or lectura)],
         analista=analista,
         central_ancho_completo=True,
     )

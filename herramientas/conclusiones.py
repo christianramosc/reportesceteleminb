@@ -769,3 +769,317 @@ def conclusiones_vendedor(df, vendedor):
                 f"<b>Rechazos:</b> {rech} de tus {n} solicitudes ({p_rech:.0f}%), "
                 f"por encima del equipo ({rech_eq:.0f}%).")
     return conclusiones
+
+
+# ====================================================================
+# IDEA PRINCIPAL Y ACCIONES
+# ====================================================================
+# La portada de cada reporte abre con dos cosas, en este orden:
+#   1. La idea principal: el resultado del periodo en una o dos frases.
+#   2. Las acciones: qué hacer con eso, cada una con el dato que la sostiene
+#      (cuántas, cuánto dinero, de quién).
+# Los focos y las conclusiones siguen existiendo, pero como sustento.
+#
+# Una acción solo se escribe si los datos del periodo la respaldan. No hay
+# recomendaciones que apliquen a cualquier mes ("dar seguimiento al equipo"):
+# cada una nombra el número de solicitudes, el monto o la persona.
+MAX_ACCIONES = 4
+_GRUPO_PERDIDA = None
+
+
+def _es_perdida(categorias):
+    return categorias.map(
+        lambda c: _est.GRUPO_CATEGORIA.get(str(c).upper(), _est.ABIERTA) == _est.CERRADA_NEGATIVA)
+
+
+def _corto(nombre):
+    partes = str(nombre).split()
+    return " ".join(partes[:2]) if len(partes) > 2 else str(nombre)
+
+
+def _mask_abiertas(df):
+    if COL_CAT not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df[COL_CAT].isin(_abiertas_presentes(_conteo_categorias(df)))
+
+
+def _monto_de(df, mask):
+    if COL_MONTO not in df.columns:
+        return 0.0
+    return float(df.loc[mask, COL_MONTO].fillna(0).sum())
+
+
+def _accion_abiertas(df, modo="cierre", tuteo=False):
+    mask = _mask_abiertas(df)
+    n = int(mask.sum())
+    if not n:
+        return None
+    monto = _monto_de(df, mask)
+    dinero = f" ({_moneda(monto)})" if monto else ""
+    aprobadas = int((df.loc[mask, COL_CAT] == "APROBADO").sum())
+    if tuteo:
+        texto = (f"<b>Da seguimiento a tus {_n(n, 'solicitud abierta', 'solicitudes abiertas')}</b>"
+                 f"{dinero}")
+        if aprobadas:
+            texto += (f": {'empieza por la' if aprobadas == 1 else f'empieza por las {aprobadas}'} "
+                      f"que ya {'está aprobada' if aprobadas == 1 else 'están aprobadas'} y solo "
+                      f"{'falta' if aprobadas == 1 else 'faltan'} dispersar")
+        return texto + "."
+    if modo == "avance":
+        texto = f"<b>Cerrar antes de fin de mes las {_n(n, 'solicitud abierta', 'solicitudes abiertas')}</b>{dinero}"
+    else:
+        texto = f"<b>Dar seguimiento a las {_n(n, 'solicitud', 'solicitudes')} sin dispersar</b>{dinero}"
+    detalle = []
+    if aprobadas:
+        detalle.append(f"empezar por {'la' if aprobadas == 1 else f'las {aprobadas}'} ya "
+                       f"aprobada{'s' if aprobadas != 1 else ''}")
+    if COL_VEND in df.columns:
+        por_vend = df.loc[mask, COL_VEND].value_counts()
+        por_vend = por_vend[por_vend.index.map(_es_nombre_de_persona)]
+        top = por_vend[por_vend >= 2].head(3)
+        if len(top):
+            detalle.append("la mayoría " + ("es" if len(top) == 1 else "son") + " de "
+                           + _lista([f"{v} ({int(k)})" for v, k in top.items()]))
+    return texto + (": " + "; ".join(detalle) if detalle else "") + "."
+
+
+def _accion_gap(df, tuteo=False):
+    if not {COL_GAP, COL_CAT}.issubset(df.columns):
+        return None
+    fin = df[df[COL_CAT] == "FINANCIADO"]
+    sin_gap_fin = int((fin[COL_GAP] != "SI").sum())
+    abiertas = df[_mask_abiertas(df)]
+    abiertas_sin = int((abiertas[COL_GAP] != "SI").sum())
+    if not sin_gap_fin and not abiertas_sin:
+        return None
+    if tuteo:
+        if not abiertas_sin:
+            return None
+        texto = (f"<b>Ofrece GAP en tus {_n(abiertas_sin, 'solicitud abierta', 'solicitudes abiertas')} "
+                 f"que no lo {'lleva' if abiertas_sin == 1 else 'llevan'}</b>, antes de que se dispersen")
+    elif abiertas_sin:
+        texto = (f"<b>Ofrecer GAP en las {_n(abiertas_sin, 'solicitud abierta', 'solicitudes abiertas')} "
+                 f"que no lo {'lleva' if abiertas_sin == 1 else 'llevan'}</b>, antes de dispersar")
+    else:
+        texto = "<b>Ofrecer GAP en cada crédito antes de dispersar</b>"
+    if len(fin):
+        texto += (f": {sin_gap_fin} de {_n(len(fin), 'crédito financiado', 'créditos financiados')} "
+                  f"{'salió' if sin_gap_fin == 1 else 'salieron'} sin GAP y lo esperado es que "
+                  f"todos lo lleven" if sin_gap_fin else
+                  f": {'tus' if tuteo else 'los'} {_n(len(fin), 'crédito financiado', 'créditos financiados')} "
+                  f"ya lo llevan todos")
+    return texto + "."
+
+
+def _accion_conversion_baja(df):
+    """El vendedor con volumen suficiente que convierte claramente por debajo
+    del equipo, con cuántas de sus solicitudes no procedieron."""
+    if not {COL_VEND, COL_CAT}.issubset(df.columns) or df.empty:
+        return None
+    personas = df[df[COL_VEND].map(_es_nombre_de_persona)]
+    tasa_eq = _pct(int((df[COL_CAT] == "FINANCIADO").sum()), len(df)) or 0.0
+    por_vend = personas.groupby(COL_VEND)[COL_CAT].agg(
+        total="size", fin=lambda s: int((s == "FINANCIADO").sum()))
+    por_vend["tasa"] = por_vend["fin"] / por_vend["total"] * 100
+    elegibles = por_vend[por_vend["total"] >= MIN_SOLICITUDES_TASA]
+    if len(elegibles) < 2:
+        return None
+    peor = elegibles.sort_values(["tasa", "total"], ascending=[True, False]).index[0]
+    fila = elegibles.loc[peor]
+    if tasa_eq - fila["tasa"] < UMBRAL_CONTRASTE:
+        return None
+    suyas = personas[personas[COL_VEND] == peor]
+    perdidas = int(_es_perdida(suyas[COL_CAT]).sum())
+    texto = (f"<b>Revisar con {_corto(peor)} sus {int(fila['total'])} solicitudes</b>: financió "
+             f"{fila['tasa']:.0f}% ({int(fila['fin'])} de {int(fila['total'])}) contra "
+             f"{tasa_eq:.0f}% del equipo")
+    if perdidas:
+        texto += f", y {perdidas} no {'procedió' if perdidas == 1 else 'procedieron'}"
+    return texto + "."
+
+
+def _accion_perdidas(df):
+    """Si una parte grande no procede, la acción es filtrar antes de ingresar."""
+    if COL_CAT not in df.columns or df.empty:
+        return None
+    perdidas = int(_es_perdida(df[COL_CAT]).sum())
+    pct = _pct(perdidas, len(df)) or 0
+    if pct < 25 or perdidas < MIN_CASOS_GRUPO:
+        return None
+    texto = (f"<b>Revisar el perfil del cliente antes de ingresar la solicitud</b>: "
+             f"{perdidas} de {len(df)} no procedieron ({pct:.0f}%)")
+    if {"Enganche", "Precio Venta (c/IVA)"}.issubset(df.columns):
+        def _eng(g):
+            base = g["Precio Venta (c/IVA)"].replace(0, pd.NA)
+            return (g["Enganche"] / base * 100).dropna().astype(float).mean()
+        rech, fin = df[df[COL_CAT] == "RECHAZADO"], df[df[COL_CAT] == "FINANCIADO"]
+        if len(rech) >= MIN_CASOS_GRUPO and len(fin) >= MIN_CASOS_GRUPO:
+            e_r, e_f = _eng(rech), _eng(fin)
+            if pd.notna(e_r) and pd.notna(e_f) and e_f - e_r >= UMBRAL_PUNTOS:
+                texto += (f"; las rechazadas dieron {e_r:.0f}% de enganche y las "
+                          f"financiadas, {e_f:.0f}%")
+    return texto + "."
+
+
+def _accion_datos(df):
+    if COL_VEND not in df.columns:
+        return None
+    raros = df[COL_VEND].dropna()
+    raros = raros[~raros.map(_es_nombre_de_persona)].value_counts()
+    if raros.empty:
+        return None
+    nombre, n = raros.index[0], int(raros.iloc[0])
+    if nombre == SIN_VENDEDOR:
+        return (f"<b>Completar el vendedor en {_n(n, 'solicitud')}</b> de la bitácora: sin ese "
+                f"dato no entran en la comparación entre asesores.")
+    return (f"<b>Reasignar {'la solicitud capturada' if n == 1 else f'las {n} solicitudes capturadas'} "
+            f"como “{nombre}”</b> al asesor que {'la' if n == 1 else 'las'} atendió: hoy no "
+            f"{'cuenta' if n == 1 else 'cuentan'} para nadie.")
+
+
+def _limpiar(acciones):
+    return [a for a in acciones if a][:MAX_ACCIONES]
+
+
+def idea_principal_mensual(df, modo, ctx=None, periodo="", meta_conversion=None):
+    """El resultado del mes en una o dos frases, para abrir la portada."""
+    total = len(df)
+    if not total or COL_CAT not in df.columns:
+        return f"Se registraron {_n(total, 'solicitud')} en el periodo."
+    fin = df[df[COL_CAT] == "FINANCIADO"]
+    n_fin, pct = len(fin), _pct(len(fin), total) or 0
+    monto = _monto_de(df, df[COL_CAT] == "FINANCIADO")
+    mask = _mask_abiertas(df)
+    n_ab, monto_ab = int(mask.sum()), _monto_de(df, mask)
+    inicio = f"{periodo}: " if periodo else ""
+    if modo == "avance":
+        texto = (f"{inicio}a la fecha se han financiado <b>{n_fin} de {total} solicitudes "
+                 f"({pct:.0f}%)</b>" + (f", por {_moneda(monto)}" if monto else "") + ".")
+        if n_ab:
+            dias = (f" en los {ctx['dias_restantes']} días que quedan del mes"
+                    if ctx and ctx.get("dias_restantes") else " antes del cierre")
+            texto += (f" Todavía pueden cerrarse <b>{n_ab} abiertas"
+                      + (f" por {_moneda(monto_ab)}" if monto_ab else "") + f"</b>{dias}.")
+    else:
+        texto = (f"{inicio}se financiaron <b>{n_fin} de {total} solicitudes ({pct:.0f}%)</b>"
+                 + (f", por {_moneda(monto)}" if monto else "") + ".")
+        if n_ab:
+            texto += (f" Quedaron <b>{n_ab} abiertas"
+                      + (f" por {_moneda(monto_ab)}" if monto_ab else "")
+                      + "</b>: de ahí sale el resultado del siguiente mes.")
+    if meta_conversion:
+        faltan = int(-(-(meta_conversion / 100 * total - n_fin) // 1))
+        texto += (f" La meta de conversión es {meta_conversion:.0f}%: "
+                  + ((f"faltan {_n(faltan, 'crédito')}." if modo == "avance"
+                      else f"faltaron {_n(faltan, 'crédito')}.") if faltan > 0
+                     else ("ya se alcanzó." if modo == "avance" else "se cumplió.")))
+    return texto[0].upper() + texto[1:] if not texto.startswith("<") else texto
+
+
+def acciones_mensual(df, modo):
+    return _limpiar([
+        _accion_abiertas(df, modo),
+        _accion_gap(df),
+        _accion_conversion_baja(df),
+        _accion_perdidas(df),
+        _accion_datos(df),
+    ])
+
+
+def idea_principal_comparativo(tabla_comp, orden_meses):
+    meses = [str(m).title() for m in orden_meses]
+    if len(meses) < 2 or "Total" not in tabla_comp.columns or "% Financiado" not in tabla_comp.columns:
+        return ""
+    tot = tabla_comp["Total"].astype(float)
+    conv = tabla_comp["% Financiado"].astype(float)
+    t0, t1, c0, c1 = tot.iloc[0], tot.iloc[-1], conv.iloc[0], conv.iloc[-1]
+    cambio = _pct(t1 - t0, t0) or 0
+    if abs(cambio) < UMBRAL_VOLUMEN_PCT:
+        vol = f"el volumen se mantuvo entre {int(tot.min())} y {int(tot.max())} solicitudes al mes"
+    else:
+        vol = (f"las solicitudes {'subieron' if cambio > 0 else 'bajaron'} {abs(cambio):.0f}% "
+               f"(de {int(t0)} a {int(t1)})")
+    if abs(c1 - c0) < UMBRAL_PUNTOS:
+        con = f"la conversión sigue en <b>{c1:.0f}%</b>"
+    else:
+        con = (f"la conversión {'subió' if c1 > c0 else 'bajó'} de {c0:.0f}% a <b>{c1:.0f}%</b>")
+    texto = f"De {meses[0]} a {meses[-1]}, {vol} y {con}."
+    if cambio >= UMBRAL_VOLUMEN_PCT and c1 - c0 < UMBRAL_PUNTOS:
+        texto += " Entran más solicitudes, pero no se están convirtiendo en más créditos al mismo ritmo."
+    return texto
+
+
+def acciones_comparativo(tabla_comp, orden_meses, df_combinado, df_ultimo=None):
+    """df_ultimo: la bitácora del último mes, para las acciones que solo
+    tienen sentido sobre lo que sigue abierto hoy."""
+    acciones = []
+    meses = [str(m).title() for m in orden_meses]
+    if len(meses) >= 2 and "% Financiado" in tabla_comp.columns and "Total" in tabla_comp.columns:
+        conv = tabla_comp["% Financiado"].astype(float)
+        ultimo, mejor = conv.iloc[-1], conv.max()
+        if mejor - ultimo >= UMBRAL_PUNTOS:
+            extra = int(round((mejor - ultimo) / 100 * float(tabla_comp["Total"].iloc[-1])))
+            acciones.append(
+                f"<b>Recuperar la conversión de {str(conv.idxmax()).title()}</b>: {meses[-1]} "
+                f"financió {ultimo:.0f}% contra {mejor:.0f}%"
+                + (f"; a ese nivel habrían sido {_n(extra, 'crédito')} más" if extra >= 1 else "") + ".")
+    if df_ultimo is not None:
+        acciones.append(_accion_abiertas(df_ultimo, "cierre"))
+        if acciones[-1]:
+            acciones[-1] = acciones[-1].replace("sin dispersar</b>", f"sin dispersar de {meses[-1]}</b>")
+    if "% GAP Financiado" in tabla_comp.columns and tabla_comp["% GAP Financiado"].notna().any():
+        g = tabla_comp["% GAP Financiado"].dropna().astype(float)
+        if g.max() < 100:
+            rango = (f"entre {g.min():.0f}% y {g.max():.0f}%" if g.max() - g.min() >= 1
+                     else f"en {g.max():.0f}%")
+            acciones.append(
+                f"<b>Llevar el GAP a todos los créditos financiados</b>: lleva "
+                f"{_n(len(g), 'mes')} {rango} y lo esperado es 100%.")
+    if {COL_VEND, "Mes"}.issubset(df_combinado.columns) and len(orden_meses) >= 2:
+        piv = pd.crosstab(df_combinado[COL_VEND], df_combinado["Mes"])
+        cols = [m for m in orden_meses if m in piv.columns]
+        if len(cols) >= 2:
+            piv = piv[piv.index.map(_es_nombre_de_persona)]
+            cambio = (piv[cols[-1]] - piv[cols[0]]).sort_values()
+            bajo = cambio[cambio <= -MIN_CAMBIO_VENDEDOR]
+            if not bajo.empty:
+                v = bajo.index[0]
+                acciones.append(
+                    f"<b>Hablar con {_corto(v)}</b>: pasó de {int(piv.loc[v, cols[0]])} a "
+                    f"{int(piv.loc[v, cols[-1]])} solicitudes entre {meses[0]} y {meses[-1]}.")
+    acciones.append(_accion_conversion_baja(df_combinado))
+    return _limpiar(acciones)
+
+
+def idea_principal_vendedor(df, vendedor):
+    mio = df[df[COL_VEND] == vendedor] if COL_VEND in df.columns else df.iloc[0:0]
+    n = len(mio)
+    if not n or COL_CAT not in df.columns:
+        return ""
+    fin = int((mio[COL_CAT] == "FINANCIADO").sum())
+    pct = _pct(fin, n) or 0
+    pct_eq = _pct(int((df[COL_CAT] == "FINANCIADO").sum()), len(df)) or 0
+    texto = (f"Financiaste <b>{fin} de tus {_n(n, 'solicitud', 'solicitudes')} ({pct:.0f}%)</b>; "
+             f"el equipo financió {pct_eq:.0f}%.")
+    mask = _mask_abiertas(mio)
+    if int(mask.sum()):
+        monto = _monto_de(mio, mask)
+        texto += (f" Tienes <b>{_n(int(mask.sum()), 'abierta', 'abiertas')}"
+                  + (f" por {_moneda(monto)}" if monto else "") + "</b> que todavía pueden cerrarse.")
+    return texto
+
+
+def acciones_vendedor(df, vendedor):
+    mio = df[df[COL_VEND] == vendedor] if COL_VEND in df.columns else df.iloc[0:0]
+    if mio.empty or COL_CAT not in df.columns:
+        return []
+    acciones = [_accion_abiertas(mio, tuteo=True), _accion_gap(mio, tuteo=True)]
+    n = len(mio)
+    pct = _pct(int((mio[COL_CAT] == "FINANCIADO").sum()), n) or 0
+    pct_eq = _pct(int((df[COL_CAT] == "FINANCIADO").sum()), len(df)) or 0
+    perdidas = int(_es_perdida(mio[COL_CAT]).sum())
+    if n >= MIN_SOLICITUDES_TASA and pct_eq - pct >= UMBRAL_CONTRASTE and perdidas:
+        acciones.append(
+            f"<b>Revisa con tu gerente tus {_n(perdidas, 'solicitud que no procedió', 'solicitudes que no procedieron')}</b>: "
+            f"financias {pct:.0f}% y el equipo, {pct_eq:.0f}%.")
+    return _limpiar(acciones)

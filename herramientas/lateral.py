@@ -75,8 +75,18 @@ def _cifra_gap_financiados(df):
         return None
     g = int((fin[COL_GAP] == "SI").sum())
     pct = g / len(fin) * 100
-    return _cifra("GAP EN FINANCIADOS", f"{pct:.0f}%", _nota_gap(g, len(fin), "créditos"),
+    return _cifra("GAP EN FINANCIADOS", f"{pct:.0f}%",
+                  _nota_gap(g, len(fin), "créditos") + (" · esperado: 100%" if pct < 100 else ""),
                   alerta=pct < _c.UMBRAL_ALERTA_GAP)
+
+
+def _cifra_conversion(etiqueta, fin, total, pct, meta=None):
+    """La conversión con su referencia: un "18%" solo no dice si es bueno.
+    Con meta, se marca en rojo si quedó por debajo."""
+    nota = f"{fin} de {total} financiadas"
+    if not meta:
+        return _cifra(etiqueta, f"{pct:.0f}%", nota)
+    return _cifra(etiqueta, f"{pct:.0f}%", f"{nota} · meta: {meta:.0f}%", alerta=pct < meta)
 
 
 def _abiertas(df):
@@ -175,14 +185,14 @@ def comparar_indicadores(antes, ahora):
 
 
 # ---------------------------------------------------------------- reportes
-def cifras_resumen(df, comparacion=None, mes_anterior=""):
+def cifras_resumen(df, comparacion=None, mes_anterior="", meta=None):
     """comparacion: lo que devuelve comparar_meses() si se subió la bitácora
     del mes anterior; cada cifra lleva entonces su cambio contra ese mes."""
     fin, total, pct = _conversion(df)
     n_ab, monto_ab = _abiertas(df)
     cifras = [
         _cifra("SOLICITUDES", f"{total}", "registradas en el mes"),
-        _cifra("CONVERSIÓN", f"{pct:.0f}%", f"{fin} de {total} financiadas"),
+        _cifra_conversion("CONVERSIÓN", fin, total, pct, meta),
         _cifra_monto(df),
         _cifra_gap_financiados(df),
         _cifra("SIN DISPERSAR", f"{n_ab}",
@@ -195,12 +205,13 @@ def cifras_resumen(df, comparacion=None, mes_anterior=""):
     return cifras
 
 
-def cifras_avance(df, ctx=None, hoja=None):
+def cifras_avance(df, ctx=None, hoja=None, meta=None):
     fin, total, pct = _conversion(df)
     n_ab, monto_ab = _abiertas(df)
     cifras = [
         _cifra("SOLICITUDES", f"{total}", "a la fecha de corte"),
-        _cifra("FINANCIADAS", f"{fin}", f"{pct:.0f}% de conversión"),
+        _cifra("FINANCIADAS", f"{fin}", f"{pct:.0f}% de conversión"
+               + (f" · meta: {meta:.0f}%" if meta else "")),
         _cifra("POR CERRAR", f"{n_ab}",
                f"{_monto_corto(monto_ab)} a financiar" if monto_ab else "aprobadas o en trámite"),
     ]

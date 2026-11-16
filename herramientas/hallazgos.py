@@ -401,3 +401,63 @@ def tu_modelo(conteo):
     if len(lideres) > 1:
         return f"Tus modelos más solicitados: {_y(lideres)} ({int(tope)} cada uno)"
     return f"Tu modelo más solicitado: {lideres[0]} ({int(tope)})"
+
+
+# ----------------------------------------- hallazgos por grupo de estatus
+def volumen_por_mes(meses, totales):
+    """"Las solicitudes subieron 29% de Agosto a Octubre: de 85 a 110"."""
+    totales = [int(t) for t in totales]
+    if len(totales) < 2 or not totales[0]:
+        return "Solicitudes por mes"
+    ini, fin = totales[0], totales[-1]
+    cambio = (fin - ini) / ini * 100
+    if abs(cambio) < _c.UMBRAL_VOLUMEN_PCT:
+        return f"Volumen estable: entre {min(totales)} y {max(totales)} solicitudes al mes"
+    verbo = "subieron" if cambio > 0 else "bajaron"
+    return (f"Las solicitudes {verbo} {abs(cambio):.0f}% de {str(meses[0]).title()} "
+            f"a {str(meses[-1]).title()}: de {ini} a {fin}")
+
+
+def gap_que_no_procede(grupos):
+    """grupos: Serie con el grupo (FINANCIADO, APROBADO, TRAMITE, PERDIDA) de
+    cada solicitud CON GAP de todo el equipo."""
+    n = len(grupos)
+    if not n:
+        return "GAP por vendedor"
+    p = int((grupos == "PERDIDA").sum())
+    return f"{p} de {n} solicitudes con GAP no procedieron: ese GAP se perdió"
+
+
+def quien_subio_y_bajo(cambio):
+    """cambio: Serie vendedor -> diferencia de solicitudes (último - primero)."""
+    if cambio.empty:
+        return "Solicitudes por vendedor"
+    sube = cambio[cambio >= _c.MIN_CAMBIO_VENDEDOR]
+    baja = cambio[cambio <= -_c.MIN_CAMBIO_VENDEDOR]
+    partes = []
+    if not sube.empty:
+        lideres, tope = _lideres(sube)
+        partes.append(f"{_y([nombre_corto(x) for x in lideres])} "
+                      f"{'subieron' if len(lideres) > 1 else 'subió'} {int(tope)} solicitudes")
+    if not baja.empty:
+        lideres, tope = _lideres(-baja)
+        partes.append(f"{_y([nombre_corto(x) for x in lideres])} "
+                      f"{'bajaron' if len(lideres) > 1 else 'bajó'} {int(tope)}")
+    if not partes:
+        return "Ningún vendedor cambió de forma relevante su volumen"
+    texto = "; ".join(partes)
+    return texto[0].upper() + texto[1:]
+
+
+def mezcla_por_grupo(conteo):
+    """conteo: Serie grupo -> solicitudes (FINANCIADO, APROBADO, TRAMITE, PERDIDA)."""
+    total = int(conteo.sum())
+    if not total:
+        return "Cómo quedaron las solicitudes"
+    fin = conteo.get("FINANCIADO", 0) / total * 100
+    per = conteo.get("PERDIDA", 0) / total * 100
+    abiertas = (conteo.get("APROBADO", 0) + conteo.get("TRAMITE", 0)) / total * 100
+    texto = f"Se financió {fin:.0f}% y {per:.0f}% no procedió"
+    if abiertas >= 1:
+        texto += f"; {abiertas:.0f}% sigue abierto"
+    return texto

@@ -89,6 +89,7 @@ from .pdf_util import Parrafo as Paragraph
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
 from reportlab.lib import colors as rl_colors
+from reportlab.platypus import CondPageBreak  # noqa: E402
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Spacer, PageBreak, HRFlowable, KeepTogether, Flowable
 )
@@ -107,18 +108,12 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 # sobre fondo blanco hacen falta tonos con más contraste (el rosa pastel de
 # RECHAZADO era ilegible dentro de la tabla).
 def color_texto_categoria(clave):
-    """Color para escribir el estatus como TEXTO sobre fondo blanco.
-
-    Los rellenos claros de la paleta (azul claro, gris claro, dorado claro)
-    se ven bien en una gráfica pero no se leen como letra; se oscurecen
-    hasta tener contraste suficiente, conservando el mismo tono.
-    """
-    r, g, b = to_rgb(COLOR_CATEGORIA.get(clave, MG_GRIS_OSCURO))
-    luminancia = 0.299 * r + 0.587 * g + 0.114 * b
-    if luminancia > 0.55:
-        factor = 0.55 / luminancia
-        r, g, b = r * factor, g * factor, b * factor
-    return "#{:02X}{:02X}{:02X}".format(int(r * 255), int(g * 255), int(b * 255))
+    """Color del estatus en la tabla de solicitudes: los mismos cuatro
+    grupos de las gráficas. Azul lo financiado, azul medio lo aprobado y
+    gris el resto; ya no un color por estatus (ni rojo para "Financiado")."""
+    from . import graficas as _g
+    return {_g.FIN: _g.AZUL, _g.APR: "#5A66B8", _g.TRA: "#6B7280",
+            _g.PER: "#9CA3AF"}[_g.grupo_de(clave)]
 
 # --- Geometría de página: se define UNA sola vez y se reutiliza tanto en
 #     los márgenes del documento como en el cálculo de anchos de tabla,
@@ -409,119 +404,11 @@ def analisis_individual(df_total, vendedor, tabla_vendedor, resumen_eq):
 # =======================================================================
 # 7) GRÁFICAS
 # =======================================================================
-def grafica_dona_status_vendedor(df_v, vendedor, guardar_como=None):
-    """Dona con la distribución de status de las solicitudes de ESTE vendedor."""
-    if "Categoria" not in df_v.columns or df_v.empty:
-        return None
-    conteo_bruto = df_v["Categoria"].value_counts()
-    orden_presente = [c for c in ORDEN_CATEGORIAS if c in conteo_bruto.index]
-    conteo = conteo_bruto.reindex(orden_presente)
-    colores = [COLOR_CATEGORIA.get(c, MG_GRIS_CLARO) for c in conteo.index]
+from .graficas import (  # noqa: E402,F401
+    grafica_estatus_vendedor, grafica_equipo_destacado, grafica_modelos_vendedor,
+    grafica_historial_vendedor,
+)
 
-    fig, ax = plt.subplots(figsize=(7, 6))
-    wedges, _, autotextos = ax.pie(
-        conteo.values, labels=None, autopct="%1.0f%%", pctdistance=0.8,
-        colors=colores, startangle=90, wedgeprops=dict(width=0.42, edgecolor="white"),
-        textprops=dict(fontweight="bold"),
-    )
-    for autotexto, color_rebanada in zip(autotextos, colores):
-        autotexto.set_color(_color_texto_legible(color_rebanada))
-
-    etiquetas = [f"{_est.etiqueta(cat).upper()} ({valor})" for cat, valor in zip(conteo.index, conteo.values)]
-    ax.legend(wedges, etiquetas, loc="upper center", bbox_to_anchor=(0.5, -0.03),
-               frameon=False, fontsize=9, ncol=2)
-    _h.titular(ax, _h.tu_cierre(conteo), "Tus solicitudes por estatus de cierre")
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
-def grafica_equipo_destacado(df_total, vendedor, guardar_como=None):
-    """Barras horizontales apiladas por categoría, con TODOS los vendedores
-    del equipo para dar contexto, pero solo el vendedor actual conserva los
-    colores de marca — el resto se muestra en gris tenue, sin exponer el
-    detalle de cada compañero, solo la comparación de volumen."""
-    if not {"Nombre del Vendedor", "Categoria"}.issubset(df_total.columns):
-        return None
-
-    # Sin capturas genéricas, pero conservando al vendedor del reporte.
-    df_total, excluidos = _h.solo_personas(df_total, conservar=vendedor)
-    pivote = pd.crosstab(df_total["Nombre del Vendedor"], df_total["Categoria"])
-    orden_cols = [c for c in ORDEN_CATEGORIAS if c in pivote.columns]
-    pivote = pivote[orden_cols]
-    pivote["Total"] = pivote.sum(axis=1)
-    pivote = pivote.sort_values("Total").drop(columns="Total")
-    if pivote.empty:
-        return None
-
-    fig, ax = plt.subplots(figsize=(9, max(4, len(pivote) * 0.55) + 0.8))
-    izquierda = np.zeros(len(pivote))
-    for col in orden_cols:
-        valores = pivote[col].values
-        colores_fila = [
-            COLOR_CATEGORIA.get(col, MG_GRIS_CLARO) if idx == vendedor else MG_GRIS_CLARO
-            for idx in pivote.index
-        ]
-        ax.barh(pivote.index, valores, left=izquierda, color=colores_fila, edgecolor="white")
-        izquierda += valores
-
-    # etiquetas en negritas solo para el vendedor destacado
-    etiquetas = ax.get_yticklabels()
-    for etiqueta in etiquetas:
-        if etiqueta.get_text() == vendedor:
-            etiqueta.set_fontweight("bold")
-            etiqueta.set_color(MG_ROJO_OSCURO)
-
-    # La etiqueta "Tú" solo se dibuja si el vendedor realmente aparece en
-    # la gráfica; antes se pintaba un "Tú: 0" sobre la barra equivocada.
-    if vendedor in pivote.index:
-        total_vendedor = int(pivote.loc[vendedor].sum())
-        ax.text(total_vendedor + max(pivote.sum(axis=1).max() * 0.02, 0.3),
-                 list(pivote.index).index(vendedor),
-                 f"  Tú: {total_vendedor}", va="center", fontsize=9, fontweight="bold",
-                 color=MG_ROJO_OSCURO)
-
-    handles = [plt.Rectangle((0, 0), 1, 1, color=COLOR_CATEGORIA.get(c, MG_GRIS_CLARO)) for c in orden_cols]
-    ax.legend(handles, [_est.etiqueta(c) for c in orden_cols], loc="upper center",
-              bbox_to_anchor=(0.5, -0.12), frameon=False, ncol=min(4, max(1, len(orden_cols))))
-    _h.titular(ax, _h.tu_lugar(pivote.sum(axis=1), vendedor),
-               "Tu volumen de solicitudes frente al resto del equipo"
-               + (" · sin capturas genéricas" if excluidos else ""))
-    ax.set_xlabel("Número de solicitudes")
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
-def grafica_modelos_vendedor(df_v, vendedor, guardar_como=None):
-    if "Vehículo" not in df_v.columns:
-        return None
-    conteo = df_v["Vehículo"].dropna().value_counts().sort_values(ascending=True)
-    if conteo.empty:
-        return None
-
-    fig, ax = plt.subplots(figsize=(8, max(2.5, len(conteo) * 0.45)))
-    colores = list(reversed(_gradiente(len(conteo))))
-    ax.barh(conteo.index, conteo.values, color=colores, edgecolor="white")
-    for i, valor in enumerate(conteo.values):
-        ax.text(valor + max(conteo.values) * 0.02, i, str(valor), va="center", fontsize=9)
-
-    _h.titular(ax, _h.tu_modelo(conteo), "Tus modelos solicitados en el mes")
-    ax.set_xlabel("Número de solicitudes")
-    ax.set_xlim(0, max(conteo.values) * 1.25)
-    # Conteos: sin marcas de 0.2, 0.4... que no existen.
-    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
-    plt.tight_layout()
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
-# -----------------------------------------------------------------------
-# Historial del vendedor (cuando se suben bitácoras de meses anteriores)
-# -----------------------------------------------------------------------
 def historial_vendedor(meses, vendedor):
     """Indicadores del vendedor mes a mes.
 
@@ -551,51 +438,6 @@ def _comparacion_de_historial(historial):
             historial[-2]["mes"])
 
 
-def grafica_historial_vendedor(historial, guardar_como=None):
-    """Solicitudes y créditos financiados del vendedor, mes a mes, con su
-    conversión anotada sobre cada mes."""
-    if not historial or len(historial) < 2:
-        return None
-    meses = [h["mes"] for h in historial]
-    solicitudes = [h["ind"]["solicitudes"] or 0 for h in historial]
-    financiados = [h["ind"]["financiados"] or 0 for h in historial]
-    if not any(solicitudes):
-        return None
-
-    x = np.arange(len(meses))
-    ancho = 0.36
-    fig, ax = plt.subplots(figsize=(8, 3.8))
-    ax.bar(x - ancho / 2, solicitudes, ancho, color=MG_GRIS_CLARO, label="Solicitudes")
-    ax.bar(x + ancho / 2, financiados, ancho, color=MG_ROJO_OSCURO, label="Créditos financiados")
-    tope = max(solicitudes) or 1
-    for i in range(len(historial)):
-        ax.text(x[i] - ancho / 2, solicitudes[i] + tope * 0.02, str(solicitudes[i]),
-                ha="center", va="bottom", fontsize=9)
-        ax.text(x[i] + ancho / 2, financiados[i] + tope * 0.02, str(financiados[i]),
-                ha="center", va="bottom", fontsize=9, fontweight="bold", color=MG_ROJO_OSCURO)
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"{m}\n{h['ind']['conversion']:.0f}% de conversión" if h["presente"]
-                        else f"{m}\nsin solicitudes" for m, h in zip(meses, historial)])
-    ax.set_ylim(0, tope * 1.18)
-    ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
-    ax.set_ylabel("Número de solicitudes")
-
-    primero = next((h for h in historial if h["presente"]), historial[0])
-    ultimo = historial[-1]
-    antes, ahora = primero["ind"]["conversion"] or 0, ultimo["ind"]["conversion"] or 0
-    if primero is ultimo or abs(ahora - antes) < 0.5:
-        hallazgo = f"Tu conversión se mantiene en {ahora:.0f}%"
-    else:
-        hallazgo = (f"Tu conversión {'subió' if ahora > antes else 'bajó'} de "
-                    f"{antes:.0f}% a {ahora:.0f}% desde {primero['mes']}")
-    _h.titular(ax, hallazgo, "Tus solicitudes y créditos financiados por mes")
-    plt.tight_layout()
-    _h.leyenda_bajo_eje(ax, ncol=2)
-    _guardar_si_procede(fig, guardar_como)
-    plt.close(fig)
-    return guardar_como
-
-
 def generar_graficas_vendedor(df_total, df_v, vendedor, carpeta, historial=None):
     """Gráficas del vendedor, como PNG en `carpeta` (la de la corrida)."""
     # Se vuelve a repartir con el equipo completo por si otra herramienta
@@ -603,7 +445,7 @@ def generar_graficas_vendedor(df_total, df_v, vendedor, carpeta, historial=None)
     if "Categoria" in df_total.columns:
         _est.asignar_colores(df_total["Categoria"])
     especificaciones = [
-        ("dona_status", lambda: grafica_dona_status_vendedor(df_v, vendedor, os.path.join(carpeta, f"dona_{_slug(vendedor)}.png"))),
+        ("estatus", lambda: grafica_estatus_vendedor(df_v, vendedor, os.path.join(carpeta, f"estatus_{_slug(vendedor)}.png"))),
         ("equipo_destacado", lambda: grafica_equipo_destacado(df_total, vendedor, os.path.join(carpeta, f"equipo_{_slug(vendedor)}.png"))),
         ("modelos", lambda: grafica_modelos_vendedor(df_v, vendedor, os.path.join(carpeta, f"modelos_{_slug(vendedor)}.png"))),
         ("historial", lambda: grafica_historial_vendedor(historial, os.path.join(carpeta, f"historial_{_slug(vendedor)}.png"))),
@@ -856,9 +698,11 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     elementos.append(Paragraph(f"Periodo: <b>{MES_TITULO}</b>", estilo_meta_portada))
     elementos.append(Spacer(1, 0.45 * cm))
 
+    # La portada abre con tu resultado, no con la descripción del documento.
+    _idea = _conclusiones.idea_principal_vendedor(resumen_v["df_equipo"], vendedor)
     intro_portada = Table(
         [[Paragraph(
-            f"Este reporte resume tu desempeño individual durante <b>{MES_TITULO}</b>: gestionaste "
+            _idea or f"Este reporte resume tu desempeño individual durante <b>{MES_TITULO}</b>: gestionaste "
             f"<b>{total_v}</b> solicitud{'es' if total_v != 1 else ''} de crédito automotriz, de las "
             f"cuales <b>{financiado}</b> se convirtieron en crédito <b>FINANCIADO</b> (dispersado). "
             f"Incluye tu detalle de solicitudes del mes, la colocación del seguro GAP y cómo te "
@@ -881,22 +725,21 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     # portada (pdf_util.construir_con_lateral); en el Word quedan como tabla.
     elementos.append(_lateral.bloque_cifras(_lateral.cifras_vendedor(
         resumen_v["df_equipo"], vendedor, comparacion, mes_anterior)))
-    elementos.append(Spacer(1, 0.5 * cm))
+    elementos.append(Spacer(1, 0.2 * cm))
+
+    # --- Lo más importante: qué hacer, y en qué se basa (antes, al final) ---
+    _pdf_util.bloque_lo_importante(
+        elementos, _estilos, mensaje=(datos.mensaje if datos else ""),
+        analista=(datos.analista if datos else ""),
+        acciones=_conclusiones.acciones_vendedor(resumen_v["df_equipo"], vendedor),
+        sustento=_conclusiones.conclusiones_vendedor(resumen_v["df_equipo"], vendedor))
+    elementos.append(CondPageBreak(17 * cm))
 
     # --- Resumen Ejecutivo ---
-    elementos.append(Paragraph("Resumen Ejecutivo", estilo_h1))
+    elementos.append(Paragraph("Detalle: tu mes", estilo_h1))
     elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
 
     elementos.append(Paragraph("Panorama del mes", estilo_h2))
-    partes_panorama = [
-        f"{financiado} ({pct_de(financiado):.1f}%) quedaron <b>FINANCIADAS</b>",
-        f"{aprobado} ({pct_de(aprobado):.1f}%) <b>APROBADAS</b> pendientes de dispersar",
-    ] + [f"{n} ({pct_de(n):.1f}%) {_est.descripcion(c)}" for c, n in otros_estatus]
-    elementos.append(Paragraph(
-        f"Durante {MES_TITULO} gestionaste {total_v} solicitud{'es' if total_v != 1 else ''}: "
-        f"{_nombres_y(partes_panorama)}.",
-        estilo_cuerpo
-    ))
     if resumen_v.get("monto_financiado"):
         texto_monto = f"El monto financiado (ya dispersado) que generaste en el mes fue de <b>${resumen_v['monto_financiado']:,.2f}</b>"
         if "ticket_financiado" in resumen_v:
@@ -1092,17 +935,16 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
     elementos.append(Spacer(1, 0.4 * cm))
 
     # --- 2. Distribución por estatus ---
-    if "dona_status" in rutas_graficas:
+    if "estatus" in rutas_graficas:
         elementos.append(Paragraph("2. Distribución de tus Solicitudes por Estatus", estilo_h2))
-        elementos.append(imagen_ajustada(rutas_graficas["dona_status"], ancho_cm=12, alto_max_cm=11))
+        elementos.append(imagen_ajustada(rutas_graficas["estatus"], ancho_cm=15, alto_max_cm=10))
         elementos.append(Spacer(1, 0.4 * cm))
 
     # --- 3. Comparativo con el equipo ---
     elementos.append(KeepTogether([
         Paragraph("3. Comparativo con el Equipo", estilo_h2),
         Paragraph(
-            "Esta gráfica compara tu volumen de solicitudes, por categoría de cierre, contra el resto "
-            "del equipo (mostrado en gris, sin detalle individual de cada compañero).",
+            "Tu volumen de solicitudes (en azul) frente al de cada compañero (en gris).",
             estilo_cuerpo
         ),
     ]))
@@ -1173,23 +1015,6 @@ def generar_reporte_pdf_vendedor(vendedor, resumen_v, tabla_vendedor, resumen_eq
         elementos.append(Paragraph("4. Modelos Más Solicitados", estilo_h2))
         elementos.append(imagen_ajustada(rutas_graficas["modelos"], ancho_cm=15, alto_max_cm=10))
         elementos.append(Spacer(1, 0.4 * cm))
-
-    # ===============================================================
-    # CONCLUSIONES
-    # ===============================================================
-    elementos.append(Paragraph("Conclusiones y Factores Importantes", estilo_h1))
-    elementos.append(HRFlowable(width="100%", thickness=0.6, color=rl_colors.HexColor(GRIS_LINEA), spaceAfter=8))
-
-    # Criterios compartidos con los demás reportes (herramientas/conclusiones.py):
-    # se compara contra la conversión REAL del equipo, el GAP que se mide es
-    # el colocado en créditos financiados, y con pocas solicitudes se dice
-    # explícitamente que la comparación todavía no es justa.
-    conclusiones = _conclusiones.conclusiones_vendedor(resumen_v["df_equipo"], vendedor)
-    if not conclusiones:
-        conclusiones = ["No hay datos suficientes para una lectura automática de este mes."]
-
-    for c in conclusiones:
-        elementos.append(Paragraph(_pdf_util.resaltar("•  " + c), estilo_cuerpo))
 
     # -------------------------------------------------------------
     # Generar el PDF
