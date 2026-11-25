@@ -32,6 +32,7 @@ from .herramienta_comparativo_mensual import HERRAMIENTA as _comparativo_mensual
 from .herramienta_resumen_mensual import HERRAMIENTA as _resumen_mensual
 from .herramienta_resumen_vendedor import HERRAMIENTA as _resumen_vendedor
 from .herramienta_validar_csf import HERRAMIENTA as _validar_csf
+from .herramienta_validar_nomina import HERRAMIENTA as _validar_nomina
 # Modelo de Datos: oculto en la app por ahora. Para volver a mostrarlo,
 # descomenta esta línea, agrega _modelo_datos a REGISTRO y, en su
 # HERRAMIENTA, declara icono=":material/dataset:", nombre_corto="Modelo de
@@ -45,4 +46,5 @@ REGISTRO = [
     _resumen_mensual,
     _resumen_vendedor,
     _validar_csf,
+    _validar_nomina,   # privada: pide usuario y contraseña
 ]

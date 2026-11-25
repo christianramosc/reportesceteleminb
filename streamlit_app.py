@@ -23,6 +23,7 @@ import streamlit as st
 
 import ui_estilos as ui
 from herramientas import REGISTRO
+from herramientas import acceso as _acceso
 from herramientas import estatus as _est
 from herramientas import fechas as _fechas
 from herramientas import vista_bitacora as _vista
@@ -67,7 +68,8 @@ ui.aplicar_estilos()
 def _etiqueta_menu(h):
     """Menú lateral: icono y nombre corto que declara cada herramienta
     (registro.py). El nombre completo se usa como título de la página."""
-    return f"{h.icono} {h.nombre_corto or ui.nombre_limpio(h.nombre)}"
+    candado = " :material/lock:" if h.requiere_acceso else ""
+    return f"{h.icono} {h.nombre_corto or ui.nombre_limpio(h.nombre)}{candado}"
 
 
 def _procesar(herramienta, archivos_subidos, opciones, archivos_anteriores=()):
@@ -261,6 +263,11 @@ with st.sidebar:
 etiquetas = ["." + t.upper() for t in herramienta.tipos_permitidos]
 etiquetas.append("Varios archivos" if herramienta.multiple_archivos else "1 archivo")
 ui.encabezado(ui.nombre_limpio(herramienta.nombre), herramienta.descripcion, etiquetas)
+
+# Herramienta privada: nada de lo que sigue (subir archivos, generar) se
+# dibuja ni se ejecuta hasta iniciar sesión.
+if herramienta.requiere_acceso and not _acceso.exigir(herramienta.id):
+    st.stop()
 
 
 @st.cache_data(show_spinner=False)

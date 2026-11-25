@@ -8,3 +8,7 @@ _extraido_*/
 .pytest_cache/
 # CSF reales para pruebas locales: traen RFC, CURP y domicilio. NUNCA al repo (es público).
 tests/muestras_csf/
+# Contraseñas y llaves locales de Streamlit. NUNCA al repo.
+.streamlit/secrets.toml
+# Recibos de nómina reales para pruebas locales: datos personales.
+tests/muestras_nomina/
