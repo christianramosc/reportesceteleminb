@@ -52,6 +52,11 @@ class Herramienta:
     meses_anteriores: Optional[str] = None
     ayuda_meses_anteriores: str = ""
 
+    # --- Acceso privado ---------------------------------------------------
+    # True: antes de mostrar la página pide usuario y contraseña
+    # (herramientas/acceso.py, credenciales en los Secrets de Streamlit).
+    requiere_acceso: bool = False
+
     # --- Guía de uso (opcional) -------------------------------------------
     # Rutas desde la raíz del repo. Si hay guía, la página muestra un
     # desplegable con la imagen (guia_vista) y el botón para bajar el PDF.
