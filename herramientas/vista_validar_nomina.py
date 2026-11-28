@@ -43,22 +43,28 @@ def mostrar(resumen):
                     st.warning(a, icon=":material/warning:")
                 continue
             r = p["habiles_restantes"]
+            sig = _fecha(p["siguiente_fin"])
             if r < 0:
                 st.error(f"Último recibo vencido hace {-r} día(s) hábil(es) (venció el {_fecha(p['vence'])}). "
-                         "Pide el recibo más reciente.", icon=":material/event_busy:")
+                         f"Pide la nómina del periodo siguiente, que terminó el {sig}.",
+                         icon=":material/event_busy:")
             elif r <= 2:
                 st.warning(f"Último recibo vence el {_fecha(p['vence'])}: quedan {r} día(s) hábil(es). "
-                           "Envía ya o pide el siguiente.", icon=":material/schedule:")
+                           f"Si el folio llegará a Financiación después, pide la nómina que terminó el {sig}.",
+                           icon=":material/schedule:")
             else:
-                st.success(f"Último recibo vigente hasta el {_fecha(p['vence'])} ({r} días hábiles).",
+                st.success(f"Último recibo vigente hasta el {_fecha(p['vence'])} ({r} días hábiles): "
+                           f"10 días hábiles desde que termina el periodo siguiente ({sig}).",
                            icon=":material/event_available:")
-            a, b, c = st.columns(3)
+            a, b, c, d = st.columns(4)
             a.metric("Frecuencia", p["frecuencia"])
             m1 = p["periodo_mes1"]
             a2 = p["periodo_mes2"]
             b.metric("Bruto mes 1", _dinero(p["bruto_mes1"]), help=f"{_fecha(m1[0])} a {_fecha(m1[1])}")
             c.metric("Bruto mes 2", _dinero(p["bruto_mes2"]),
                      help=f"{_fecha(a2[0])} a {_fecha(a2[1])}" if a2 else None)
+            d.metric("Ingreso mensual", _dinero(p.get("ingreso_mensual")),
+                     help="El mes más bajo de los dos. Debe llegar a $6,500 brutos sin ingresos adicionales.")
             for aviso in p["avisos"]:
                 st.warning(aviso, icon=":material/warning:")
 
@@ -71,5 +77,6 @@ def mostrar(resumen):
                 "Cuenta": "Sí" if x in p["seleccion"] else "",
             } for x in reversed(p["recibos"])])
             st.dataframe(tabla, hide_index=True, width="stretch")
-    st.caption(f"Vigencia calculada al {_fecha(hoy)}: 10 días hábiles desde el fin del periodo, "
-               "sin sábados, domingos ni días de descanso obligatorio (LFT art. 74).")
+    st.caption(f"Vigencia calculada al {_fecha(hoy)}: cada recibo vale hasta 10 días hábiles después de que "
+               "termina el periodo siguiente (la nómina que ya debió timbrarse), sin sábados, domingos ni días "
+               "de descanso obligatorio (LFT art. 74).")

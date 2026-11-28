@@ -8,8 +8,10 @@ Qué hace
    el mismo que usa verificacfdi.facturaelectronica.sat.gob.mx, sin captcha).
 3. Por persona: toma los recibos de los 2 meses más recientes según la
    frecuencia (8 semanales, 4 quincenales o 2 mensuales), suma el ingreso
-   bruto por mes y calcula la vigencia de 10 días hábiles del último recibo
-   (contados desde el FIN DEL PERIODO; ver guía de crédito, F31 y C1).
+   bruto de cada mes y toma el MES MÁS BAJO como ingreso mensual.
+4. Vigencia: el último recibo vale hasta 10 días hábiles después de que
+   termina el PERIODO SIGUIENTE (la nómina que ya debió timbrarse). Mientras
+   esa nómina no se paga, no se exige (ver guía de crédito, F31 y C1).
 
 Códigos del SAT (comprobados con pruebas controladas)
 -----------------------------------------------------
@@ -42,6 +44,7 @@ NUM = r"\$?\s*([\d,]+\.\d{2})"
 MESES = {"ENE": 1, "FEB": 2, "MAR": 3, "ABR": 4, "MAY": 5, "JUN": 6,
          "JUL": 7, "AGO": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DIC": 12}
 DIAS_VIGENCIA = 10
+INGRESO_MINIMO = 6500.0
 
 ESTADO_OK = "Vigente"
 ESTADO_CANCELADO = "Cancelado"
@@ -272,6 +275,19 @@ def frecuencia(inicio, fin):
     return "Mensual", 2
 
 
+def fin_siguiente(inicio: date, fin: date, freq: str) -> date:
+    """Fecha en que termina el periodo que sigue al último recibo."""
+    if freq == "Quincenal" and inicio.day in (1, 16):
+        if fin.day <= 15:
+            return date(fin.year, fin.month, calendar.monthrange(fin.year, fin.month)[1])
+        y, m = (fin.year + 1, 1) if fin.month == 12 else (fin.year, fin.month + 1)
+        return date(y, m, 15)
+    if freq == "Mensual" and inicio.day == 1:
+        y, m = (fin.year + 1, 1) if fin.month == 12 else (fin.year, fin.month + 1)
+        return date(y, m, calendar.monthrange(y, m)[1])
+    return fin + timedelta(days=(fin - inicio).days + 1)
+
+
 def analizar_persona(recibos, hoy: date):
     """recibos: dicts de UNA persona, ya consultados. Devuelve el resumen."""
     con_fecha = sorted([r for r in recibos if r.get("fin")], key=lambda r: r["fin"])
@@ -292,14 +308,20 @@ def analizar_persona(recibos, hoy: date):
     mes1, mes2 = sel[:mitad], sel[mitad:]
     suma = lambda rs: round(sum(r.get("percepciones") or 0 for r in rs), 2)   # noqa: E731
     ultimo = sel[-1]
-    vto = vence(ultimo["fin"])
+    sig = fin_siguiente(ultimo["inicio"], ultimo["fin"], freq)
+    vto = vence(sig)
     restantes = habiles_entre(hoy, vto) if hoy <= vto else -habiles_entre(vto, hoy)
+    b1, b2 = suma(mes1), (suma(mes2) if mes2 else None)
+    ingreso = min(b1, b2) if b2 is not None else b1
+    if len(sel) == n and ingreso < INGRESO_MINIMO:
+        avisos.append(f"El ingreso mensual con nómina (mes más bajo) es ${ingreso:,.2f}: no llega al mínimo de "
+                      f"${INGRESO_MINIMO:,.0f} brutos. Los ingresos adicionales no lo completan.")
     return {
         "recibos": con_fecha, "frecuencia": freq, "seleccion": sel, "avisos": avisos,
-        "bruto_mes1": suma(mes1), "bruto_mes2": suma(mes2),
+        "bruto_mes1": b1, "bruto_mes2": b2, "ingreso_mensual": ingreso,
         "periodo_mes1": (mes1[0]["inicio"], mes1[-1]["fin"]),
         "periodo_mes2": (mes2[0]["inicio"], mes2[-1]["fin"]) if mes2 else None,
-        "ultimo_fin": ultimo["fin"], "vence": vto, "habiles_restantes": restantes,
+        "ultimo_fin": ultimo["fin"], "siguiente_fin": sig, "vence": vto, "habiles_restantes": restantes,
     }
 
 
@@ -327,7 +349,9 @@ def a_excel(filas, personas, ruta):
     resumen = pd.DataFrame([{
         "RFC": p["rfc"], "Nombre": p["nombre"], "Frecuencia": p["frecuencia"],
         "Bruto mes 1": p.get("bruto_mes1"), "Bruto mes 2": p.get("bruto_mes2"),
-        "Último periodo termina": p.get("ultimo_fin"), "Vigencia hasta": p.get("vence"),
+        "Ingreso mensual (mes más bajo)": p.get("ingreso_mensual"),
+        "Último periodo termina": p.get("ultimo_fin"), "Periodo siguiente termina": p.get("siguiente_fin"),
+        "Vigencia hasta": p.get("vence"),
         "Días hábiles restantes": p.get("habiles_restantes"), "Avisos": " | ".join(p["avisos"]),
     } for p in personas])
     with pd.ExcelWriter(ruta) as w:
